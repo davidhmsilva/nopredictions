@@ -1,0 +1,999 @@
+"""
+Paper Trader — pre-match edge detector: Polymarket vs sharp consensus (today only).
+
+Flow:
+  1. Fetch today's football markets from Polymarket Gamma API
+  2. Fetch today's sharp odds from The Odds API (Pinnacle + Betfair, real-time)
+     → builds a lookup table: {(home_team, away_team) → sharp_probs}
+  3. For each PM market, fuzzy-match to an Odds API event
+  4. Compare PM implied probability vs sharp consensus probability
+  5. Edge = sharp_prob − pm_price (in percentage points)
+  6. Log paper_trade for edges > EDGE_THRESHOLD_PP
+
+No dependency on Stage A / DB fixtures being up to date.
+DB is only used to: store trades, load team aliases, check active strategies.
+
+Requirements:
+  THE_ODDS_API_KEY in ingest/.env  (free tier: 500 req/month; ~7 req per scan)
+  If key is missing: falls back to DB Pinnacle odds for any loaded fixtures.
+
+Usage:
+    python -m agent.paper_trader --dry-run      # scan + print, no DB writes
+    python -m agent.paper_trader                # scan + log to DB
+
+    from agent import paper_trader
+    trades = paper_trader.run()
+    trades = paper_trader.run(dry_run=True)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Any
+
+import psycopg2
+import psycopg2.extras
+import requests
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'))
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+
+# ─── Config ───────────────────────────────────────────────────────────────────
+
+DATABASE_URL    = os.getenv('DATABASE_URL')
+GAMMA_API       = os.getenv('POLYMARKET_GAMMA_API', 'https://gamma-api.polymarket.com').rstrip('/')
+ODDS_API_KEY    = os.getenv('THE_ODDS_API_KEY', '')
+ODDS_API_BASE   = 'https://api.the-odds-api.com/v4'
+
+EDGE_THRESHOLD_PP = 4.0   # minimum edge in pp to log a trade
+STAKE_UNITS       = 1.0
+DAYS_AHEAD        = 0     # 0 = today only; use --days 1 to include tomorrow too
+
+# Sharp books and their weights for consensus
+SHARP_BOOKS = {'pinnacle': 0.65, 'betfair_ex_eu': 0.35}
+
+# Football sport keys on The Odds API
+TARGET_SPORTS = [
+    'soccer_epl',
+    'soccer_spain_la_liga',
+    'soccer_germany_bundesliga',
+    'soccer_italy_serie_a',
+    'soccer_france_ligue_one',
+    'soccer_uefa_champs_league',
+    'soccer_uefa_europa_league',
+    'soccer_uefa_europa_conference_league',
+    'soccer_england_championship',
+    'soccer_spain_segunda_division',
+    'soccer_germany_bundesliga2',
+    'soccer_italy_serie_b',
+    'soccer_france_ligue_deux',
+    'soccer_netherlands_eredivisie',
+    'soccer_portugal_primeira_liga',
+]
+
+# PM football detection keywords
+FOOTBALL_KEYWORDS = [
+    'soccer', 'football', 'premier league', 'la liga', 'bundesliga', 'serie a',
+    'ligue 1', 'champions league', 'europa league', 'epl', 'world cup',
+    'liverpool', 'arsenal', 'chelsea', 'man city', 'man utd', 'manchester',
+    'tottenham', 'real madrid', 'barcelona', 'atletico', 'atlético', 'bayern',
+    'dortmund', 'inter milan', 'ac milan', 'juventus', 'napoli', 'psg',
+    'newcastle', 'aston villa', 'porto', 'benfica', 'ajax', 'psv',
+    'celtic', 'rangers', 'marseille', 'lyon', 'monaco', 'sevilla',
+    'borussia', 'bayer', 'rb leipzig', 'real madrid', 'sporting',
+]
+NON_FOOTBALL = [
+    'tweet', 'post ', 'elon', 'bitcoin', 'crypto', 'trump', 'election',
+    'nfl', 'nba', 'mlb', 'nhl', 'cricket', 'rugby', 'ufc', 'boxing',
+    'tennis', 'formula 1', 'f1 ', 'golf', 'horse racing',
+]
+
+
+# ─── Sharp odds cache (reused by poisson_trader) ────────────────────────────
+
+_SHARP_CACHE: dict[str, Any] = {}  # {'date': '2026-05-03', 'lookup': {...}}
+
+
+def get_cached_sharp_odds() -> dict[str, dict]:
+    """
+    Return today's sharp odds if already fetched, else empty dict.
+    Called by poisson_trader to avoid duplicate Odds API calls.
+    """
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    if _SHARP_CACHE.get('date') == today:
+        return _SHARP_CACHE.get('lookup', {})
+    return {}
+
+
+def _cache_sharp_odds(lookup: dict[str, dict]) -> None:
+    """Store today's sharp odds in module-level cache."""
+    _SHARP_CACHE['date'] = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    _SHARP_CACHE['lookup'] = lookup
+
+
+# ─── DB helpers ───────────────────────────────────────────────────────────────
+
+def _conn():
+    return psycopg2.connect(DATABASE_URL)
+
+
+def _serial(obj):
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if hasattr(obj, '__float__'):
+        return float(obj)
+    raise TypeError(f'Not serialisable: {type(obj)}')
+
+
+# ─── HTTP ─────────────────────────────────────────────────────────────────────
+
+def _get(url: str, params: dict | None = None, retries: int = 2, timeout: int = 8) -> Any:
+    delay = 1.0
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            r.raise_for_status()
+            return r.json()
+        except requests.RequestException as e:
+            if attempt == retries:
+                raise RuntimeError(f'GET {url} failed: {e}') from e
+            time.sleep(delay)
+            delay *= 2.0
+
+
+# ─── Step 1: Fetch today's PM football events ─────────────────────────────────
+
+def _parse_dt(v) -> datetime | None:
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _yes_price_from_market(mkt: dict) -> float | None:
+    raw = mkt.get('outcomePrices') or mkt.get('outcome_prices')
+    if raw:
+        prices = json.loads(raw) if isinstance(raw, str) else raw
+        try:
+            return float(prices[0])
+        except (TypeError, ValueError, IndexError):
+            pass
+    for t in (mkt.get('tokens') or []):
+        if isinstance(t, dict) and (t.get('outcome', '') or '').lower() in ('yes', '1'):
+            try:
+                return float(t['price'])
+            except (KeyError, TypeError, ValueError):
+                pass
+    return None
+
+
+def _yes_price(market: dict) -> float | None:
+    return _yes_price_from_market(market)
+
+
+def _no_price(market: dict) -> float | None:
+    """Return the 'No' side price for binary PM markets."""
+    raw = market.get('outcomePrices') or market.get('outcome_prices')
+    if raw:
+        prices = json.loads(raw) if isinstance(raw, str) else raw
+        try:
+            return float(prices[1])
+        except (TypeError, ValueError, IndexError):
+            pass
+    yes = _yes_price(market)
+    return round(1.0 - yes, 6) if yes is not None else None
+
+
+def _is_1x2_market(question: str) -> bool:
+    """
+    Return True only for plain 1X2 markets (home win / draw / away win).
+    Filters out exact score, O/U, halftime, spread, and other derivative markets.
+    """
+    q = question.lower()
+    # Reject derivative market types
+    reject_patterns = [
+        r'\bby\s+\d',        # "win by 2-0"
+        r'\b\d{1,2}\s*-\s*\d{1,2}\b(?![\d-])',  # scorelines like 2-0, 3-1 (not dates like 2026-05-02)
+        r'exact',            # exact score
+        r'halftime',         # half-time
+        r'half.?time',
+        r'over\s*[\d.]',    # Over 2.5
+        r'under\s*[\d.]',   # Under 2.5
+        r'spread',           # handicap spread
+        r'handicap',
+        r'btts',
+        r'both teams',
+        r'clean sheet',
+        r'first goal',
+        r'anytime',
+        r'goalscorer',
+        r'corners',
+        r'cards',
+        r'total goals',
+    ]
+    for pat in reject_patterns:
+        if re.search(pat, q):
+            return False
+    # Accept: "Will X win?", "Draw?", "Will it be a draw?"
+    accept_patterns = [
+        r'^will .{2,50} win',
+        r'\bdraw\b',
+        r'^will .{2,50} (beat|defeat)',
+    ]
+    return any(re.search(p, q) for p in accept_patterns)
+
+
+def _extract_home_away_from_event_title(title: str) -> tuple[str, str] | None:
+    """
+    Parse event titles like 'FC Porto vs. FC Alverca' or 'FC Porto vs. FC Alverca - More Markets'.
+    Returns (home, away) or None.
+    """
+    # Strip suffix like " - More Markets", " - Halftime Result", " - Exact Score"
+    clean = re.sub(r'\s+-\s+(?:More Markets|Halftime Result|Exact Score|.*Markets.*)$',
+                   '', title, flags=re.IGNORECASE).strip()
+    m = re.match(r'^(.+?)\s+vs\.?\s+(.+)$', clean, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return None
+
+
+def fetch_pm_markets_today() -> list[dict]:
+    """
+    Fetch today's soccer markets from Polymarket via /events?tag_slug=soccer.
+    Uses the events endpoint which correctly returns all football markets including
+    negRisk/restricted ones that don't appear in the general /markets endpoint.
+
+    Returns flat list of market dicts, each enriched with:
+      _yes_price, _no_price, _resolution_time, _home_team, _away_team, _event_title
+    """
+    log.info('[paper_trader] Fetching Polymarket soccer events...')
+
+    now = datetime.now(timezone.utc)
+    if DAYS_AHEAD == 0:
+        end_cutoff = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        end_cutoff = now + timedelta(days=DAYS_AHEAD)
+
+    try:
+        events = _get(f'{GAMMA_API}/events', params={
+            'tag_slug':    'soccer',
+            'closed':      'false',
+            'active':      'true',
+            'limit':       200,
+            'order':       'volume24hr',
+            'ascending':   'false',
+            'end_date_min': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'end_date_max': end_cutoff.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        })
+    except RuntimeError as e:
+        log.error(f'[paper_trader] Gamma /events error: {e}')
+        return []
+
+    if not isinstance(events, list):
+        log.error(f'[paper_trader] Unexpected /events response type: {type(events)}')
+        return []
+
+    markets_out: list[dict] = []
+    seen: set[tuple] = set()   # (event_id, question) dedup
+
+    for event in events:
+        event_title = event.get('title', '')
+        end_date    = _parse_dt(event.get('endDate'))
+        event_id    = event.get('id', '')
+
+        if end_date is None or end_date < now:
+            continue
+
+        # Extract home/away team names directly from the event title
+        teams = _extract_home_away_from_event_title(event_title)
+        home_team = teams[0] if teams else None
+        away_team = teams[1] if teams else None
+
+        for mkt in event.get('markets', []):
+            if not mkt.get('active') or mkt.get('closed'):
+                continue
+
+            question = mkt.get('question', '') or event_title
+            dedup_key = (event_id, question)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            # Only keep plain 1X2 markets — skip exact score, O/U, halftime, etc.
+            if not _is_1x2_market(question):
+                continue
+
+            yes_p = _yes_price_from_market(mkt)
+            if yes_p is None or yes_p <= 0.03 or yes_p >= 0.97:
+                continue
+
+            no_p = round(1.0 - yes_p, 6)
+
+            mkt['_yes_price']       = yes_p
+            mkt['_no_price']        = no_p if 0.03 < no_p < 0.97 else None
+            mkt['_resolution_time'] = end_date
+            mkt['_home_team']       = home_team
+            mkt['_away_team']       = away_team
+            mkt['_event_title']     = event_title
+            mkt['question']         = question
+            markets_out.append(mkt)
+
+    window = 'today' if DAYS_AHEAD == 0 else f'next {DAYS_AHEAD} day(s)'
+    n_events = len({m['_event_title'] for m in markets_out})
+    log.info(f'[paper_trader] {len(markets_out)} markets across {n_events} events ({window})')
+    return markets_out
+
+
+# ─── Step 2: Fetch today's sharp odds from The Odds API ───────────────────────
+
+def fetch_sharp_odds_today(team_hints: list[str] | None = None) -> dict[str, dict]:
+    """
+    Fetch pre-match h2h odds from The Odds API for today's events.
+
+    team_hints: list of team name fragments from PM markets — used to pick
+    only the relevant sports rather than scanning all 15 (saves API quota + time).
+    Falls back to all TARGET_SPORTS if no hints or no match found.
+
+    Returns {} if no API key or quota exceeded.
+    """
+    if not ODDS_API_KEY:
+        log.warning('[paper_trader] THE_ODDS_API_KEY not set — cannot fetch live sharp odds')
+        return {}
+
+    # Smart sport selection: map known team → sport key to avoid 15 sequential calls
+    TEAM_TO_SPORT: dict[str, str] = {
+        'liverpool': 'soccer_epl', 'arsenal': 'soccer_epl', 'chelsea': 'soccer_epl',
+        'manchester': 'soccer_epl', 'man city': 'soccer_epl', 'man utd': 'soccer_epl',
+        'tottenham': 'soccer_epl', 'newcastle': 'soccer_epl', 'aston villa': 'soccer_epl',
+        'real madrid': 'soccer_spain_la_liga', 'barcelona': 'soccer_spain_la_liga',
+        'atletico': 'soccer_spain_la_liga', 'sevilla': 'soccer_spain_la_liga',
+        'villarreal': 'soccer_spain_la_liga', 'athletic': 'soccer_spain_la_liga',
+        'bayern': 'soccer_germany_bundesliga', 'dortmund': 'soccer_germany_bundesliga',
+        'leverkusen': 'soccer_germany_bundesliga', 'leipzig': 'soccer_germany_bundesliga',
+        'juventus': 'soccer_italy_serie_a', 'inter': 'soccer_italy_serie_a',
+        'milan': 'soccer_italy_serie_a', 'napoli': 'soccer_italy_serie_a',
+        'roma': 'soccer_italy_serie_a', 'lazio': 'soccer_italy_serie_a',
+        'psg': 'soccer_france_ligue_one', 'marseille': 'soccer_france_ligue_one',
+        'lyon': 'soccer_france_ligue_one', 'monaco': 'soccer_france_ligue_one',
+        'porto': 'soccer_portugal_primeira_liga', 'benfica': 'soccer_portugal_primeira_liga',
+        'sporting': 'soccer_portugal_primeira_liga', 'braga': 'soccer_portugal_primeira_liga',
+        'ajax': 'soccer_netherlands_eredivisie', 'psv': 'soccer_netherlands_eredivisie',
+        'barcelona': 'soccer_spain_la_liga', 'celta': 'soccer_spain_la_liga',
+        'espanyol': 'soccer_spain_la_liga', 'betis': 'soccer_spain_la_liga',
+        'valencia': 'soccer_spain_la_liga', 'sociedad': 'soccer_spain_la_liga',
+        'monaco': 'soccer_france_ligue_one', 'marseille': 'soccer_france_ligue_one',
+        'leverkusen': 'soccer_germany_bundesliga', 'frankfurt': 'soccer_germany_bundesliga',
+    }
+    # Champions League / Europa: always include when any major club is spotted
+    CL_CLUBS = {'real madrid', 'barcelona', 'arsenal', 'liverpool', 'manchester',
+                'chelsea', 'tottenham', 'inter', 'milan', 'juventus', 'bayern', 'dortmund'}
+
+    sports_to_fetch: list[str] = []
+    if team_hints:
+        hints_lower = ' '.join(h.lower() for h in team_hints)
+        found_sports: set[str] = set()
+        for kw, sport in TEAM_TO_SPORT.items():
+            if kw in hints_lower:
+                found_sports.add(sport)
+        if any(c in hints_lower for c in CL_CLUBS):
+            found_sports.add('soccer_uefa_champs_league')
+            found_sports.add('soccer_uefa_europa_league')
+        sports_to_fetch = list(found_sports) if found_sports else TARGET_SPORTS[:5]
+    else:
+        sports_to_fetch = TARGET_SPORTS[:5]  # top 5 if no hints
+
+    log.info(f'[paper_trader] Fetching sharp odds ({len(sports_to_fetch)} sport(s))...')
+    now = datetime.now(timezone.utc)
+    # For today-only mode: scan until end of today UTC (catches evening kickoffs)
+    # For multi-day mode: roll forward by DAYS_AHEAD days
+    if DAYS_AHEAD == 0:
+        cutoff = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        cutoff = now + timedelta(days=DAYS_AHEAD)
+    lookup: dict[str, dict] = {}
+    total_events = 0
+
+    for sport in sports_to_fetch:
+        try:
+            events = _get(f'{ODDS_API_BASE}/sports/{sport}/odds', params={
+                'apiKey':     ODDS_API_KEY,
+                'regions':    'eu',
+                'markets':    'h2h',
+                'bookmakers': ','.join(SHARP_BOOKS.keys()),
+                'oddsFormat': 'decimal',
+            }, timeout=8)
+        except RuntimeError as e:
+            if '401' in str(e) or '422' in str(e):
+                log.warning('[paper_trader] Odds API key invalid or quota exceeded')
+                return {}
+            log.debug(f'[paper_trader] {sport}: {e}')
+            continue
+
+        if not isinstance(events, list):
+            continue
+
+        for event in events:
+            commence = _parse_dt(event.get('commence_time'))
+            if commence is None or not (now <= commence <= cutoff):
+                continue
+
+            sharp = _vig_remove(event)
+            if sharp is None:
+                continue
+
+            home = event['home_team']
+            away = event['away_team']
+            sharp['home'] = home
+            sharp['away'] = away
+            sharp['commence_time'] = commence
+            sharp['sport'] = sport
+
+            # Store under multiple keys for flexible matching
+            for key in _match_keys(home, away):
+                lookup[key] = sharp
+            total_events += 1
+
+    log.info(f'[paper_trader] Sharp odds loaded: {total_events} events across {len(TARGET_SPORTS)} leagues')
+    _cache_sharp_odds(lookup)
+    return lookup
+
+
+def _vig_remove(event: dict) -> dict | None:
+    """Vig-remove Pinnacle + Betfair odds → consensus implied probabilities."""
+    home = event.get('home_team', '')
+    away = event.get('away_team', '')
+    book_probs: dict[str, dict] = {}
+
+    for bk in event.get('bookmakers', []):
+        key = bk['key']
+        if key not in SHARP_BOOKS:
+            continue
+        for mkt in bk.get('markets', []):
+            if mkt['key'] != 'h2h':
+                continue
+            raw = {o['name']: float(o['price']) for o in mkt['outcomes']}
+            ho = raw.get(home)
+            do = raw.get('Draw')
+            ao = raw.get(away)
+            if not (ho and ao):
+                continue
+            h_imp = 1 / ho
+            d_imp = (1 / do) if do else 0.0
+            a_imp = 1 / ao
+            total = h_imp + d_imp + a_imp
+            book_probs[key] = {
+                'home': h_imp / total,
+                'draw': d_imp / total if do else None,
+                'away': a_imp / total,
+                'home_odds': ho, 'draw_odds': do, 'away_odds': ao,
+            }
+
+    if not book_probs:
+        return None
+
+    def wavg(field):
+        vals = [(book_probs[k][field], SHARP_BOOKS[k])
+                for k in book_probs if book_probs[k].get(field) is not None]
+        if not vals:
+            return None
+        return sum(v * w for v, w in vals) / sum(w for _, w in vals)
+
+    hp = wavg('home')
+    dp = wavg('draw')
+    ap = wavg('away')
+    if not (hp and ap):
+        return None
+
+    total = (hp or 0) + (dp or 0) + (ap or 0)
+    return {
+        'home_prob': hp / total,
+        'draw_prob': dp / total if dp else None,
+        'away_prob': ap / total,
+        'sources':   book_probs,
+    }
+
+
+def _norm(s: str) -> str:
+    """Normalise team name for matching: lowercase, strip punctuation, collapse spaces."""
+    s = s.lower()
+    s = re.sub(r'[^a-z0-9 ]', '', s)
+    s = re.sub(r'\b(fc|cf|sc|ac|ss|afc|bsc|1\.|vfb|vfl|rb|sv|fk|sk|bv|borussia)\b', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def _match_keys(home: str, away: str) -> list[str]:
+    """Generate multiple lookup keys for a match to maximise hit rate."""
+    hn, an = _norm(home), _norm(away)
+    h6, a6 = hn[:6], an[:6]
+    return [
+        f'{hn}_{an}',
+        f'{h6}_{a6}',
+        f'{hn[:8]}_{an[:8]}',
+    ]
+
+
+# ─── Step 3: Extract team + outcome from PM market title ─────────────────────
+
+def _extract_team(title: str) -> str | None:
+    """
+    Extract the primary team name from single-team PM market titles:
+      "Will Liverpool FC win on 2026-05-03?" → "Liverpool"
+      "Will Real Madrid CF win?" → "Real Madrid"
+    """
+    t = title.strip()
+    if any(kw in t.lower() for kw in NON_FOOTBALL):
+        return None
+
+    # "Will X [FC] win [on ...]?"
+    m = re.search(r'will\s+(.+?)\s+(?:FC\s+|CF\s+)?win\b', t, re.IGNORECASE)
+    if m:
+        team = re.sub(r'\s+(?:FC|CF|SC|AC)\s*$', '', m.group(1), flags=re.IGNORECASE).strip()
+        # Remove trailing date fragments like "on 2026-05-03"
+        team = re.sub(r'\s+on\s+\d{4}-\d{2}-\d{2}.*', '', team).strip()
+        return team if len(team) > 2 else None
+
+    return None
+
+
+def _extract_two_teams(title: str) -> tuple[str, str] | None:
+    """Extract home + away from "X vs Y" style titles."""
+    if any(kw in title.lower() for kw in NON_FOOTBALL):
+        return None
+    m = re.search(r'(.+?)\s+(?:vs?\.?|versus)\s+(.+?)(?:[:\-\?]|$)', title, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    m = re.search(r'will\s+(.+?)\s+(?:beat|win\s+vs?\.?)\s+(.+?)[\?\.]', title, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return None
+
+
+def _classify_outcome(title: str, home: str, away: str) -> tuple[str, str] | None:
+    """
+    Map market title → (outcome_key, label).
+    outcome_key: 'home' | 'draw' | 'away' | 'over_2.5' | 'under_2.5' | 'btts_yes'
+    """
+    t = title.lower()
+    hn = _norm(home)
+    an = _norm(away)
+    hn6, an6 = hn[:6], an[:6]
+
+    if 'draw' in t and 'no draw' not in t and 'spread' not in t:
+        return ('draw', 'Draw')
+
+    if 'over' in t and '2.5' in t:  return ('over_2.5', 'Over 2.5 goals')
+    if 'under' in t and '2.5' in t: return ('under_2.5', 'Under 2.5 goals')
+    if 'over' in t and '1.5' in t:  return ('over_1.5', 'Over 1.5 goals')
+    if 'under' in t and '1.5' in t: return ('under_1.5', 'Under 1.5 goals')
+    if 'over' in t and '3.5' in t:  return ('over_3.5', 'Over 3.5 goals')
+    if 'both teams to score' in t or 'btts' in t:
+        return ('btts_no' if 'no' in t.split('btts')[-1] else 'btts_yes',
+                'BTTS No' if 'no' in t.split('btts')[-1] else 'BTTS Yes')
+
+    t_norm = _norm(t)
+    if hn6 in t_norm and 'win' in t:  return ('home', f'{home} win')
+    if an6 in t_norm and 'win' in t:  return ('away', f'{away} win')
+    if hn6 in t_norm:                 return ('home', f'{home} win')
+    return None
+
+
+# ─── Step 4: Match PM market to Odds API event ────────────────────────────────
+
+def _fuzzy_find_event(team_name: str, sharp_lookup: dict) -> dict | None:
+    """
+    Given a single team name, find the Odds API event that contains it.
+    Tries exact norm match, then prefix match, then substring scan.
+    """
+    tn = _norm(team_name)
+    t6 = tn[:6]
+
+    # Try prefix keys first (fast path)
+    for key, event in sharp_lookup.items():
+        parts = key.split('_')
+        if len(parts) >= 2:
+            if tn in key or t6 in key:
+                return event
+
+    # Full scan — check home/away team names directly
+    for event in sharp_lookup.values():
+        hn = _norm(event.get('home', ''))
+        an = _norm(event.get('away', ''))
+        if tn in hn or hn in tn or tn in an or an in tn:
+            return event
+        if t6 and (t6 in hn or t6 in an):
+            return event
+
+    return None
+
+
+def _fuzzy_find_event_two(home: str, away: str, sharp_lookup: dict) -> dict | None:
+    """Find an Odds API event matching both team names."""
+    hn, an = _norm(home), _norm(away)
+    h6, a6 = hn[:6], an[:6]
+
+    for key in _match_keys(home, away):
+        if key in sharp_lookup:
+            return sharp_lookup[key]
+
+    # Full scan
+    for event in sharp_lookup.values():
+        eh = _norm(event.get('home', ''))
+        ea = _norm(event.get('away', ''))
+        h_match = hn in eh or eh in hn or (h6 and h6 in eh)
+        a_match = an in ea or ea in an or (a6 and a6 in ea)
+        if h_match and a_match:
+            return event
+
+    return None
+
+
+# ─── Step 5: Get sharp probability for the specific outcome ───────────────────
+
+def _sharp_prob_for_outcome(outcome_key: str, event: dict) -> float | None:
+    """Map outcome_key to the vig-removed probability from the event."""
+    if outcome_key == 'home':  return event.get('home_prob')
+    if outcome_key == 'draw':  return event.get('draw_prob')
+    if outcome_key == 'away':  return event.get('away_prob')
+    # O/U and BTTS not available from h2h market — skip for now
+    return None
+
+
+# ─── DB: strategy + trade helpers ────────────────────────────────────────────
+
+def _get_or_create_scan_strategy(conn) -> int:
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM strategies WHERE name = 'PM-vs-Pinnacle Pre-Match' LIMIT 1")
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    cur.execute("""
+        INSERT INTO research_hypotheses (title, description, rationale, source, status, created_by)
+        VALUES ('PM Pre-Match Edge Scanner',
+                'Polymarket pre-match prices diverge from Pinnacle/Betfair consensus.',
+                'PM user base is less sharp; pre-match prices slow to reflect sharp moves.',
+                'agent', 'live', 'agent')
+        RETURNING id
+    """)
+    hyp_id = cur.fetchone()[0]
+    conn.commit()
+    cur.execute("""
+        INSERT INTO strategies (hypothesis_id, name, rules, promoted_at)
+        VALUES (%s, 'PM-vs-Pinnacle Pre-Match', %s::jsonb, NOW())
+        RETURNING id
+    """, (hyp_id, json.dumps({
+        'edge_threshold_pp': EDGE_THRESHOLD_PP,
+        'benchmark': 'Pinnacle + Betfair (The Odds API)',
+        'stake': '1u flat', 'phase': 'paper-only',
+    })))
+    strat_id = cur.fetchone()[0]
+    conn.commit()
+    return strat_id
+
+
+def _upsert_pm_market(conn, market: dict) -> int | None:
+    ext_id = str(market.get('id') or market.get('conditionId') or '')
+    if not ext_id:
+        return None
+    title = market.get('question') or market.get('title') or ''
+    if not title:
+        return None
+    t = title.lower()
+    mtype = ('1x2' if any(x in t for x in ['win', 'beat', 'draw']) else
+             'over_under' if ('over' in t or 'under' in t) else 'other')
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO pm_markets (platform, external_id, title, market_type,
+                                resolution_time, status, raw_metadata, ingested_at)
+        VALUES ('polymarket', %s, %s, %s, %s, 'active', %s::jsonb, NOW())
+        ON CONFLICT (platform, external_id) DO UPDATE SET
+            title = EXCLUDED.title, resolution_time = EXCLUDED.resolution_time,
+            raw_metadata = EXCLUDED.raw_metadata, ingested_at = NOW()
+        RETURNING id
+    """, (ext_id, title, mtype, market.get('_resolution_time'),
+          json.dumps({k: v for k, v in market.items()
+                      if k not in ('_yes_price', '_resolution_time')})))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
+                       entry_price, sharp_prob, sharp_sources,
+                       edge_pp, reasoning) -> int | None:
+    cur = conn.cursor()
+    # Dedup: skip same market+outcome logged in last 30 min
+    if market_db_id:
+        cur.execute("""
+            SELECT id FROM paper_trades
+            WHERE market_id = %s AND outcome = %s AND strategy_id = %s
+              AND placed_at >= NOW() - INTERVAL '30 minutes' LIMIT 1
+        """, (market_db_id, outcome, strategy_id))
+        if cur.fetchone():
+            return None
+
+    entry_odds = round(1 / entry_price, 4) if entry_price > 0 else None
+    cur.execute("""
+        INSERT INTO paper_trades (
+            strategy_id, market_id, outcome, entry_price, entry_odds,
+            model_probability, sharp_consensus_price, sharp_consensus_sources,
+            expected_edge, confidence, stake_units, reasoning, placed_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, NOW())
+        RETURNING id
+    """, (
+        strategy_id, market_db_id, outcome,
+        entry_price, entry_odds,
+        sharp_prob, sharp_prob,
+        json.dumps(sharp_sources, default=_serial),
+        round(edge_pp / 100, 6),
+        min(round(edge_pp / 15.0, 3), 1.0),
+        STAKE_UNITS, reasoning,
+    ))
+    trade_id = cur.fetchone()[0]
+    conn.commit()
+    return trade_id
+
+
+# ─── DB fallback: Pinnacle odds from match_odds table ────────────────────────
+
+def _db_sharp_odds_today(conn) -> dict[str, dict]:
+    """
+    Fallback when Odds API key is missing.
+    Returns same-format lookup from match_odds table for upcoming fixtures.
+    """
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        SELECT
+            th.canonical_name AS home,
+            ta.canonical_name AS away,
+            m.kickoff_utc     AS commence_time,
+            mo.home_odds, mo.draw_odds, mo.away_odds
+        FROM matches m
+        JOIN teams th ON th.id = m.home_team_id
+        JOIN teams ta ON ta.id = m.away_team_id
+        JOIN match_odds mo ON mo.match_id = m.id
+        JOIN bookmakers b  ON b.id = mo.bookmaker_id
+        WHERE m.kickoff_utc BETWEEN NOW() AND NOW() + INTERVAL '2 days'
+          AND m.home_score IS NULL
+          AND b.name ILIKE '%pinnacle%'
+          AND mo.home_odds IS NOT NULL
+    """)
+    lookup = {}
+    for row in cur.fetchall():
+        ho, do, ao = float(row['home_odds']), (float(row['draw_odds']) if row['draw_odds'] else None), float(row['away_odds'])
+        h_imp = 1 / ho
+        d_imp = (1 / do) if do else 0.0
+        a_imp = 1 / ao
+        total = h_imp + d_imp + a_imp
+        event = {
+            'home': row['home'], 'away': row['away'],
+            'commence_time': row['commence_time'],
+            'home_prob': h_imp / total,
+            'draw_prob': d_imp / total if do else None,
+            'away_prob': a_imp / total,
+            'sources': {'pinnacle_db': {'home_odds': ho, 'draw_odds': do, 'away_odds': ao}},
+        }
+        for key in _match_keys(row['home'], row['away']):
+            lookup[key] = event
+    if lookup:
+        log.info(f'[paper_trader] DB fallback: {len(set(id(v) for v in lookup.values()))} fixtures loaded')
+    return lookup
+
+
+# ─── Main scan ────────────────────────────────────────────────────────────────
+
+def run(dry_run: bool = False) -> list[dict]:
+    """
+    Full scan: fetch today's PM markets → compare vs sharp odds → log trades.
+    Returns list of trade dicts.
+    """
+    log.info('\n' + '='*60)
+    log.info('[paper_trader] Pre-match scan — %s',
+             datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
+    log.info('='*60)
+
+    if not DATABASE_URL:
+        log.error('[paper_trader] DATABASE_URL not set')
+        return []
+
+    # 1. Fetch today's PM football markets
+    pm_markets = fetch_pm_markets_today()
+    if not pm_markets:
+        log.info('[paper_trader] No PM football markets for today — done')
+        return []
+
+    # 2. Fetch today's sharp odds
+    #    Extract team name hints from PM market titles to fetch only relevant sports
+    team_hints = [
+        market.get('question') or market.get('title') or ''
+        for market in pm_markets
+    ]
+
+    #    Try The Odds API first; fall back to DB Pinnacle odds
+    sharp_lookup = fetch_sharp_odds_today(team_hints=team_hints)
+    if not sharp_lookup:
+        log.info('[paper_trader] Odds API unavailable — trying DB fallback...')
+        conn_temp = _conn()
+        sharp_lookup = _db_sharp_odds_today(conn_temp)
+        conn_temp.close()
+        if sharp_lookup:
+            _cache_sharp_odds(sharp_lookup)
+
+    if not sharp_lookup:
+        log.warning(
+            '[paper_trader] No sharp odds available.\n'
+            '  → Set THE_ODDS_API_KEY in ingest/.env (free at the-odds-api.com)\n'
+            '  → Or run: python3 ingest/stage_a_football_data.py --seasons 2025-26'
+        )
+        return []
+
+    # 3. Open DB connection for writing
+    conn = _conn()
+    trades_found: list[dict] = []
+
+    try:
+        strategy_id = None if dry_run else _get_or_create_scan_strategy(conn)
+
+        log.info(f'[paper_trader] Scanning {len(pm_markets)} PM markets...\n')
+
+        for market in pm_markets:
+            title     = market.get('question') or market.get('title') or ''
+            yes_price = market['_yes_price']
+            res_time  = market['_resolution_time']
+            home_pm   = market.get('_home_team')
+            away_pm   = market.get('_away_team')
+
+            # 4. Find matching sharp event
+            # Prefer _home_team/_away_team from event (reliable), fall back to title parsing
+            if home_pm and away_pm:
+                event = _fuzzy_find_event_two(home_pm, away_pm, sharp_lookup)
+            else:
+                two_teams = _extract_two_teams(title)
+                if two_teams:
+                    event = _fuzzy_find_event_two(*two_teams, sharp_lookup)
+                else:
+                    single_team = _extract_team(title)
+                    if not single_team:
+                        log.debug(f'  [skip] Cannot parse teams: {title[:60]}')
+                        continue
+                    event = _fuzzy_find_event(single_team, sharp_lookup)
+
+            if event is None:
+                log.debug(f'  [skip] No sharp event match: {title[:60]}')
+                continue
+
+            home = event['home']
+            away = event['away']
+
+            # 5. Classify PM market outcome
+            outcome_info = _classify_outcome(title, home, away)
+            if outcome_info is None:
+                log.debug(f'  [skip] Cannot classify outcome: {title[:60]}')
+                continue
+            outcome_key, outcome_label = outcome_info
+
+            # 6. Get sharp probability for this outcome
+            sharp_prob = _sharp_prob_for_outcome(outcome_key, event)
+            if sharp_prob is None or sharp_prob <= 0:
+                log.debug(f'  [skip] No sharp prob for {outcome_key}: {title[:60]}')
+                continue
+
+            kickoff = event.get('commence_time')
+            kickoff_str = kickoff.strftime('%d %b %H:%M') if kickoff else '?'
+            sources    = event.get('sources', {})
+            source_str = ', '.join(sources.keys()) if sources else 'unknown'
+
+            # 7. Evaluate both sides: "Yes" (buy) and "No" (sell = buy the opposite)
+            sides = []
+
+            # Yes side
+            edge_pp_yes = (sharp_prob - yes_price) * 100
+            sides.append(('yes', yes_price, sharp_prob, outcome_label, edge_pp_yes))
+
+            # No side — only for binary outcome markets (home/draw/away win)
+            # "No" on "Will X win?" = draw + loss combined
+            no_price = market.get('_no_price') or _no_price(market)
+            if no_price is not None and 0.03 < no_price < 0.97 and outcome_key in ('home', 'away', 'draw'):
+                # Sharp prob for the "No" side = 1 - sharp_prob (for home/away/draw)
+                # For home: no_sharp = 1 - home_prob = draw_prob + away_prob
+                no_sharp_prob = 1.0 - sharp_prob
+                no_label = f'NOT {outcome_label}'
+                edge_pp_no = (no_sharp_prob - no_price) * 100
+                sides.append(('no', no_price, no_sharp_prob, no_label, edge_pp_no))
+
+            for (side, pm_p, sh_p, label, edge_pp) in sides:
+                pm_odds    = round(1 / pm_p, 3)
+                sharp_odds = round(1 / sh_p, 3)
+                sign = ('✅' if edge_pp >= EDGE_THRESHOLD_PP else
+                        '~' if edge_pp > 1 else
+                        '·' if abs(edge_pp) <= 1 else '❌')
+
+                log.info(f'  {sign} {home} vs {away}  [{kickoff_str} UTC]')
+                log.info(f'     {label} [{side.upper()}]: PM={pm_p:.3f} ({pm_odds}x) | '
+                         f'Sharp={sh_p:.3f} ({sharp_odds}x) | Edge={edge_pp:+.2f}pp')
+
+                if edge_pp < EDGE_THRESHOLD_PP:
+                    continue
+
+                # 8. Build reasoning + log trade
+                reasoning = (
+                    f'Pre-match PM edge.\n'
+                    f'Match: {home} vs {away}  [kickoff {kickoff_str} UTC]\n'
+                    f'Selection: {label} [{side.upper()}]\n\n'
+                    f'PM price:   {pm_p:.4f}  (odds {pm_odds})\n'
+                    f'Sharp:      {sh_p:.4f}  (odds {sharp_odds})\n'
+                    f'Edge:       +{edge_pp:.2f}pp\n'
+                    f'Sources:    {source_str}\n\n'
+                    f'PM market:  {title}\n'
+                    f'Resolves:   {res_time.strftime("%Y-%m-%d %H:%M UTC")}\n'
+                )
+
+                trade_info = {
+                    'match':      f'{home} vs {away}',
+                    'kickoff':    kickoff_str,
+                    'outcome':    label,
+                    'side':       side,
+                    'pm_price':   pm_p,
+                    'pm_odds':    pm_odds,
+                    'sharp_prob': round(sh_p, 4),
+                    'sharp_odds': sharp_odds,
+                    'edge_pp':    round(edge_pp, 2),
+                    'sources':    source_str,
+                    'pm_market':  title,
+                }
+                trades_found.append(trade_info)
+
+                if not dry_run:
+                    market_db_id = _upsert_pm_market(conn, market)
+                    trade_id = _write_paper_trade(
+                        conn, strategy_id, market_db_id,
+                        label, pm_p, sh_p,
+                        sources, edge_pp, reasoning,
+                    )
+                    if trade_id:
+                        log.info(f'     → Paper trade #{trade_id} logged ✅')
+                        trade_info['trade_id'] = trade_id
+                    else:
+                        log.info(f'     → Skipped (duplicate within 30 min)')
+
+    finally:
+        conn.close()
+
+    log.info(f'\n[paper_trader] Done — {len(trades_found)} edge(s) found today')
+    return trades_found
+
+
+def scan_and_print() -> list[dict]:
+    """Dry-run alias."""
+    return run(dry_run=True)
+
+
+# ─── CLI ──────────────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Paper Trader — today\'s PM vs sharp odds')
+    parser.add_argument('--dry-run', action='store_true', help='Print only, no DB writes')
+    parser.add_argument('--days', type=int, default=DAYS_AHEAD,
+                        help=f'Days ahead to scan (default {DAYS_AHEAD})')
+    args = parser.parse_args()
+    DAYS_AHEAD = args.days
+    trades = run(dry_run=args.dry_run)
+    if trades:
+        print(f'\n{"─"*60}')
+        print(f'EDGES FOUND ({len(trades)}):')
+        for t in trades:
+            print(f"  {t['match']} | {t['outcome']} | "
+                  f"PM={t['pm_price']:.3f} | Sharp={t['sharp_prob']:.4f} | "
+                  f"Edge={t['edge_pp']:+.2f}pp")
+    else:
+        print('\nNo edges found today.')
