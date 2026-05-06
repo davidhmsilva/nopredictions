@@ -639,6 +639,7 @@ def get_prematch_lambda(
             log.info(f'  Pre-match lambda from DB: lh={lh:.3f} la={la:.3f}')
             return lh, la
     except Exception as e:
+        conn.rollback()
         log.debug(f'  DB lambda lookup failed: {e}')
 
     # 3. Check odds_api_snapshots (populated by stage_d if it stores pre-match odds)
@@ -663,7 +664,7 @@ def get_prematch_lambda(
             log.info(f'  Pre-match lambda from odds_api_snapshots: lh={lh:.3f} la={la:.3f}')
             return lh, la
     except Exception:
-        pass  # table may not exist yet
+        conn.rollback()  # table may not exist — clear failed transaction state
 
     # 4. Fallback: UCL average (teams are roughly balanced at this level)
     log.info(f'  Pre-match lambda: no source found → using UCL defaults (1.30, 1.10)')

@@ -69,6 +69,22 @@ export function Nav({
             {link.label}
           </button>
         ))}
+        <a
+          href="/scanner"
+          style={{
+            padding: '20px 24px',
+            color: 'var(--grey)',
+            cursor: 'pointer',
+            fontSize: '12px',
+            letterSpacing: '2px',
+            textDecoration: 'none',
+            fontFamily: 'var(--font)',
+            transition: 'all 0.15s',
+            borderBottom: '2px solid transparent',
+          }}
+        >
+          SCANNER
+        </a>
       </div>
 
       {/* CTA — desktop only */}
