@@ -499,7 +499,8 @@ button { font-family: var(--font); }
     z-index: 200;
     height: 56px;
   }
-  .mobile-nav button {
+  .mobile-nav button,
+  .mobile-nav a {
     background: none;
     border: none;
     color: var(--grey);
@@ -510,12 +511,15 @@ button { font-family: var(--font); }
     display: flex;
     flex-direction: column;
     align-items: center;
+    text-decoration: none;
     justify-content: center;
     gap: 4px;
     padding: 0;
   }
-  .mobile-nav button.active { color: var(--accent); }
-  .mobile-nav button .icn {
+  .mobile-nav button.active,
+  .mobile-nav a.active { color: var(--accent); }
+  .mobile-nav button .icn,
+  .mobile-nav a .icn {
     font-size: 16px;
     line-height: 1;
   }

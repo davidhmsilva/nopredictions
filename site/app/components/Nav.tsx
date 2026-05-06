@@ -14,6 +14,8 @@ const MOBILE_NAV: { id: Section; icn: string; label: string }[] = [
   { id: 'about',       icn: '◌', label: 'ABOUT' },
 ]
 
+const SCANNER_LINK = { icn: '⊕', label: 'SCAN' }
+
 export function Nav({
   section,
   setSection,
@@ -124,12 +126,25 @@ export function MobileNav({
   section: Section
   setSection: (s: Section) => void
 }) {
+  const isScanner = typeof window !== 'undefined' && window.location.pathname === '/scanner'
+
   return (
     <div className="mobile-nav">
-      {MOBILE_NAV.map((item) => (
+      <button
+        className={section === 'home' && !isScanner ? 'active' : ''}
+        onClick={() => { window.location.href = '/'; }}
+      >
+        <span className="icn">◆</span>
+        <span>HOME</span>
+      </button>
+      <a href="/scanner" className={isScanner ? 'active' : ''}>
+        <span className="icn">{SCANNER_LINK.icn}</span>
+        <span>{SCANNER_LINK.label}</span>
+      </a>
+      {MOBILE_NAV.filter((item) => item.id !== 'home').map((item) => (
         <button
           key={item.id}
-          className={section === item.id ? 'active' : ''}
+          className={section === item.id && !isScanner ? 'active' : ''}
           onClick={() => setSection(item.id)}
         >
           <span className="icn">{item.icn}</span>
