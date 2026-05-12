@@ -35,6 +35,7 @@ from dixon_coles import DixonColesModel
 DATABASE_URL = os.getenv("DATABASE_URL")
 GAMMA_API = "https://gamma-api.polymarket.com"
 PARAMS_PATH = os.path.join(os.path.dirname(__file__), "dc_model_params.json")
+ALIASES_PATH = os.path.join(os.path.dirname(__file__), "team_aliases.json")
 STRATEGY_NAME = "DC Model Pre-Match"
 STAKE_UNITS = 1.0
 DEFAULT_EDGE_THRESHOLD_PP = 3.0
@@ -188,20 +189,41 @@ def _norm(s: str) -> str:
         s.lower()))).strip()
 
 
+# Load team aliases after _norm is defined
+with open(ALIASES_PATH) as _f:
+    _RAW_ALIASES: dict = json.load(_f)
+TEAM_ALIASES: dict[str, str] = {_norm(k): v for k, v in _RAW_ALIASES.items()}
+
+
 def _find_team(name: str, team_idx: dict[str, int]) -> Optional[int]:
     n = _norm(name)
+
+    # 1. Alias table — explicit PM name → canonical model name
+    canonical = TEAM_ALIASES.get(n)
+    if canonical is not None:
+        if canonical == "__NOT_IN_MODEL__":
+            return None
+        cn = _norm(canonical)
+        if cn in team_idx:
+            return team_idx[cn]
+
+    # 2. Exact normalised match
     if n in team_idx:
         return team_idx[n]
-    # Prefix match
-    pre = n[:6]
-    if len(pre) >= 4:
+
+    # 3. Prefix match (first 7 chars, min length 5 to avoid "inter" → "inter miami")
+    pre = n[:7]
+    if len(pre) >= 5:
         for key, idx in team_idx.items():
-            if key.startswith(pre) or pre.startswith(key[:6]):
+            if len(key) >= 5 and (key.startswith(pre) or pre.startswith(key[:7])):
                 return idx
-    # Substring
-    for key, idx in team_idx.items():
-        if key and (key in n or n in key):
-            return idx
+
+    # 4. Substring — only if the match is unambiguous (name has ≥7 chars)
+    if len(n) >= 7:
+        for key, idx in team_idx.items():
+            if len(key) >= 7 and (key in n or n in key):
+                return idx
+
     return None
 
 
@@ -229,9 +251,9 @@ def _classify_market(question: str, home: str, away: str) -> Optional[str]:
     if "over 1.5" in q:  return "over_1.5"
     if "under 1.5" in q: return "under_1.5"
     if "both teams" in q and "score" in q: return "btts"
-    # Team name match for win markets
-    h_words = {w for w in _norm(home).split() if len(w) > 3}
-    a_words = {w for w in _norm(away).split() if len(w) > 3}
+    # Team name match for win markets (min 5 chars to avoid "real", "club", "city" cross-match)
+    h_words = {w for w in _norm(home).split() if len(w) >= 5}
+    a_words = {w for w in _norm(away).split() if len(w) >= 5}
     q_words = set(q.split())
     if h_words & q_words: return "home"
     if a_words & q_words: return "away"
