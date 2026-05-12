@@ -101,6 +101,18 @@ export interface LiveAnalysis {
     totals: TotalsLine[]
   } | null
   poisson: Record<string, number> | null
+  dc_model: {
+    home_win: number
+    draw: number
+    away_win: number
+    over_2_5: number
+    under_2_5: number
+    over_1_5: number
+    under_1_5: number
+    btts: number
+    lambda_home: number
+    lambda_away: number
+  } | null
   pm_markets: {
     title: string
     pm_price: number
@@ -108,6 +120,8 @@ export interface LiveAnalysis {
     edge_pp: number | null
     is_edge: boolean
     reasoning: string
+    dc_prob: number | null
+    dc_edge_pp: number | null
   }[]
 }
 

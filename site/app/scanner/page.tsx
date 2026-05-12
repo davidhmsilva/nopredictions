@@ -119,48 +119,56 @@ function AnalysisResult({ data }: { data: LiveAnalysis }) {
       </div>
 
       {/* Probabilities comparison */}
-      {(data.sharp_odds || data.poisson) && (
+      {(data.sharp_odds || data.poisson || data.dc_model) && (
         <div className="analysis-probs">
           <h3 className="scan-group-title">PROBABILITY COMPARISON</h3>
           <table className="scan-table">
             <thead>
               <tr>
                 <th>OUTCOME</th>
+                {data.dc_model && <th style={{ color: 'var(--accent)' }}>OUR MODEL ★</th>}
                 {data.sharp_odds && <th>SHARP CONSENSUS</th>}
-                {data.poisson && <th>POISSON MODEL</th>}
+                {data.poisson && <th>POISSON IN-PLAY</th>}
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td>{data.home} win</td>
+                {data.dc_model && <td style={{ color: 'var(--accent)' }}>{pct(data.dc_model.home_win)}</td>}
                 {data.sharp_odds && <td>{pct(data.sharp_odds.home_prob)}</td>}
                 {data.poisson && <td>{pct(data.poisson.home_win)}</td>}
               </tr>
               <tr>
                 <td>Draw</td>
+                {data.dc_model && <td style={{ color: 'var(--accent)' }}>{pct(data.dc_model.draw)}</td>}
                 {data.sharp_odds && <td>{data.sharp_odds.draw_prob != null ? pct(data.sharp_odds.draw_prob) : '—'}</td>}
                 {data.poisson && <td>{pct(data.poisson.draw)}</td>}
               </tr>
               <tr>
                 <td>{data.away} win</td>
+                {data.dc_model && <td style={{ color: 'var(--accent)' }}>{pct(data.dc_model.away_win)}</td>}
                 {data.sharp_odds && <td>{pct(data.sharp_odds.away_prob)}</td>}
                 {data.poisson && <td>{pct(data.poisson.away_win)}</td>}
               </tr>
-              {data.sharp_odds?.totals?.map((t) => (
-                <tr key={t.line}>
-                  <td>Over/Under {t.line}</td>
-                  <td>{pct(t.over_prob)} / {pct(t.under_prob)}</td>
-                  {data.poisson && (
-                    <td>
-                      {t.line === 2.5
-                        ? `${pct(data.poisson.over_2_5)} / ${pct(data.poisson.under_2_5)}`
-                        : t.line === 1.5
-                          ? `${pct(data.poisson.over_1_5)} / ${pct(data.poisson.under_1_5)}`
-                          : '—'}
-                    </td>
-                  )}
+              <tr>
+                <td>Over 2.5</td>
+                {data.dc_model && <td style={{ color: 'var(--accent)' }}>{pct(data.dc_model.over_2_5)}</td>}
+                {data.sharp_odds && <td>{data.sharp_odds.totals?.find(t => t.line === 2.5) ? pct(data.sharp_odds.totals.find(t => t.line === 2.5)!.over_prob) : '—'}</td>}
+                {data.poisson && <td>{pct(data.poisson.over_2_5)}</td>}
+              </tr>
+              <tr>
+                <td>BTTS</td>
+                {data.dc_model && <td style={{ color: 'var(--accent)' }}>{pct(data.dc_model.btts)}</td>}
+                {data.sharp_odds && <td>—</td>}
+                {data.poisson && <td>{data.poisson.btts != null ? pct(data.poisson.btts) : '—'}</td>}
+              </tr>
+              {data.dc_model && (
+                <tr style={{ fontSize: 10, color: 'var(--grey)' }}>
+                  <td colSpan={data.sharp_odds && data.poisson ? 4 : data.sharp_odds || data.poisson ? 3 : 2}>
+                    λ home: {data.dc_model.lambda_home.toFixed(2)}  ·  λ away: {data.dc_model.lambda_away.toFixed(2)}
+                  </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -191,18 +199,24 @@ function AnalysisResult({ data }: { data: LiveAnalysis }) {
                     <span className="scan-cell-label">PM PRICE</span>
                     <span className="scan-cell-val">{pct(m.pm_price)}</span>
                   </div>
-                  <div className="scan-card-cell">
-                    <span className="scan-cell-label">FAIR VALUE</span>
-                    <span className="scan-cell-val">
-                      {m.fair_prob != null ? pct(m.fair_prob) : '—'}
-                    </span>
-                  </div>
-                  <div className="scan-card-cell">
-                    <span className="scan-cell-label">EDGE</span>
-                    <span className={`scan-cell-val ${(m.edge_pp ?? 0) > 0 ? 'c-green' : (m.edge_pp ?? 0) < 0 ? 'c-red' : ''}`}>
-                      {m.edge_pp != null ? `${m.edge_pp > 0 ? '+' : ''}${m.edge_pp.toFixed(1)}pp` : '—'}
-                    </span>
-                  </div>
+                  {m.dc_prob != null && (
+                    <div className="scan-card-cell">
+                      <span className="scan-cell-label" style={{ color: 'var(--accent)' }}>OUR MODEL ★</span>
+                      <span className="scan-cell-val" style={{ color: 'var(--accent)' }}>{pct(m.dc_prob)}</span>
+                      <span className={`scan-cell-odds ${(m.dc_edge_pp ?? 0) > 0 ? 'c-green' : 'c-red'}`}>
+                        {m.dc_edge_pp != null ? `${m.dc_edge_pp > 0 ? '+' : ''}${m.dc_edge_pp.toFixed(1)}pp` : ''}
+                      </span>
+                    </div>
+                  )}
+                  {m.fair_prob != null && (
+                    <div className="scan-card-cell">
+                      <span className="scan-cell-label">SHARP</span>
+                      <span className="scan-cell-val">{pct(m.fair_prob)}</span>
+                      <span className={`scan-cell-odds ${(m.edge_pp ?? 0) > 0 ? 'c-green' : 'c-red'}`}>
+                        {m.edge_pp != null ? `${m.edge_pp > 0 ? '+' : ''}${m.edge_pp.toFixed(1)}pp` : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="scan-reasoning">{m.reasoning}</div>
               </div>

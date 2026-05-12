@@ -13,6 +13,7 @@ import {
   type SharpEvent,
   type LiveAnalysis,
 } from '../../lib/edge'
+import { dcPredict } from '../../lib/dc_model'
 
 const ODDS_API_KEY = process.env.THE_ODDS_API_KEY || ''
 const ODDS_API_BASE = 'https://api.the-odds-api.com/v4'
@@ -207,7 +208,10 @@ async function analyzeEvent(event: any) {
   const score = sharpResult?.score ?? null
   const minute = sharpResult?.minute ?? null
 
-  // 3. Build Poisson model if live
+  // 3. Run our DC model (always — pre-match and live)
+  const dcModel = dcPredict(home, away)
+
+  // 4. Build Poisson model if live
   let poisson: Record<string, number> | null = null
   if (isLive && score && minute != null && sharpResult?.sharp) {
     const s = sharpResult.sharp
@@ -223,7 +227,7 @@ async function analyzeEvent(event: any) {
     }
   }
 
-  // 4. Analyze each PM market
+  // 5. Analyze each PM market
   const pmMarkets: LiveAnalysis['pm_markets'] = []
   for (const mkt of event.markets || []) {
     if (!mkt.active && !mkt.closed) continue
@@ -265,6 +269,22 @@ async function analyzeEvent(event: any) {
     const edgePp = fairProb != null ? (fairProb - yesPrice) * 100 : null
     const isEdge = edgePp != null && edgePp >= EDGE_THRESHOLD_PP
 
+    // DC model prob for this outcome
+    let dcProb: number | null = null
+    if (dcModel) {
+      const dcKey = outcome.key === 'home' ? 'home_win'
+        : outcome.key === 'away' ? 'away_win'
+        : outcome.key === 'draw' ? 'draw'
+        : outcome.key === 'over_2.5' ? 'over_2_5'
+        : outcome.key === 'under_2.5' ? 'under_2_5'
+        : outcome.key === 'over_1.5' ? 'over_1_5'
+        : outcome.key === 'under_1.5' ? 'under_1_5'
+        : outcome.key === 'btts' ? 'btts'
+        : null
+      if (dcKey) dcProb = (dcModel as Record<string, number>)[dcKey] ?? null
+    }
+    const dcEdgePp = dcProb != null ? Math.round((dcProb - yesPrice) * 1000) / 10 : null
+
     let reasoning = ''
     if (fairProb != null && edgePp != null) {
       reasoning = edgeReasoning(yesPrice, fairProb, edgePp, outcome.label, home, away, EDGE_THRESHOLD_PP)
@@ -280,6 +300,8 @@ async function analyzeEvent(event: any) {
       edge_pp: edgePp != null ? Math.round(edgePp * 10) / 10 : null,
       is_edge: isEdge,
       reasoning,
+      dc_prob: dcProb,
+      dc_edge_pp: dcEdgePp,
     })
   }
 
@@ -305,6 +327,7 @@ async function analyzeEvent(event: any) {
         }
       : null,
     poisson,
+    dc_model: dcModel,
     pm_markets: pmMarkets,
   }
 
