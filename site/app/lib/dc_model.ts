@@ -36,9 +36,83 @@ function norm(s: string): string {
   return s
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, '')
-    .replace(/\b(fc|cf|sc|ac|ss|afc|bsc|united|city|hotspur)\b/g, '')
+    .replace(/\b(fc|cf|sc|ac|ss|afc|bsc|rcd|ssc|cd|rc|sl|as|ca|aa|fk|sk|rb|vfb|vfl|sv|bv)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// Explicit PM name → canonical model name aliases
+const RAW_ALIASES: Record<string, string> = {
+  "deportivo alaves": "Alaves", "alaves": "Alaves",
+  "heart of midlothian": "Hearts", "hearts fc": "Hearts",
+  "cordoba cf": "Cordoba",
+  "cd castellon": "Castellon", "castellon": "Castellon",
+  "cadiz cf": "Cadiz", "cadiz": "Cadiz",
+  "ss lazio": "Lazio",
+  "fc internazionale milano": "Inter", "internazionale": "Inter", "inter milan": "Inter",
+  "inter miami": "__NOT_IN_MODEL__", "inter miami cf": "__NOT_IN_MODEL__",
+  "stade brestois 29": "Brest", "stade brestois": "Brest",
+  "stade rennais fc": "Rennes", "stade rennais": "Rennes",
+  "racing club de lens": "Lens", "rc lens": "Lens",
+  "ssc bari": "Bari",
+  "cd guadalajara": "Guadalajara",
+  "albacete balompie": "Albacete",
+  "fc barcelona": "Barcelona",
+  "real madrid cf": "Real Madrid",
+  "atletico madrid": "Ath Madrid", "atletico de madrid": "Ath Madrid",
+  "rcd espanyol de barcelona": "Espanyol", "rcd espanyol": "Espanyol",
+  "real sociedad de futbol": "Real Sociedad", "real sociedad futbol": "Real Sociedad",
+  "fk shakhtar donetsk": "Shakhtar Donetsk", "shakhtar": "Shakhtar Donetsk",
+  "sk slavia praha": "Slavia Prague", "slavia praha": "Slavia Prague",
+  "ac milan": "Milan",
+  "hellas verona": "Verona",
+  "us lecce": "Lecce",
+  "atalanta bc": "Atalanta",
+  "olympique de marseille": "Marseille",
+  "olympique lyonnais": "Lyon",
+  "paris saint-germain": "Paris SG", "paris saint germain": "Paris SG", "psg": "Paris SG",
+  "as monaco": "Monaco",
+  "ogc nice": "Nice",
+  "rc strasbourg alsace": "Strasbourg", "rc strasbourg": "Strasbourg",
+  "borussia dortmund": "Dortmund",
+  "borussia monchengladbach": "Monchengladbach",
+  "eintracht frankfurt": "Frankfurt",
+  "bayer leverkusen": "Leverkusen",
+  "tsg hoffenheim": "Hoffenheim", "tsg 1899 hoffenheim": "Hoffenheim",
+  "1 fc union berlin": "Union Berlin", "fc union berlin": "Union Berlin",
+  "sv werder bremen": "Werder Bremen",
+  "fc schalke 04": "Schalke 04", "schalke": "Schalke 04",
+  "hamburger sv": "Hamburg",
+  "fsv mainz 05": "Mainz", "mainz 05": "Mainz",
+  "1 fc heidenheim": "Heidenheim",
+  "sporting cp": "Sp Lisbon", "sporting lisbon": "Sp Lisbon", "sporting clube de portugal": "Sp Lisbon",
+  "sl benfica": "Benfica",
+  "heart of midlothian fc": "Hearts",
+  "real betis balompie": "Betis", "real betis": "Betis",
+  "rc celta de vigo": "Celta", "celta vigo": "Celta",
+  "sevilla fc": "Sevilla",
+  "valencia cf": "Valencia",
+  "villarreal cf": "Villarreal",
+  "athletic club": "Athletic Bilbao", "athletic bilbao": "Athletic Bilbao",
+  "ca osasuna": "Osasuna",
+  "getafe cf": "Getafe",
+  "tottenham hotspur": "Tottenham",
+  "manchester united": "Man United",
+  "manchester city": "Man City",
+  "newcastle united": "Newcastle",
+  "brighton & hove albion": "Brighton", "brighton and hove albion": "Brighton",
+  "west ham united": "West Ham",
+  "wolverhampton wanderers": "Wolves", "wolverhampton": "Wolves",
+  "nottingham forest": "Nottm Forest",
+  "ajax amsterdam": "Ajax",
+  "psv eindhoven": "PSV",
+  "feyenoord rotterdam": "Feyenoord",
+}
+
+// Normalise alias keys at module load time
+const ALIASES: Map<string, string> = new Map()
+for (const [k, v] of Object.entries(RAW_ALIASES)) {
+  ALIASES.set(norm(k), v)
 }
 
 // Build a normalised → index map once at module load
@@ -50,21 +124,32 @@ for (let i = 0; i < params.teams.length; i++) {
 function findTeam(name: string): number | null {
   const n = norm(name)
 
-  // Exact normalised match
+  // 1. Alias table
+  const canonical = ALIASES.get(n)
+  if (canonical !== undefined) {
+    if (canonical === '__NOT_IN_MODEL__') return null
+    const cn = norm(canonical)
+    const aliasIdx = normIdx.get(cn)
+    if (aliasIdx !== undefined) return aliasIdx
+  }
+
+  // 2. Exact normalised match
   const exact = normIdx.get(n)
   if (exact !== undefined) return exact
 
-  // Prefix match (first 6 chars)
-  const pre = n.slice(0, 6)
-  if (pre.length >= 4) {
+  // 3. Prefix match (first 7 chars, min length 5)
+  const pre = n.slice(0, 7)
+  if (pre.length >= 5) {
     for (const [key, idx] of normIdx) {
-      if (key.startsWith(pre) || pre.startsWith(key.slice(0, 6))) return idx
+      if (key.length >= 5 && (key.startsWith(pre) || pre.startsWith(key.slice(0, 7)))) return idx
     }
   }
 
-  // Substring match
-  for (const [key, idx] of normIdx) {
-    if (key.includes(n) || n.includes(key)) return idx
+  // 4. Substring — only for long names (≥7 chars) to avoid false positives
+  if (n.length >= 7) {
+    for (const [key, idx] of normIdx) {
+      if (key.length >= 7 && (key.includes(n) || n.includes(key))) return idx
+    }
   }
 
   return null
