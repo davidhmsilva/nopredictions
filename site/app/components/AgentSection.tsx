@@ -6,7 +6,23 @@ import { TradeCard } from './TradeCard'
 export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loading: boolean }) {
   if (loading) return <SectionWrap><Spinner /></SectionWrap>
 
-  const active = trades.filter((t) => !t.resolved_at)
+  // Deduplicate active trades by match — keep the one with the highest edge per game
+  function matchKey(t: PaperTrade): string {
+    const m = (t.reasoning ?? '').match(/^DC Model:\s*(.+?)\s*—/)
+    return m ? m[1].toLowerCase().trim() : `id:${t.id}`
+  }
+  const activeAll = trades.filter((t) => !t.resolved_at)
+  const bestByMatch = new Map<string, PaperTrade>()
+  for (const t of activeAll) {
+    const key = matchKey(t)
+    const existing = bestByMatch.get(key)
+    if (!existing || Number(t.expected_edge) > Number(existing.expected_edge)) {
+      bestByMatch.set(key, t)
+    }
+  }
+  const active = Array.from(bestByMatch.values()).sort(
+    (a, b) => new Date(b.placed_at).getTime() - new Date(a.placed_at).getTime()
+  )
   const settled = trades.filter((t) => !!t.resolved_at)
   const recentSettled = settled.slice(0, 10)
   const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)

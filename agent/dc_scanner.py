@@ -335,6 +335,9 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
 
             n_matched += 1
 
+            # Collect all edges for this match, then write only the best one
+            match_candidates: list[dict] = []
+
             for mkt in event.get("markets", []):
                 if not mkt.get("active") or mkt.get("closed"):
                     continue
@@ -375,19 +378,27 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     f"PM={yes_p*100:.1f}% DC={dc_prob*100:.1f}%"
                 )
 
-                if not dry_run:
-                    ext_id = str(mkt.get("id") or mkt.get("conditionId") or "")
-                    market_db_id = _upsert_pm_market(conn, ext_id, question, end_date)
-                    if market_db_id:
-                        trade_id = _write_trade(
-                            conn, strategy_id, market_db_id, outcome_key,
-                            yes_p, dc_prob, edge_pp, reasoning,
-                        )
-                        if trade_id:
-                            log.info(f"    → Trade #{trade_id} logged")
-                            trades_logged.append(trade_id)
-                        else:
-                            log.info("    → Already logged today, skipped")
+                match_candidates.append({
+                    "mkt": mkt, "outcome_key": outcome_key, "yes_p": yes_p,
+                    "dc_prob": dc_prob, "edge_pp": edge_pp, "reasoning": reasoning,
+                })
+
+            # Only log the single best edge for this match
+            if match_candidates and not dry_run:
+                best = max(match_candidates, key=lambda c: c["edge_pp"])
+                ext_id = str(best["mkt"].get("id") or best["mkt"].get("conditionId") or "")
+                question = best["mkt"].get("question", "")
+                market_db_id = _upsert_pm_market(conn, ext_id, question, end_date)
+                if market_db_id:
+                    trade_id = _write_trade(
+                        conn, strategy_id, market_db_id, best["outcome_key"],
+                        best["yes_p"], best["dc_prob"], best["edge_pp"], best["reasoning"],
+                    )
+                    if trade_id:
+                        log.info(f"    → Trade #{trade_id} logged (best edge of {len(match_candidates)} candidates)")
+                        trades_logged.append(trade_id)
+                    else:
+                        log.info("    → Already logged today, skipped")
 
         if not dry_run:
             _log_run(conn, len(events), n_matched, n_edges, dry_run)
