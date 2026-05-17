@@ -35,7 +35,7 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
   const isInPlay = !!score
 
   const edgePp = Number(trade.expected_edge) * 100
-  const pnl = Number(trade.payout_units ?? 0)
+  const pnl = Number(trade.payout_units ?? 0) - Number(trade.stake_units ?? 0)
 
   const matchName = extractMatchName(trade)
   const entryPrice = Number(trade.entry_price)
