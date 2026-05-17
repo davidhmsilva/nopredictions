@@ -367,7 +367,8 @@ export function classifyOutcome(
 }
 
 export function is1x2Market(q: string): boolean {
-  const t = q.toLowerCase()
+  // Strip date suffixes (e.g. "on 2026-05-17") before scoring-pattern checks
+  const t = q.replace(/\s+on\s+\d{4}-\d{2}-\d{2}/i, '').toLowerCase()
   const rejects = [
     /\bby\s+\d/, /\b\d{1,2}\s*-\s*\d{1,2}\b/, /exact/, /halftime/, /half.?time/,
     /over\s*[\d.]/, /under\s*[\d.]/, /spread/, /handicap/, /btts/, /both teams/,

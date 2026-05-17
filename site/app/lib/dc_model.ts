@@ -34,6 +34,7 @@ const LOG2 = Math.log(2)
 
 function norm(s: string): string {
   return s
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents: é→e, ñ→n
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, '')
     .replace(/\b(fc|cf|sc|ac|ss|afc|bsc|rcd|ssc|cd|rc|sl|as|ca|aa|fk|sk|rb|vfb|vfl|sv|bv)\b/g, '')

@@ -125,6 +125,7 @@ export interface PaperTrade {
   // joined
   market_title: string
   strategy_name: string
+  game_time: string | null
 }
 
 export async function fetchPaperTrades(): Promise<PaperTrade[]> {
@@ -132,7 +133,7 @@ export async function fetchPaperTrades(): Promise<PaperTrade[]> {
     .from('paper_trades')
     .select(`
       *,
-      pm_markets!market_id ( title ),
+      pm_markets!market_id ( title, resolution_time ),
       strategies!strategy_id ( name )
     `)
     .order('placed_at', { ascending: false })
@@ -148,5 +149,6 @@ export async function fetchPaperTrades(): Promise<PaperTrade[]> {
     ...r,
     market_title: r.pm_markets?.title ?? '—',
     strategy_name: r.strategies?.name ?? '—',
+    game_time: r.pm_markets?.resolution_time ?? null,
   }))
 }

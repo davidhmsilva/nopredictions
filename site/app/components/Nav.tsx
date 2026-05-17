@@ -25,25 +25,20 @@ export function Nav({
     <nav className="nav-container">
       {/* Logo */}
       <div
-        style={{ display: 'flex', flexDirection: 'column', padding: '16px 0', cursor: 'pointer' }}
+        className="nav-brand"
         onClick={() => setSection('home')}
       >
         <div
           className="nav-logo-title"
-          style={{
-            fontSize: '20px',
-            fontWeight: 'bold',
-            letterSpacing: '4px',
-            color: 'var(--white)',
-          }}
+          style={{ fontSize: '16px', fontWeight: 'bold', letterSpacing: '4px', color: 'var(--white)' }}
         >
           NOPREDICTIONS
         </div>
         <div
           className="nav-logo-sub"
-          style={{ fontSize: '9px', letterSpacing: '3px', color: 'var(--grey)', marginTop: '2px' }}
+          style={{ fontSize: '9px', letterSpacing: '3px', color: 'var(--green)', marginTop: '1px' }}
         >
-          AI VS POLYMARKET
+          AI VS PREDICTION MARKETS
         </div>
       </div>
 

@@ -76,7 +76,7 @@ export function NewsletterSection() {
               </button>
             </form>
             <div style={{ fontSize: '11px', color: 'var(--grey)' }}>
-              No spam. Unsubscribe anytime. Every pick posted before kickoff.
+              No spam. Unsubscribe anytime. Every pick logged publicly.
             </div>
           </>
         )}

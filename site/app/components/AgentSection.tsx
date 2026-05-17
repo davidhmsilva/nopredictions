@@ -39,7 +39,7 @@ export function AgentSection({
 
   return (
     <SectionWrap>
-      <SectionTitle title="THE AGENT" sub="AI-POWERED EDGE DETECTION ON POLYMARKET" />
+      <SectionTitle title="THE AGENT" sub="AI-POWERED EDGE DETECTION ON PREDICTION MARKETS" />
 
       {/* Description — accessible */}
       <div style={{
@@ -51,52 +51,34 @@ export function AgentSection({
           fontSize: '13px',
           color: 'var(--grey)',
           lineHeight: '1.9',
-          marginBottom: '24px',
         }}>
-          Our AI scans Polymarket football markets every day, comparing prices against
+          Our AI scans football prediction markets every day, comparing prices against
           its own mathematical models trained on 100,000+ matches.
           When the market price is wrong, the agent bets — and logs everything here
-          with full transparency before kickoff.
+          with full transparency, in real time.
         </p>
-        <div style={{
-          display: 'flex',
-          gap: '24px',
-          justifyContent: 'center',
-          flexWrap: 'wrap',
-        }}>
-          {[
-            { label: 'MODE', value: 'Paper Trading' },
-            { label: 'VENUE', value: 'Polymarket' },
-            { label: 'SPORT', value: 'Football' },
-          ].map(s => (
-            <div key={s.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '4px' }}>{s.label}</div>
-              <div style={{ fontSize: '12px', color: 'var(--accent)', letterSpacing: '1px' }}>{s.value}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* Overall stats */}
       {trades.length > 0 && (
         <div className="lab-stats-strip" style={{ marginBottom: '40px' }}>
           <div>
-            <div className="v">{trades.length}</div>
-            <div className="l">POSITIONS</div>
+            <div className="v" style={{ color: 'var(--accent)' }}>{active.length}</div>
+            <div className="l">OPEN</div>
           </div>
           <div>
-            <div className="v">{settled.length > 0 ? `${winRate.toFixed(0)}%` : '—'}</div>
-            <div className="l">WIN RATE</div>
+            <div className="v">{settled.length}</div>
+            <div className="l">SETTLED</div>
+          </div>
+          <div>
+            <div className="v">{settled.length > 0 ? `${wins}W / ${settled.length - wins}L` : '—'}</div>
+            <div className="l">RECORD</div>
           </div>
           <div>
             <div className="v" style={{ color: settled.length > 0 && totalPnl >= 0 ? 'var(--green)' : settled.length > 0 ? 'var(--red)' : 'var(--grey)' }}>
               {settled.length > 0 ? `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}u` : '—'}
             </div>
             <div className="l">P&amp;L</div>
-          </div>
-          <div>
-            <div className="v">{settled.length > 0 ? `${wins}W / ${settled.length - wins}L` : '—'}</div>
-            <div className="l">RECORD</div>
           </div>
         </div>
       )}
@@ -120,7 +102,9 @@ export function AgentSection({
                 </tr>
               </thead>
               <tbody>
-                {strategies.map((s) => {
+                {[...strategies]
+                  .sort((a, b) => (b.total_pnl ?? 0) - (a.total_pnl ?? 0))
+                  .map((s) => {
                   const isActive = !s.retired_at
                   const pnlVal = s.total_pnl ?? 0
                   const yieldVal = s.yield_pct ?? 0
@@ -168,7 +152,7 @@ export function AgentSection({
           </div>
           <div style={{ fontSize: '12px', color: 'var(--grey)', lineHeight: '1.8', maxWidth: '480px', margin: '0 auto' }}>
             The agent scans Polymarket football markets every morning.
-            When it finds a mispricing, it logs a paper trade here — posted before kickoff.
+            When it finds a mispricing, it logs a paper trade here — publicly, in real time.
           </div>
         </div>
       ) : (

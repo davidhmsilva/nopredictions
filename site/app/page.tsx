@@ -76,7 +76,7 @@ export default function Page() {
 
   return (
     <>
-      <Ticker />
+      <Ticker trades={trades} />
       <Nav section={section} setSection={setSection} />
 
       {section === 'home' && (

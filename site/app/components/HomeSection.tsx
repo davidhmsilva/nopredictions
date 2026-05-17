@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { fmtPnl, formatDate } from '../lib/helpers'
+import { useState } from 'react'
+import { fmtPnl, formatDate, formatDateTime } from '../lib/helpers'
 import type { Section } from '../lib/types'
 import type { DbStats, Strategy, PaperTrade } from '../lib/supabase'
 import { Spinner } from './ui'
-import { TradeCard } from './TradeCard'
+import { TradeCard, extractMatchName } from './TradeCard'
 
 export function HomeSection({
   stats,
@@ -21,7 +21,9 @@ export function HomeSection({
   loading: boolean
 }) {
   const latestTrade = trades[0] ?? null
-  const top3 = strategies.slice(0, 3)
+  const top3 = [...strategies]
+    .sort((a, b) => (b.total_pnl ?? 0) - (a.total_pnl ?? 0))
+    .slice(0, 3)
   const settledTrades = trades.filter(t => !!t.resolved_at)
   const totalPnl = settledTrades.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)
   const wins = settledTrades.filter(t => t.result === 'won').length
@@ -30,13 +32,6 @@ export function HomeSection({
 
   const [email, setEmail] = useState('')
   const [subscribed, setSubscribed] = useState(false)
-  const [cursor, setCursor] = useState(true)
-
-  // Blinking cursor
-  useEffect(() => {
-    const t = setInterval(() => setCursor(c => !c), 530)
-    return () => clearInterval(t)
-  }, [])
 
   function handleSubscribe(e: React.FormEvent) {
     e.preventDefault()
@@ -46,16 +41,15 @@ export function HomeSection({
   return (
     <div>
 
-      {/* ── HERO (compact) ── */}
+      {/* ── HERO ── */}
       <div className="home-hero">
-        <div className="eyebrow">● AI AGENT · POLYMARKET · LIVE</div>
+        <div className="eyebrow">● AI AGENT · PREDICTION MARKETS · LIVE</div>
         <h1>
           NO PREDICTIONS.<br />
           <span className="accent">JUST EDGES.</span>
-          <span style={{ color: 'var(--accent)', opacity: cursor ? 1 : 0 }}>_</span>
         </h1>
         <p>
-          An AI agent hunting football mispricings on Polymarket — using mathematical models
+          An AI agent hunting football mispricings on prediction markets — using mathematical models
           trained on 100,000+ matches to find prices the market got wrong.
           Every position, every failure: public.
         </p>
@@ -101,25 +95,25 @@ export function HomeSection({
 
       {/* ── AGENT STATS ── */}
       <div className="home-block alt">
-        <div className="block-eyebrow"><span>AGENT STATS</span></div>
+        <div className="block-eyebrow" style={{ justifyContent: 'center' }}><span>AGENT STATS</span></div>
         <div className="lab-stats-strip">
           <div>
-            <div className="v">{trades.length}</div>
-            <div className="l">POSITIONS</div>
+            <div className="v" style={{ color: 'var(--accent)' }}>{activeTrades.length}</div>
+            <div className="l">OPEN</div>
           </div>
           <div>
-            <div className="v">{settledTrades.length > 0 ? `${winRate.toFixed(0)}%` : '—'}</div>
-            <div className="l">WIN RATE</div>
+            <div className="v">{settledTrades.length}</div>
+            <div className="l">SETTLED</div>
+          </div>
+          <div>
+            <div className="v">{settledTrades.length > 0 ? `${wins}W / ${settledTrades.length - wins}L` : '—'}</div>
+            <div className="l">RECORD</div>
           </div>
           <div>
             <div className="v" style={{ color: settledTrades.length > 0 && totalPnl >= 0 ? 'var(--green)' : settledTrades.length > 0 ? 'var(--red)' : 'var(--grey)' }}>
               {settledTrades.length > 0 ? `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}u` : '—'}
             </div>
             <div className="l">P&amp;L</div>
-          </div>
-          <div>
-            <div className="v">{settledTrades.length > 0 ? `${wins}W / ${settledTrades.length - wins}L` : '—'}</div>
-            <div className="l">RECORD</div>
           </div>
         </div>
       </div>
@@ -139,7 +133,7 @@ export function HomeSection({
                 <div key={s.id} className="mini-lb-row">
                   <div className="rank">#{i + 1}</div>
                   <div className="name">{s.name}</div>
-                  <div className="mini-lb-metrics" style={{ display: 'contents' }}>
+                  <div className="mini-lb-metrics">
                     <div>
                       <div className="metric-label">PNL</div>
                       <div style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtPnl(pnl)}</div>
@@ -178,12 +172,12 @@ export function HomeSection({
         {trades.length > 0 ? (
           trades.slice(0, 3).map((t) => (
             <div key={t.id} className="hyp-row">
-              <div className="hyp-title">{t.market_title || t.outcome}</div>
+              <div className="hyp-title">{extractMatchName(t)}</div>
               <div className="hyp-meta">
                 <span className={t.result === 'won' ? 'badge badge-live' : t.result === 'lost' ? 'badge badge-rejected' : 'badge badge-pending'}>
                   {t.result ? t.result.toUpperCase() : 'OPEN'}
                 </span>
-                <span>{formatDate(t.placed_at)}</span>
+                <span>{t.game_time ? formatDateTime(t.game_time) : formatDate(t.placed_at)}</span>
               </div>
             </div>
           ))
@@ -194,12 +188,12 @@ export function HomeSection({
 
       {/* ── WHAT IS THIS (compact) ── */}
       <div className="home-block">
-        <div className="block-eyebrow"><span>WHAT IS THIS?</span></div>
+        <div className="block-eyebrow" style={{ justifyContent: 'center' }}><span>WHAT IS THIS?</span></div>
         <p className="what-is-this">
-          An AI agent scans <strong>Polymarket</strong> football markets daily, using
+          An AI agent scans football <strong>prediction markets</strong> daily, using
           mathematical models trained on <strong>100,000+ real matches</strong> to find
           mispricings. When it detects the market got a price wrong, it logs a paper trade
-          — posted before kickoff with full reasoning.
+          — logged publicly in real time, with full reasoning.
           No retroactive claims, no quiet failures.{' '}
           <button onClick={() => setSection('about')}>The full project →</button>
         </p>
@@ -207,7 +201,7 @@ export function HomeSection({
 
       {/* ── NEWSLETTER (inline, compact) ── */}
       <div className="home-block alt">
-        <div className="block-eyebrow"><span>● FOLLOW THE EXPERIMENT</span></div>
+        <div className="block-eyebrow" style={{ justifyContent: 'center' }}><span>● FOLLOW THE EXPERIMENT</span></div>
         {subscribed ? (
           <div style={{
             background: 'var(--bg)', border: '1px solid var(--green)',

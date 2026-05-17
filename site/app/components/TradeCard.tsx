@@ -1,20 +1,25 @@
 'use client'
 
 import { useState } from 'react'
-import { formatDate } from '../lib/helpers'
+import { formatDate, formatDateTime } from '../lib/helpers'
 import type { PaperTrade } from '../lib/supabase'
 
-function extractMatchName(trade: PaperTrade): string {
+export function extractMatchName(trade: PaperTrade): string {
+  // 1. Try DC Model reasoning: "DC Model: Team A vs Team B —"
+  if (trade.reasoning) {
+    const m = trade.reasoning.match(/DC Model:\s*(.+?)\s*[—\-]/i)
+    if (m) return m[1].trim()
+    const m2 = trade.reasoning.match(/Match:\s*(.+?)\s*\[/i)
+    if (m2) return m2[1].trim()
+  }
+  // 2. Try market_title with "vs"
   if (trade.market_title && trade.market_title !== '—') {
     const m = trade.market_title.match(/(?:Will\s+)?(.+?)\s+(?:vs\.?|versus)\s+(.+?)(?:\s+end|\s+win|\?|$)/i)
     if (m) return `${m[1].trim()} vs ${m[2].trim()}`
-    return trade.market_title
-  }
-  if (trade.reasoning) {
-    const m = trade.reasoning.match(/Match:\s*(.+?)\s*\[/i)
-    if (m) return m[1].trim()
-    const m2 = trade.reasoning.match(/^(.+?\s+vs\.?\s+.+?)[,\s]/i)
+    // 3. "Will X win on date?" → extract just X
+    const m2 = trade.market_title.match(/Will\s+(.+?)\s+win\b/i)
     if (m2) return m2[1].trim()
+    return trade.market_title
   }
   return '—'
 }
@@ -52,7 +57,7 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
           <div style={{ fontSize: '11px', color: 'var(--grey)' }}>
             {trade.strategy_name}
             {isInPlay && score ? ` · IN-PLAY ${score} ${minute}'` : ''}
-            {' · '}{formatDate(trade.placed_at)}
+            {' · '}{trade.game_time ? formatDateTime(trade.game_time) : formatDate(trade.placed_at)}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
@@ -73,7 +78,7 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
 
       {/* Pick */}
       <div style={{ marginBottom: '20px', fontSize: '14px', color: 'var(--accent)', letterSpacing: '1px' }}>
-        PICK: {trade.outcome}
+        PICK: {trade.outcome?.toUpperCase()}
       </div>
 
       {/* Stats grid */}
@@ -81,16 +86,16 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>PM ODDS</div>
           <div style={{ fontSize: '20px' }}>{entryOdds > 0 ? entryOdds.toFixed(2) : '—'}</div>
-          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>{entryProb.toFixed(1)}% implied</div>
+          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>{entryProb.toFixed(1)}%</div>
         </div>
         <div>
-          <div style={{ fontSize: '10px', color: 'var(--accent)', letterSpacing: '2px', marginBottom: '6px' }}>OUR PRICE</div>
-          <div style={{ fontSize: '20px' }}>{modelProb.toFixed(1)}%</div>
-          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>{modelOdds} fair odds</div>
+          <div style={{ fontSize: '10px', color: 'var(--accent)', letterSpacing: '2px', marginBottom: '6px' }}>OUR ODDS</div>
+          <div style={{ fontSize: '20px' }}>{modelOdds}</div>
+          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>{modelProb.toFixed(1)}%</div>
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>EDGE</div>
-          <div style={{ fontSize: '20px', color: 'var(--green)' }}>+{edgePp.toFixed(1)}pp</div>
+          <div style={{ fontSize: '20px', color: 'var(--green)' }}>+{edgePp.toFixed(1)}%</div>
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>P&L</div>
