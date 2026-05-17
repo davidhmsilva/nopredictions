@@ -1,12 +1,13 @@
 """
-Poisson In-Play Trader — PM-vs-Poisson strategy.
+Poisson In-Play Trader v2 — dynamic in-play model with DC lambdas.
 
-Derives pre-match Poisson lambdas from sharp consensus odds (cached by
-paper_trader), then calculates fair in-play probabilities given current
-score + minute. Compares against live Polymarket prices.
-
-Zero Odds API calls — reuses the morning sharp odds cache.
-Only polls the free Polymarket Gamma API for live prices.
+Upgrades over v1:
+- DC model lambdas as primary source (no Odds API needed)
+- Red card adjustment: 10-man team gets lambda penalty, opponent gets boost
+- Trailing-team push after 70': losing team attacks harder, draw becomes less likely
+- Goal-driven lambda recalculation: each goal shifts expected intensity
+- Non-linear time model: stoppage time awareness, half-time adjustment
+- Richer live data from api-football.com (red cards, shots on target)
 
 Usage:
     from agent import poisson_trader
@@ -18,13 +19,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
-from scipy.stats import poisson
+from scipy.stats import poisson as poisson_dist
 from scipy.optimize import minimize
 
 from . import paper_trader
@@ -37,23 +40,40 @@ from .tools.db import log_agent_run
 
 log = logging.getLogger(__name__)
 
-INPLAY_EDGE_THRESHOLD_PP = 5.0  # slightly higher threshold for in-play
+INPLAY_EDGE_THRESHOLD_PP = 5.0
 MAX_GOALS = 8
+
+# ─── DC model loader ────────────────────────────────────────────────────────
+
+_dc_model = None
+
+def _load_dc_model():
+    global _dc_model
+    if _dc_model is not None:
+        return _dc_model
+    try:
+        from .dixon_coles import DixonColesModel
+        params_path = Path(__file__).parent / 'dc_model_params.json'
+        if params_path.exists():
+            _dc_model = DixonColesModel.load(str(params_path))
+            log.info(f'[poisson] DC model loaded: {_dc_model.n_matches} matches, {len(_dc_model.teams)} teams')
+        else:
+            log.warning('[poisson] dc_model_params.json not found')
+    except Exception as e:
+        log.warning(f'[poisson] Failed to load DC model: {e}')
+    return _dc_model
 
 
 # ─── Poisson math ────────────────────────────────────────────────────────────
 
 def _poisson_match_probs(lam_h: float, lam_a: float) -> tuple[float, float, float]:
-    """
-    Calculate P(home win), P(draw), P(away win) from independent Poisson.
-    """
     p_home = 0.0
     p_draw = 0.0
     p_away = 0.0
     for i in range(MAX_GOALS + 1):
-        p_i = poisson.pmf(i, lam_h)
+        p_i = poisson_dist.pmf(i, lam_h)
         for j in range(MAX_GOALS + 1):
-            p_j = poisson.pmf(j, lam_a)
+            p_j = poisson_dist.pmf(j, lam_a)
             p_ij = p_i * p_j
             if i > j:
                 p_home += p_ij
@@ -82,25 +102,124 @@ def derive_lambdas(p_home: float, p_draw: float, p_away: float) -> tuple[float, 
     return lam_h, lam_a
 
 
-def inplay_probs(lam_h: float, lam_a: float,
-                 home_goals: int, away_goals: int,
-                 minute: int) -> dict[str, float]:
+# ─── Dynamic in-play adjustments ─────────────────────────────────────────────
+
+RED_CARD_LAMBDA_PENALTY = 0.80    # 10-man team scores at 80% of base rate
+RED_CARD_LAMBDA_BOOST = 1.10      # opponent scores at 110% against 10 men
+TRAILING_PUSH_MINUTE = 70         # when trailing-team boost kicks in
+TRAILING_PUSH_FACTOR = 1.15       # trailing team attacks 15% harder after 70'
+TRAILING_DRAW_SQUEEZE = 0.90      # draw becomes 10% less likely when team pushes
+
+# Goal-driven intensity shift: each goal changes momentum
+GOAL_MOMENTUM_LEADING = 0.92     # team that scores tends to sit back slightly
+GOAL_MOMENTUM_TRAILING = 1.08    # team that concedes pushes harder
+
+
+def _effective_minute(minute: int) -> float:
     """
-    Given pre-match lambdas and current score at `minute`, calculate
-    fair probabilities for the final result using remaining-time Poisson.
+    Convert match minute to effective remaining fraction.
+    Non-linear: accounts for half-time break and stoppage time.
     """
-    remaining = max(0, (90 - minute)) / 90.0
+    if minute <= 0:
+        return 1.0
+    if minute >= 90:
+        # Stoppage time: goals still happen but at reduced rate
+        # ~3 min stoppage on average, model as decaying tail
+        extra = minute - 90
+        return max(0.0, 3.0 / 90.0 * math.exp(-extra / 3.0))
+    if 45 <= minute <= 47:
+        # Half-time: treat as minute 45
+        return (90 - 45) / 90.0
+    return (90 - minute) / 90.0
+
+
+def _adjust_lambdas_for_red_cards(
+    lam_h: float, lam_a: float,
+    home_reds: int, away_reds: int
+) -> tuple[float, float]:
+    """Adjust lambdas when a team has red cards."""
+    adj_h = lam_h
+    adj_a = lam_a
+
+    for _ in range(home_reds):
+        adj_h *= RED_CARD_LAMBDA_PENALTY
+        adj_a *= RED_CARD_LAMBDA_BOOST
+
+    for _ in range(away_reds):
+        adj_a *= RED_CARD_LAMBDA_PENALTY
+        adj_h *= RED_CARD_LAMBDA_BOOST
+
+    return adj_h, adj_a
+
+
+def _adjust_lambdas_for_score(
+    lam_h: float, lam_a: float,
+    home_goals: int, away_goals: int,
+    minute: int
+) -> tuple[float, float]:
+    """
+    Adjust lambdas based on current score and game phase.
+    - Trailing team pushes harder (especially after 70')
+    - Leading team sits back slightly
+    """
+    adj_h = lam_h
+    adj_a = lam_a
+
+    goal_diff = home_goals - away_goals
+
+    if goal_diff != 0:
+        # Goal momentum: leading team defends, trailing team attacks
+        if goal_diff > 0:
+            # Home leading
+            adj_h *= GOAL_MOMENTUM_LEADING
+            adj_a *= GOAL_MOMENTUM_TRAILING
+        else:
+            # Away leading
+            adj_a *= GOAL_MOMENTUM_LEADING
+            adj_h *= GOAL_MOMENTUM_TRAILING
+
+        # Late-game trailing-team push
+        if minute >= TRAILING_PUSH_MINUTE:
+            progress = min(1.0, (minute - TRAILING_PUSH_MINUTE) / 20.0)
+            push = 1.0 + (TRAILING_PUSH_FACTOR - 1.0) * progress
+            if goal_diff > 0:
+                adj_a *= push
+            else:
+                adj_h *= push
+
+    return adj_h, adj_a
+
+
+def inplay_probs(
+    lam_h: float, lam_a: float,
+    home_goals: int, away_goals: int,
+    minute: int,
+    home_reds: int = 0, away_reds: int = 0,
+) -> dict[str, float]:
+    """
+    Dynamic in-play probabilities with all adjustments applied.
+    """
+    # 1. Red card adjustment
+    lam_h, lam_a = _adjust_lambdas_for_red_cards(lam_h, lam_a, home_reds, away_reds)
+
+    # 2. Score-driven momentum adjustment
+    lam_h, lam_a = _adjust_lambdas_for_score(lam_h, lam_a, home_goals, away_goals, minute)
+
+    # 3. Time remaining (non-linear)
+    remaining = _effective_minute(minute)
     lam_h_rem = lam_h * remaining
     lam_a_rem = lam_a * remaining
 
+    # 4. Calculate outcome probabilities from remaining-time Poisson
     p_home = 0.0
     p_draw = 0.0
     p_away = 0.0
+    total_goals_dist = {}
 
     for k in range(MAX_GOALS + 1):
-        pk = poisson.pmf(k, lam_h_rem) if lam_h_rem > 0 else (1.0 if k == 0 else 0.0)
+        pk = poisson_dist.pmf(k, lam_h_rem) if lam_h_rem > 0 else (1.0 if k == 0 else 0.0)
         for j in range(MAX_GOALS + 1):
-            pj = poisson.pmf(j, lam_a_rem) if lam_a_rem > 0 else (1.0 if j == 0 else 0.0)
+            pj = poisson_dist.pmf(j, lam_a_rem) if lam_a_rem > 0 else (1.0 if j == 0 else 0.0)
             p_kj = pk * pj
             final_h = home_goals + k
             final_a = away_goals + j
@@ -111,63 +230,110 @@ def inplay_probs(lam_h: float, lam_a: float,
             else:
                 p_away += p_kj
 
+            total_final = final_h + final_a
+            total_goals_dist[total_final] = total_goals_dist.get(total_final, 0.0) + p_kj
+
     total = p_home + p_draw + p_away
     if total > 0:
         p_home /= total
         p_draw /= total
         p_away /= total
+        for k in total_goals_dist:
+            total_goals_dist[k] /= total
 
-    return {'home': p_home, 'draw': p_draw, 'away': p_away}
+    # O/U and BTTS from distribution
+    over_2_5 = sum(p for g, p in total_goals_dist.items() if g > 2.5)
+    under_2_5 = sum(p for g, p in total_goals_dist.items() if g <= 2.5)
+    over_1_5 = sum(p for g, p in total_goals_dist.items() if g > 1.5)
+    under_1_5 = sum(p for g, p in total_goals_dist.items() if g <= 1.5)
+
+    # BTTS: at least 1 goal each in final score
+    btts = 0.0
+    for k in range(MAX_GOALS + 1):
+        pk = poisson_dist.pmf(k, lam_h_rem) if lam_h_rem > 0 else (1.0 if k == 0 else 0.0)
+        for j in range(MAX_GOALS + 1):
+            pj = poisson_dist.pmf(j, lam_a_rem) if lam_a_rem > 0 else (1.0 if j == 0 else 0.0)
+            if (home_goals + k) >= 1 and (away_goals + j) >= 1:
+                btts += pk * pj
+    if total > 0:
+        btts /= total
+
+    return {
+        'home': p_home,
+        'draw': p_draw,
+        'away': p_away,
+        'over_2_5': over_2_5,
+        'under_2_5': under_2_5,
+        'over_1_5': over_1_5,
+        'under_1_5': under_1_5,
+        'btts': btts,
+        'lambda_home_adj': lam_h,
+        'lambda_away_adj': lam_a,
+        'remaining_fraction': remaining,
+    }
 
 
-# ─── Live score fetching ─────────────────────────────────────────────────────
+# ─── Lambda sourcing: DC model (primary) or sharp odds (fallback) ────────────
 
-def _get_live_scores_from_pm(pm_markets: list[dict]) -> dict[str, dict]:
-    """
-    Try to extract live score + minute from PM market metadata.
-    Returns {event_title: {home_goals, away_goals, minute}} for in-play matches.
+def _get_lambdas_dc(home: str, away: str) -> tuple[float, float] | None:
+    """Get pre-match lambdas from our DC model."""
+    model = _load_dc_model()
+    if model is None:
+        return None
+    pred = model.predict_or_none(home, away)
+    if pred is None:
+        return None
+    return pred['lambda_home'], pred['lambda_away']
 
-    PM markets don't always expose live scores directly, so this is best-effort.
-    Falls back to checking if a match is likely in-play based on commence_time.
-    """
-    scores = {}
-    now = datetime.now(timezone.utc)
 
-    for mkt in pm_markets:
-        event_title = mkt.get('_event_title', '')
-        if not event_title or event_title in scores:
-            continue
+def _get_lambdas_sharp(event: dict) -> tuple[float, float] | None:
+    """Derive lambdas from sharp consensus odds (fallback)."""
+    hp = event.get('home_prob', 0)
+    dp = event.get('draw_prob', 0)
+    ap = event.get('away_prob', 0)
+    if not (hp > 0 and ap > 0):
+        return None
+    if dp is None or dp <= 0:
+        dp = max(0.01, 1.0 - hp - ap)
+    return derive_lambdas(hp, dp, ap)
 
-        commence = mkt.get('_commence_time')
-        if commence and isinstance(commence, datetime):
-            elapsed = (now - commence).total_seconds() / 60
-            if 0 <= elapsed <= 105:
-                # Match is likely in-play but we don't know the score
-                # Store as "in-play but score unknown"
-                scores[event_title] = {
-                    'home_goals': None,
-                    'away_goals': None,
-                    'minute': int(min(elapsed, 90)),
-                    'score_known': False,
-                }
 
-    return scores
-
+# ─── Live data fetching ──────────────────────────────────────────────────────
 
 def _fetch_live_scores_api() -> dict[str, dict]:
     """
-    Fetch live scores from a free API. Returns {normalized_key: {home_goals, away_goals, minute}}.
+    Fetch live match data from available APIs.
+    Tries api-football.com first (richer data: red cards, shots),
+    then falls back to The Odds API /scores endpoint.
+    """
+    scores = _fetch_scores_football_api()
+    if scores:
+        return scores
+    return _fetch_scores_odds_api()
 
-    Uses api-football.com free tier or similar. Returns empty dict if unavailable.
+
+def _fetch_scores_football_api() -> dict[str, dict]:
+    """
+    Fetch from api-football.com with enriched data.
+    Returns red cards, shots on target alongside score + minute.
     """
     api_key = os.getenv('FOOTBALL_API_KEY', '')
     if not api_key:
         return {}
 
     try:
-        data = _get('https://v3.football.api-sports.io/fixtures', params={
-            'live': 'all',
-        }, timeout=8)
+        import requests as _req
+        resp = _req.get(
+            'https://v3.football.api-sports.io/fixtures',
+            params={'live': 'all'},
+            headers={'x-apisports-key': api_key},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            log.debug(f'[poisson] api-football HTTP {resp.status_code}')
+            return {}
+
+        data = resp.json()
         if not isinstance(data, dict) or 'response' not in data:
             return {}
 
@@ -185,18 +351,144 @@ def _fetch_live_scores_api() -> dict[str, dict]:
             away_goals = goals.get('away')
             elapsed = status.get('elapsed')
 
-            if home_goals is not None and away_goals is not None and elapsed:
-                for key in _match_keys(home, away):
-                    scores[key] = {
-                        'home_goals': int(home_goals),
-                        'away_goals': int(away_goals),
-                        'minute': int(elapsed),
-                        'score_known': True,
-                    }
+            if home_goals is None or away_goals is None or not elapsed:
+                continue
+
+            # Extract red cards from events
+            home_reds = 0
+            away_reds = 0
+            events = fixture.get('events', [])
+            for ev in events:
+                if ev.get('type') == 'Card' and ev.get('detail') == 'Red Card':
+                    team_name = ev.get('team', {}).get('name', '')
+                    if team_name == home:
+                        home_reds += 1
+                    elif team_name == away:
+                        away_reds += 1
+
+            # Extract shots on target from statistics
+            home_shots_on = None
+            away_shots_on = None
+            stats = fixture.get('statistics', [])
+            for team_stat in stats:
+                team_name = team_stat.get('team', {}).get('name', '')
+                for s in team_stat.get('statistics', []):
+                    if s.get('type') == 'Shots on Goal':
+                        val = s.get('value')
+                        if val is not None:
+                            if team_name == home:
+                                home_shots_on = int(val)
+                            elif team_name == away:
+                                away_shots_on = int(val)
+
+            match_data = {
+                'home_goals': int(home_goals),
+                'away_goals': int(away_goals),
+                'minute': int(elapsed),
+                'score_known': True,
+                'home_reds': home_reds,
+                'away_reds': away_reds,
+                'home_shots_on': home_shots_on,
+                'away_shots_on': away_shots_on,
+                'source': 'api-football',
+            }
+            for key in _match_keys(home, away):
+                scores[key] = match_data
+
+        if scores:
+            log.info(f'[poisson] Live data via api-football: {len(scores)} match(es)')
         return scores
     except Exception as e:
-        log.debug(f'[poisson] Live scores API error: {e}')
+        log.debug(f'[poisson] api-football error: {e}')
         return {}
+
+
+def _fetch_scores_odds_api() -> dict[str, dict]:
+    """Fetch live scores from The Odds API /scores endpoint."""
+    import requests as _req
+    api_key = os.getenv('THE_ODDS_API_KEY', '')
+    if not api_key:
+        return {}
+
+    sports = ['soccer_uefa_champs_league', 'soccer_epl', 'soccer_spain_la_liga',
+              'soccer_italy_serie_a', 'soccer_germany_bundesliga', 'soccer_france_ligue_one',
+              'soccer_conmebol_libertadores', 'soccer_conmebol_copa_sudamericana']
+
+    scores = {}
+    now = datetime.now(timezone.utc)
+    for sport in sports:
+        try:
+            resp = _req.get(
+                f'https://api.the-odds-api.com/v4/sports/{sport}/scores',
+                params={'apiKey': api_key, 'daysFrom': 1},
+                timeout=8,
+            )
+            if resp.status_code != 200:
+                continue
+            for ev in resp.json():
+                if ev.get('completed') or not ev.get('scores'):
+                    continue
+                home = ev.get('home_team', '')
+                away = ev.get('away_team', '')
+                sc = {s['name']: int(s['score']) for s in ev['scores'] if s.get('score') is not None}
+                if home not in sc or away not in sc:
+                    continue
+                commence = datetime.fromisoformat(ev['commence_time'].replace('Z', '+00:00'))
+                elapsed = int((now - commence).total_seconds() / 60)
+                elapsed = max(1, min(elapsed, 90))
+                match_data = {
+                    'home_goals': sc[home],
+                    'away_goals': sc[away],
+                    'minute': elapsed,
+                    'score_known': True,
+                    'home_reds': 0,
+                    'away_reds': 0,
+                    'home_shots_on': None,
+                    'away_shots_on': None,
+                    'source': 'odds-api',
+                }
+                for key in _match_keys(home, away):
+                    scores[key] = match_data
+        except Exception as e:
+            log.debug(f'[poisson] Odds API scores error ({sport}): {e}')
+            continue
+    if scores:
+        log.info(f'[poisson] Live scores via The Odds API: {len(scores)} match(es)')
+    return scores
+
+
+# ─── PM score extraction (zero API cost fallback) ────────────────────────────
+
+def _get_live_scores_from_pm(pm_markets: list[dict]) -> dict[str, dict]:
+    """
+    Extract live score + minute from PM market metadata.
+    Best-effort fallback when no external live API is available.
+    """
+    scores = {}
+    now = datetime.now(timezone.utc)
+
+    for mkt in pm_markets:
+        event_title = mkt.get('_event_title', '')
+        if not event_title or event_title in scores:
+            continue
+
+        commence = mkt.get('_commence_time')
+        if commence and isinstance(commence, datetime):
+            elapsed = (now - commence).total_seconds() / 60
+            if 0 <= elapsed <= 105:
+                scores[event_title] = {
+                    'home_goals': None,
+                    'away_goals': None,
+                    'minute': int(min(elapsed, 90)),
+                    'score_known': False,
+                    'home_reds': 0,
+                    'away_reds': 0,
+                    'home_shots_on': None,
+                    'away_shots_on': None,
+                    'source': 'pm-inferred',
+                }
+
+    return scores
 
 
 # ─── DB: strategy helper ─────────────────────────────────────────────────────
@@ -210,8 +502,8 @@ def _get_or_create_poisson_strategy(conn) -> int:
     cur.execute("""
         INSERT INTO research_hypotheses (title, description, rationale, source, status, created_by)
         VALUES ('PM In-Play Poisson Edge Scanner',
-                'In-play Polymarket prices diverge from Poisson-model fair values derived from sharp pre-match odds.',
-                'PM in-play markets are thin and slow to update; Poisson model provides a mathematical fair value anchor.',
+                'In-play Polymarket prices diverge from dynamic Poisson-model fair values.',
+                'PM in-play markets are thin and slow to update; dynamic Poisson model with DC lambdas, red card adjustment, and trailing-team push provides mathematical fair value.',
                 'agent', 'live', 'agent')
         RETURNING id
     """)
@@ -222,9 +514,10 @@ def _get_or_create_poisson_strategy(conn) -> int:
         VALUES (%s, 'PM-vs-Poisson In-Play', %s::jsonb, NOW())
         RETURNING id
     """, (hyp_id, json.dumps({
-        'model': 'independent_poisson',
+        'model': 'dynamic_poisson_v2',
+        'lambda_source': 'dc_model_primary_sharp_fallback',
+        'adjustments': ['red_card', 'trailing_push_70', 'goal_momentum', 'nonlinear_time'],
         'edge_threshold_pp': INPLAY_EDGE_THRESHOLD_PP,
-        'lambda_source': 'sharp_consensus_pre_match',
         'stake': '1u flat', 'phase': 'paper-only',
     })))
     strat_id = cur.fetchone()[0]
@@ -232,38 +525,103 @@ def _get_or_create_poisson_strategy(conn) -> int:
     return strat_id
 
 
+# ─── Outcome classification ──────────────────────────────────────────────────
+
+def _classify_pm_outcome(title: str, home: str, away: str) -> str | None:
+    """Classify a PM market question into an outcome key."""
+    t = title.lower()
+    if 'draw' in t:
+        return 'draw'
+    if 'over' in t and '2.5' in t:
+        return 'over_2_5'
+    if 'under' in t and '2.5' in t:
+        return 'under_2_5'
+    if 'over' in t and '1.5' in t:
+        return 'over_1_5'
+    if 'under' in t and '1.5' in t:
+        return 'under_1_5'
+    if 'both teams' in t or 'btts' in t:
+        return 'btts'
+    # Home/away win
+    if _norm(home)[:6] in _norm(t):
+        return 'home'
+    if _norm(away)[:6] in _norm(t):
+        return 'away'
+    # Check for "win" patterns
+    if 'win' in t:
+        home_n = _norm(home)
+        away_n = _norm(away)
+        t_n = _norm(t)
+        if home_n[:5] in t_n:
+            return 'home'
+        if away_n[:5] in t_n:
+            return 'away'
+    return None
+
+
 # ─── Main scan ───────────────────────────────────────────────────────────────
 
-def run(dry_run: bool = False) -> list[dict]:
+def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
     """
     Scan for in-play Poisson edges on Polymarket.
+    Uses DC model lambdas (primary) or sharp odds (fallback).
+    Optionally accepts a LiveMatchTracker for pressure-based lambda adjustments.
     Returns list of trade dicts.
     """
     log.info('\n' + '=' * 60)
-    log.info('[poisson] In-play Poisson scan — %s',
+    log.info('[poisson v2] Dynamic in-play scan — %s',
              datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
     log.info('=' * 60)
 
-    # 1. Get cached sharp odds (from morning consensus scan)
+    # 1. Try to load DC model
+    dc = _load_dc_model()
+
+    # 2. Get cached sharp odds (fallback)
     sharp_lookup = paper_trader.get_cached_sharp_odds()
-    if not sharp_lookup:
-        log.info('[poisson] No cached sharp odds — run consensus scan first')
+    if not dc and not sharp_lookup:
+        log.info('[poisson] No DC model and no cached sharp odds — cannot price')
         return []
 
-    # 2. Get live scores
+    # 3. Get live scores
     live_scores = _fetch_live_scores_api()
     if not live_scores:
         log.info('[poisson] No live scores available — skipping in-play scan')
-        log.info('[poisson] Set FOOTBALL_API_KEY in ingest/.env for live score data')
+        log.info('[poisson] Set FOOTBALL_API_KEY or THE_ODDS_API_KEY in ingest/.env')
         return []
 
-    # 3. Fetch current PM markets
+    log.info(f'[poisson] {len(live_scores)} live match(es) found')
+    for key, sd in live_scores.items():
+        reds_info = ''
+        if sd.get('home_reds') or sd.get('away_reds'):
+            reds_info = f'  🟥 home={sd["home_reds"]} away={sd["away_reds"]}'
+        log.info(f'  • {key}: {sd["home_goals"]}-{sd["away_goals"]} ({sd["minute"]}\'){reds_info}')
+
+    # 3b. Poll live tracker for pressure signals (if available)
+    pressure_signals = {}
+    edge_signals_by_match = {}
+    if tracker:
+        try:
+            pressure_signals = tracker.poll()
+            from .live_tracker import derive_edge_signals
+            for fid, sig in pressure_signals.items():
+                edges = derive_edge_signals(sig)
+                if edges:
+                    match_key = f'{_norm(sig.home)}_{_norm(sig.away)}'
+                    edge_signals_by_match[match_key] = edges
+                    log.info(f'  📊 {sig.home} vs {sig.away}: danger H={sig.home_danger_index:.0f} '
+                             f'A={sig.away_danger_index:.0f} | {len(edges)} signal(s)')
+                    for es in edges:
+                        log.info(f'     🎯 [{es.signal_type}] {es.direction} conf={es.confidence:.0%}')
+        except Exception as e:
+            log.warning(f'[poisson] Tracker error (non-fatal): {e}')
+
+    # 4. Fetch current PM markets
     pm_markets = fetch_pm_markets_today()
     if not pm_markets:
         log.info('[poisson] No PM markets available')
         return []
 
-    # 4. Match PM markets to sharp events + live scores
+    # 5. Match PM markets to live scores and price
     conn = _conn() if not dry_run else None
     trades_found: list[dict] = []
 
@@ -272,15 +630,12 @@ def run(dry_run: bool = False) -> list[dict]:
         if conn:
             strategy_id = _get_or_create_poisson_strategy(conn)
 
+        seen_matches = set()
+
         for mkt in pm_markets:
             home_pm = mkt.get('_home_team')
             away_pm = mkt.get('_away_team')
             if not home_pm or not away_pm:
-                continue
-
-            # Find sharp event
-            event = _fuzzy_find_event_two(home_pm, away_pm, sharp_lookup)
-            if not event:
                 continue
 
             # Find live score
@@ -296,37 +651,68 @@ def run(dry_run: bool = False) -> list[dict]:
             home_goals = score_data['home_goals']
             away_goals = score_data['away_goals']
             minute = score_data['minute']
-            home = event['home']
-            away = event['away']
+            home_reds = score_data.get('home_reds', 0)
+            away_reds = score_data.get('away_reds', 0)
 
-            # 5. Derive Poisson lambdas from sharp odds
-            hp = event.get('home_prob', 0)
-            dp = event.get('draw_prob', 0)
-            ap = event.get('away_prob', 0)
-            if not (hp > 0 and ap > 0):
+            # Get lambdas: DC model first, sharp odds fallback
+            lam_h, lam_a = None, None
+            lambda_source = ''
+
+            # Try DC model
+            dc_lambdas = _get_lambdas_dc(home_pm, away_pm)
+            if dc_lambdas:
+                lam_h, lam_a = dc_lambdas
+                lambda_source = 'dc_model'
+
+            # Fallback: sharp odds
+            if lam_h is None:
+                event = _fuzzy_find_event_two(home_pm, away_pm, sharp_lookup) if sharp_lookup else None
+                if event:
+                    sharp_lambdas = _get_lambdas_sharp(event)
+                    if sharp_lambdas:
+                        lam_h, lam_a = sharp_lambdas
+                        lambda_source = 'sharp_consensus'
+
+            if lam_h is None:
                 continue
 
-            if dp is None or dp <= 0:
-                dp = max(0.01, 1.0 - hp - ap)
+            home = home_pm
+            away = away_pm
 
-            lam_h, lam_a = derive_lambdas(hp, dp, ap)
+            # Apply pressure-based lambda adjustments from live tracker
+            match_key = f'{_norm(home)}_{_norm(away)}'
+            pressure_adjustments = []
+            if match_key in edge_signals_by_match:
+                for es in edge_signals_by_match[match_key]:
+                    if es.confidence >= 0.5:
+                        lam_h *= es.lambda_boost_home
+                        lam_a *= es.lambda_boost_away
+                        pressure_adjustments.append(
+                            f'{es.signal_type}({es.direction}, conf={es.confidence:.0%})')
 
-            # 6. Calculate in-play fair probs
-            fair = inplay_probs(lam_h, lam_a, home_goals, away_goals, minute)
+            if match_key not in seen_matches:
+                seen_matches.add(match_key)
+                adj_info = []
+                if home_reds or away_reds:
+                    adj_info.append(f'reds: H={home_reds} A={away_reds}')
+                if minute >= TRAILING_PUSH_MINUTE and home_goals != away_goals:
+                    adj_info.append('trailing push active')
+                if pressure_adjustments:
+                    adj_info.extend(pressure_adjustments)
+                adj_str = f'  [{", ".join(adj_info)}]' if adj_info else ''
+                log.info(f'\n  ⚽ {home} vs {away} [{home_goals}-{away_goals} {minute}\'] '
+                         f'λ={lam_h:.2f}/{lam_a:.2f} ({lambda_source}){adj_str}')
 
-            # 7. Compare each outcome against PM price
+            # Calculate dynamic in-play probs
+            fair = inplay_probs(lam_h, lam_a, home_goals, away_goals, minute,
+                                home_reds=home_reds, away_reds=away_reds)
+
+            # Classify PM market outcome
             title = mkt.get('question', '')
             yes_price = mkt['_yes_price']
 
-            # Determine which outcome this PM market is about
-            t_lower = title.lower()
-            if 'draw' in t_lower:
-                outcome_key = 'draw'
-            elif _norm(home_pm)[:6] in _norm(t_lower):
-                outcome_key = 'home'
-            elif _norm(away_pm)[:6] in _norm(t_lower):
-                outcome_key = 'away'
-            else:
+            outcome_key = _classify_pm_outcome(title, home, away)
+            if not outcome_key:
                 continue
 
             fair_prob = fair.get(outcome_key, 0)
@@ -335,45 +721,70 @@ def run(dry_run: bool = False) -> list[dict]:
 
             edge_pp = (fair_prob - yes_price) * 100
 
-            score_str = f'{home_goals}-{away_goals}'
             pm_odds = round(1 / yes_price, 3)
             fair_odds = round(1 / fair_prob, 3)
+            score_str = f'{home_goals}-{away_goals}'
 
             sign = ('✅' if edge_pp >= INPLAY_EDGE_THRESHOLD_PP else
                     '~' if edge_pp > 1 else '·')
-            log.info(f'  {sign} {home} vs {away}  [{score_str} {minute}\']')
-            log.info(f'     {outcome_key.upper()}: PM={yes_price:.3f} ({pm_odds}x) | '
-                     f'Poisson={fair_prob:.3f} ({fair_odds}x) | Edge={edge_pp:+.2f}pp')
+            log.info(f'  {sign} {outcome_key.upper()}: PM={yes_price:.3f} ({pm_odds}x) | '
+                     f'Model={fair_prob:.3f} ({fair_odds}x) | Edge={edge_pp:+.1f}pp')
 
             if edge_pp < INPLAY_EDGE_THRESHOLD_PP:
                 continue
 
-            # 8. Log trade
-            sources = {
-                'model': 'poisson',
-                'score': score_str,
-                'minute': minute,
-                'lambda_home': round(lam_h, 4),
-                'lambda_away': round(lam_a, 4),
-                'pre_match_probs': {'home': round(hp, 4), 'draw': round(dp, 4), 'away': round(ap, 4)},
-            }
+            # Build reasoning
+            adjustments_applied = []
+            if home_reds or away_reds:
+                adjustments_applied.append(f'red cards (H={home_reds} A={away_reds})')
+            if minute >= TRAILING_PUSH_MINUTE and home_goals != away_goals:
+                adjustments_applied.append(f'trailing-team push ({minute}\')')
+            if home_goals != away_goals:
+                adjustments_applied.append('goal momentum')
+            if pressure_adjustments:
+                adjustments_applied.extend(pressure_adjustments)
 
             outcome_label = {
-                'home': f'{home} win',
-                'draw': 'Draw',
-                'away': f'{away} win',
-            }[outcome_key]
+                'home': f'{home} win', 'draw': 'Draw', 'away': f'{away} win',
+                'over_2_5': 'Over 2.5', 'under_2_5': 'Under 2.5',
+                'over_1_5': 'Over 1.5', 'under_1_5': 'Under 1.5',
+                'btts': 'BTTS',
+            }.get(outcome_key, outcome_key)
+
+            sources = {
+                'model': 'dynamic_poisson_v2',
+                'lambda_source': lambda_source,
+                'score': score_str,
+                'minute': minute,
+                'lambda_home_pre': round(lam_h, 4),
+                'lambda_away_pre': round(lam_a, 4),
+                'lambda_home_adj': round(fair['lambda_home_adj'], 4),
+                'lambda_away_adj': round(fair['lambda_away_adj'], 4),
+                'home_reds': home_reds,
+                'away_reds': away_reds,
+                'adjustments': adjustments_applied,
+                'pressure_signals': pressure_adjustments if pressure_adjustments else None,
+            }
 
             reasoning = (
-                f'In-play Poisson edge.\n'
+                f'In-play dynamic Poisson edge (v2).\n'
                 f'Match: {home} vs {away}  [{score_str} at {minute}\']\n'
                 f'Selection: {outcome_label}\n\n'
                 f'PM price:       {yes_price:.4f}  (odds {pm_odds})\n'
-                f'Poisson fair:   {fair_prob:.4f}  (odds {fair_odds})\n'
+                f'Model fair:     {fair_prob:.4f}  (odds {fair_odds})\n'
                 f'Edge:           +{edge_pp:.2f}pp\n\n'
+                f'Lambda source:  {lambda_source}\n'
                 f'Pre-match λ:    home={lam_h:.3f}  away={lam_a:.3f}\n'
-                f'Remaining:      {max(0, 90 - minute)} min\n'
+                f'Adjusted λ:     home={fair["lambda_home_adj"]:.3f}  away={fair["lambda_away_adj"]:.3f}\n'
+                f'Remaining:      {max(0, 90 - minute)} min ({fair["remaining_fraction"]:.1%})\n'
             )
+            if adjustments_applied:
+                reasoning += f'Adjustments:    {", ".join(adjustments_applied)}\n'
+            # Add pressure signal details
+            if match_key in edge_signals_by_match:
+                reasoning += '\nPressure signals:\n'
+                for es in edge_signals_by_match[match_key]:
+                    reasoning += f'  • [{es.signal_type}] {es.reasoning}\n'
 
             trade_info = {
                 'match': f'{home} vs {away}',
@@ -385,16 +796,21 @@ def run(dry_run: bool = False) -> list[dict]:
                 'fair_prob': round(fair_prob, 4),
                 'fair_odds': fair_odds,
                 'edge_pp': round(edge_pp, 2),
+                'lambda_source': lambda_source,
+                'adjustments': adjustments_applied,
             }
             trades_found.append(trade_info)
 
             if not dry_run and conn:
                 from .paper_trader import _upsert_pm_market, _write_paper_trade
+                from .tools.db import find_match_id as _fmi
                 market_db_id = _upsert_pm_market(conn, mkt)
+                db_match_id = _fmi(conn, home, away)
                 trade_id = _write_paper_trade(
                     conn, strategy_id, market_db_id,
                     outcome_label, yes_price, fair_prob,
                     sources, edge_pp, reasoning,
+                    match_id=db_match_id,
                 )
                 if trade_id:
                     log.info(f'     → Paper trade #{trade_id} logged ✅')
@@ -406,27 +822,39 @@ def run(dry_run: bool = False) -> list[dict]:
         if conn:
             conn.close()
 
-    log.info(f'\n[poisson] Done — {len(trades_found)} in-play edge(s) found')
+    log.info(f'\n[poisson v2] Done — {len(trades_found)} in-play edge(s) found')
     return trades_found
 
 
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='Poisson In-Play Trader')
+    parser = argparse.ArgumentParser(description='Poisson In-Play Trader v2')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--no-tracker', action='store_true', help='Disable live pressure tracker')
     args = parser.parse_args()
 
     # Need to run consensus first to populate sharp odds cache
     log.info('[poisson] Running consensus scan first to populate sharp odds cache...')
     paper_trader.run(dry_run=True)
 
-    trades = run(dry_run=args.dry_run)
+    # Initialize live tracker for pressure signals
+    live_tracker = None
+    if not args.no_tracker:
+        try:
+            from .live_tracker import LiveMatchTracker
+            live_tracker = LiveMatchTracker()
+            log.info('[poisson] Live pressure tracker enabled')
+        except Exception as e:
+            log.warning(f'[poisson] Could not init tracker: {e}')
+
+    trades = run(dry_run=args.dry_run, tracker=live_tracker)
     if trades:
         print(f'\n{"─" * 60}')
         print(f'IN-PLAY EDGES ({len(trades)}):')
         for t in trades:
+            adj = f'  [{", ".join(t["adjustments"])}]' if t.get('adjustments') else ''
             print(f"  {t['match']} [{t['score']} {t['minute']}'] | {t['outcome']} | "
-                  f"PM={t['pm_price']:.3f} | Poisson={t['fair_prob']:.4f} | "
-                  f"Edge={t['edge_pp']:+.2f}pp")
+                  f"PM={t['pm_price']:.3f} | Model={t['fair_prob']:.4f} | "
+                  f"Edge={t['edge_pp']:+.2f}pp | λ={t['lambda_source']}{adj}")
     else:
         print('\nNo in-play edges found.')

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { fmtPnl, fmtClv, formatDate } from '../lib/helpers'
+import { fmtPnl, formatDate } from '../lib/helpers'
 import type { Section } from '../lib/types'
 import type { DbStats, Strategy, PaperTrade } from '../lib/supabase'
 import { Spinner } from './ui'
@@ -24,10 +24,8 @@ export function HomeSection({
   const top3 = strategies.slice(0, 3)
   const settledTrades = trades.filter(t => !!t.resolved_at)
   const totalPnl = settledTrades.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)
-  const tradesWithClv = trades.filter(t => t.clv != null)
-  const avgClv = tradesWithClv.length > 0
-    ? tradesWithClv.reduce((s, t) => s + Number(t.clv ?? 0), 0) / tradesWithClv.length
-    : 0
+  const wins = settledTrades.filter(t => t.result === 'won').length
+  const winRate = settledTrades.length > 0 ? (wins / settledTrades.length) * 100 : 0
   const activeTrades = trades.filter(t => !t.resolved_at)
 
   const [email, setEmail] = useState('')
@@ -57,17 +55,17 @@ export function HomeSection({
           <span style={{ color: 'var(--accent)', opacity: cursor ? 1 : 0 }}>_</span>
         </h1>
         <p>
-          An AI agent hunting football mispricings on Polymarket — comparing prices against
-          sharp bookmaker consensus to find edges the market hasn't priced in.
+          An AI agent hunting football mispricings on Polymarket — using mathematical models
+          trained on 100,000+ matches to find prices the market got wrong.
           Every position, every failure: public.
         </p>
         <div className="cta-row">
-          <button className="btn-primary" onClick={() => setSection('strategies')}>
+          <button className="btn-primary" onClick={() => setSection('agent')}>
             ● SEE THE AGENT
           </button>
-          <button className="btn-secondary" onClick={() => setSection('leaderboard')}>
-            LEADERBOARD →
-          </button>
+          <a href="/scanner" className="btn-secondary">
+            SCANNER →
+          </a>
         </div>
       </div>
 
@@ -76,7 +74,7 @@ export function HomeSection({
         <div className="block-eyebrow">
           <span>● LATEST POSITION</span>
           {trades.length > 0 && (
-            <button onClick={() => setSection('strategies')}>
+            <button onClick={() => setSection('agent')}>
               ALL {trades.length} →
             </button>
           )}
@@ -95,7 +93,7 @@ export function HomeSection({
             </div>
             <div style={{ fontSize: '12px', color: 'var(--grey)', lineHeight: '1.7', maxWidth: '420px', margin: '0 auto' }}>
               The agent scans Polymarket football markets daily. First trade lands
-              when it finds a price that diverges from sharp consensus.
+              when it finds a price the market got wrong.
             </div>
           </div>
         )}
@@ -110,10 +108,8 @@ export function HomeSection({
             <div className="l">POSITIONS</div>
           </div>
           <div>
-            <div className="v" style={{ color: activeTrades.length > 0 ? 'var(--green)' : 'var(--grey)' }}>
-              {activeTrades.length}
-            </div>
-            <div className="l">ACTIVE</div>
+            <div className="v">{settledTrades.length > 0 ? `${winRate.toFixed(0)}%` : '—'}</div>
+            <div className="l">WIN RATE</div>
           </div>
           <div>
             <div className="v" style={{ color: settledTrades.length > 0 && totalPnl >= 0 ? 'var(--green)' : settledTrades.length > 0 ? 'var(--red)' : 'var(--grey)' }}>
@@ -122,25 +118,23 @@ export function HomeSection({
             <div className="l">P&amp;L</div>
           </div>
           <div>
-            <div className="v" style={{ color: avgClv >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {trades.length > 0 ? `${avgClv >= 0 ? '+' : ''}${(avgClv * 100).toFixed(1)}¢` : '—'}
-            </div>
-            <div className="l">AVG CLV</div>
+            <div className="v">{settledTrades.length > 0 ? `${wins}W / ${settledTrades.length - wins}L` : '—'}</div>
+            <div className="l">RECORD</div>
           </div>
         </div>
       </div>
 
-      {/* ── MINI LEADERBOARD ── */}
+      {/* ── STRATEGIES OVERVIEW ── */}
       <div className="home-block">
         <div className="block-eyebrow">
-          <span>LEADERBOARD</span>
-          <button onClick={() => setSection('leaderboard')}>FULL TABLE →</button>
+          <span>STRATEGIES</span>
+          <button onClick={() => setSection('agent')}>FULL DETAILS →</button>
         </div>
         {top3.length > 0 ? (
           <>
             {top3.map((s, i) => {
               const pnl = s.total_pnl ?? 0
-              const clv = s.avg_clv ?? 0
+              const wr = s.total_bets ? `${((s.win_rate ?? 0) * 100).toFixed(0)}%` : '—'
               return (
                 <div key={s.id} className="mini-lb-row">
                   <div className="rank">#{i + 1}</div>
@@ -151,8 +145,8 @@ export function HomeSection({
                       <div style={{ color: pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtPnl(pnl)}</div>
                     </div>
                     <div>
-                      <div className="metric-label">CLV</div>
-                      <div style={{ color: clv >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtClv(clv * 100)}</div>
+                      <div className="metric-label">WIN RATE</div>
+                      <div>{wr}</div>
                     </div>
                     <div>
                       <div className="metric-label">N</div>
@@ -169,8 +163,8 @@ export function HomeSection({
             padding: '24px 20px', fontSize: '13px', color: 'var(--grey)', lineHeight: '1.7',
           }}>
             <span style={{ color: 'var(--white)' }}>No strategies ranked yet.</span>{' '}
-            The agent is scanning Polymarket for edges against sharp bookmaker consensus.
-            Strategies appear here once they accumulate enough trades to measure performance.
+            The agent is scanning Polymarket for mispriced markets.
+            Strategies appear here once they accumulate enough trades.
           </div>
         )}
       </div>
@@ -179,7 +173,7 @@ export function HomeSection({
       <div className="home-block alt">
         <div className="block-eyebrow">
           <span>● RECENT POSITIONS</span>
-          <button onClick={() => setSection('strategies')}>SEE ALL →</button>
+          <button onClick={() => setSection('agent')}>SEE ALL →</button>
         </div>
         {trades.length > 0 ? (
           trades.slice(0, 3).map((t) => (
@@ -202,10 +196,10 @@ export function HomeSection({
       <div className="home-block">
         <div className="block-eyebrow"><span>WHAT IS THIS?</span></div>
         <p className="what-is-this">
-          An AI agent scans <strong>Polymarket</strong> football markets daily, comparing
-          prices against <strong>sharp bookmaker consensus</strong> to find mispricings.
-          When it detects an edge, it logs a paper trade — posted before kickoff with full
-          reasoning. Two waves at once: AI and prediction markets.
+          An AI agent scans <strong>Polymarket</strong> football markets daily, using
+          mathematical models trained on <strong>100,000+ real matches</strong> to find
+          mispricings. When it detects the market got a price wrong, it logs a paper trade
+          — posted before kickoff with full reasoning.
           No retroactive claims, no quiet failures.{' '}
           <button onClick={() => setSection('about')}>The full project →</button>
         </p>

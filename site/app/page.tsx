@@ -13,7 +13,6 @@ import { VALID_SECTIONS, type Section } from './lib/types'
 import { Ticker } from './components/Ticker'
 import { Nav, MobileNav } from './components/Nav'
 import { HomeSection } from './components/HomeSection'
-import { LeaderboardSection } from './components/LeaderboardSection'
 import { AgentSection } from './components/AgentSection'
 import { NewsletterSection } from './components/NewsletterSection'
 import { AboutSection } from './components/AboutSection'
@@ -23,7 +22,10 @@ import { Footer } from './components/Footer'
 
 function readSectionFromHash(): Section {
   if (typeof window === 'undefined') return 'home'
-  const h = window.location.hash.replace(/^#/, '') as Section
+  const raw = window.location.hash.replace(/^#/, '')
+  // Backwards compat: old #strategies and #leaderboard → #agent
+  if (raw === 'strategies' || raw === 'leaderboard') return 'agent'
+  const h = raw as Section
   return VALID_SECTIONS.includes(h) ? h : 'home'
 }
 
@@ -86,15 +88,12 @@ export default function Page() {
           loading={loadingStats || loadingTrades || loadingStrategies}
         />
       )}
-      {section === 'leaderboard' && (
-        <LeaderboardSection
+      {section === 'agent' && (
+        <AgentSection
+          trades={trades}
           strategies={strategies}
-          stats={stats}
-          loading={loadingStrategies}
+          loading={loadingTrades || loadingStrategies}
         />
-      )}
-      {section === 'strategies' && (
-        <AgentSection trades={trades} loading={loadingTrades} />
       )}
       {section === 'newsletter' && <NewsletterSection />}
       {section === 'about' && <AboutSection stats={stats} loading={loadingStats} />}

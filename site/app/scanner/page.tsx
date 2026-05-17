@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Nav, MobileNav } from '../components/Nav'
+import type { Section } from '../lib/types'
 import type { LiveAnalysis } from '../lib/edge'
 
 function pct(v: number) {
@@ -11,10 +13,6 @@ function EdgeBadge({ edge }: { edge: number }) {
   const cls = edge >= 3 ? 'badge-edge' : edge > 0 ? 'badge-slight' : 'badge-neg'
   const sign = edge > 0 ? '+' : ''
   return <span className={`scan-badge ${cls}`}>{sign}{edge.toFixed(1)}pp</span>
-}
-
-function oddsFromProb(p: number) {
-  return p > 0 ? (1 / p).toFixed(2) : '—'
 }
 
 // ─── Game Analyzer ──────────────────────────────────────────────────────────
@@ -54,8 +52,8 @@ function AnalyzeSection() {
         <div>
           <h2 className="scan-title">POLYMARKET GAME SCANNER</h2>
           <p className="scan-sub">
-            Paste any Polymarket football game URL — live or pre-match. The agent fetches
-            current prices, compares against Pinnacle + Betfair sharp consensus, and flags any edges.
+            Paste any Polymarket football game URL — live or pre-match. The agent runs our
+            Dixon-Coles model and compares against sharp consensus to find any exploitable edge.
           </p>
         </div>
       </div>
@@ -237,23 +235,21 @@ function AnalysisResult({ data }: { data: LiveAnalysis }) {
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function ScannerPage() {
+  const navigateHome = (s: Section) => {
+    window.location.href = s === 'home' ? '/' : `/?section=${s}`
+  }
+
   return (
     <div className="scanner-page">
-      <nav className="scanner-nav">
-        <a href="/" className="scanner-logo">
-          <span className="scanner-logo-title">NOPREDICTIONS</span>
-          <span className="scanner-logo-sub">AI VS POLYMARKET</span>
-        </a>
-        <a href="/" className="scanner-back">← DASHBOARD</a>
-      </nav>
+      <Nav section="home" setSection={navigateHome} />
 
       <main className="scanner-main">
         <div className="scanner-hero">
           <span className="scanner-eyebrow">EDGE SCANNER</span>
           <h1 className="scanner-h1">Find mispricings.</h1>
           <p className="scanner-hero-sub">
-            Paste a Polymarket game link — live or pre-match — and the agent will compare prices
-            against Pinnacle + Betfair sharp consensus to find any exploitable edge.
+            Paste a Polymarket game link — live or pre-match — and the agent runs our
+            Dixon-Coles model to find any exploitable edge.
           </p>
         </div>
 
@@ -264,6 +260,8 @@ export default function ScannerPage() {
         <span>NOPREDICTIONS</span>
         <span style={{ color: 'var(--grey)' }}>No predictions. Just edges.</span>
       </footer>
+
+      <MobileNav section="home" setSection={navigateHome} />
     </div>
   )
 }

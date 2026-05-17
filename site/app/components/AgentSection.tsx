@@ -1,12 +1,20 @@
-import { fmtClv } from '../lib/helpers'
-import type { PaperTrade } from '../lib/supabase'
+import { fmtPnl, fmtPct } from '../lib/helpers'
+import type { PaperTrade, Strategy } from '../lib/supabase'
 import { SectionWrap, SectionTitle, Spinner } from './ui'
 import { TradeCard } from './TradeCard'
 
-export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loading: boolean }) {
+export function AgentSection({
+  trades,
+  strategies,
+  loading,
+}: {
+  trades: PaperTrade[]
+  strategies: Strategy[]
+  loading: boolean
+}) {
   if (loading) return <SectionWrap><Spinner /></SectionWrap>
 
-  // Deduplicate active trades by match — keep the one with the highest edge per game
+  // Deduplicate active trades — keep one per game (highest edge)
   function matchKey(t: PaperTrade): string {
     const m = (t.reasoning ?? '').match(/^DC Model:\s*(.+?)\s*—/)
     return m ? m[1].toLowerCase().trim() : `id:${t.id}`
@@ -28,16 +36,12 @@ export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loadin
   const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)
   const wins = settled.filter(t => t.result === 'won').length
   const winRate = settled.length > 0 ? (wins / settled.length) * 100 : 0
-  const tradesWithClv = trades.filter(t => t.clv != null)
-  const avgClv = tradesWithClv.length > 0
-    ? tradesWithClv.reduce((s, t) => s + Number(t.clv ?? 0), 0) / tradesWithClv.length
-    : 0
 
   return (
     <SectionWrap>
       <SectionTitle title="THE AGENT" sub="AI-POWERED EDGE DETECTION ON POLYMARKET" />
 
-      {/* Description */}
+      {/* Description — accessible */}
       <div style={{
         maxWidth: '640px',
         margin: '0 auto 48px',
@@ -49,9 +53,10 @@ export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loadin
           lineHeight: '1.9',
           marginBottom: '24px',
         }}>
-          The agent continuously scans Polymarket for football markets where prices
-          diverge from sharp bookmaker consensus. It uses mathematical models to identify
-          mispricings and logs every position with full transparency. No predictions, just edges.
+          Our AI scans Polymarket football markets every day, comparing prices against
+          its own mathematical models trained on 100,000+ matches.
+          When the market price is wrong, the agent bets — and logs everything here
+          with full transparency before kickoff.
         </p>
         <div style={{
           display: 'flex',
@@ -60,9 +65,9 @@ export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loadin
           flexWrap: 'wrap',
         }}>
           {[
-            { label: 'STRATEGY', value: 'PM vs Sharp Consensus' },
             { label: 'MODE', value: 'Paper Trading' },
             { label: 'VENUE', value: 'Polymarket' },
+            { label: 'SPORT', value: 'Football' },
           ].map(s => (
             <div key={s.label} style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '4px' }}>{s.label}</div>
@@ -72,7 +77,7 @@ export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loadin
         </div>
       </div>
 
-      {/* Stats strip */}
+      {/* Overall stats */}
       {trades.length > 0 && (
         <div className="lab-stats-strip" style={{ marginBottom: '40px' }}>
           <div>
@@ -90,12 +95,66 @@ export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loadin
             <div className="l">P&amp;L</div>
           </div>
           <div>
-            <div className="v" style={{ color: avgClv >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {tradesWithClv.length > 0 ? `${avgClv >= 0 ? '+' : ''}${(avgClv * 100).toFixed(1)}¢` : '—'}
-            </div>
-            <div className="l">AVG CLV</div>
+            <div className="v">{settled.length > 0 ? `${wins}W / ${settled.length - wins}L` : '—'}</div>
+            <div className="l">RECORD</div>
           </div>
         </div>
+      )}
+
+      {/* Strategy table (merged from leaderboard) */}
+      {strategies.length > 0 && (
+        <>
+          <div style={{ fontSize: '11px', letterSpacing: '3px', color: 'var(--grey)', marginBottom: '20px' }}>
+            STRATEGIES
+          </div>
+          <div className="table-scroll" style={{ marginBottom: '40px' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>STRATEGY</th>
+                  <th>POSITIONS</th>
+                  <th>WIN RATE</th>
+                  <th>YIELD</th>
+                  <th>P&L</th>
+                  <th>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {strategies.map((s) => {
+                  const isActive = !s.retired_at
+                  const pnlVal = s.total_pnl ?? 0
+                  const yieldVal = s.yield_pct ?? 0
+
+                  return (
+                    <tr key={s.id}>
+                      <td style={{ color: 'var(--white)', letterSpacing: '1px' }}>{s.name}</td>
+                      <td>{s.total_bets ?? 0}</td>
+                      <td>
+                        {s.total_bets ? `${((s.win_rate ?? 0) * 100).toFixed(0)}%` : '—'}
+                        {(s.total_bets ?? 0) > 0 && (
+                          <div className="win-bar-bg">
+                            <div className="win-bar" style={{ width: `${(s.win_rate ?? 0) * 100}%` }} />
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ color: yieldVal >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {s.total_bets ? fmtPct(yieldVal) : '—'}
+                      </td>
+                      <td style={{ color: pnlVal >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                        {s.total_bets ? fmtPnl(pnlVal) : '—'}
+                      </td>
+                      <td>
+                        <span className={`badge ${isActive ? 'badge-live' : 'badge-rejected'}`}>
+                          {isActive ? 'LIVE' : 'RETIRED'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* Positions */}
@@ -108,9 +167,8 @@ export function AgentSection({ trades, loading }: { trades: PaperTrade[]; loadin
             NO POSITIONS YET
           </div>
           <div style={{ fontSize: '12px', color: 'var(--grey)', lineHeight: '1.8', maxWidth: '480px', margin: '0 auto' }}>
-            The agent scans Polymarket football markets every morning and compares prices
-            against sharp bookmaker consensus. When it finds a mispricing above its threshold,
-            it logs a paper trade here — posted before kickoff.
+            The agent scans Polymarket football markets every morning.
+            When it finds a mispricing, it logs a paper trade here — posted before kickoff.
           </div>
         </div>
       ) : (

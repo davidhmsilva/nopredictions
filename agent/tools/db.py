@@ -127,6 +127,93 @@ def run_analysis_query(sql: str) -> list[dict]:
 # WRITE — agent outputs
 # ---------------------------------------------------------------------------
 
+def find_match_id(conn, home_name: str, away_name: str,
+                  kickoff_date: date | None = None,
+                  days_window: int = 3) -> int | None:
+    """
+    Look up a match_id from the matches table by fuzzy-matching team names.
+
+    Strategy:
+      1. Search teams table for home/away by canonical_name (case-insensitive substring)
+      2. Find match in the given date window
+    Returns match_id or None.
+    """
+    import re
+
+    def _norm(s: str) -> str:
+        s = s.lower()
+        s = re.sub(r'[^a-z0-9 ]', '', s)
+        s = re.sub(r'\b(fc|cf|sc|ac|ss|afc|bsc|cd|rc|rcd|fk|sk|rb|vfb|vfl|sv|bv|1\.)\b', '', s)
+        return re.sub(r'\s+', ' ', s).strip()
+
+    def _find_team_id(cur, name: str) -> int | None:
+        n = _norm(name)
+        # Exact canonical match
+        cur.execute(
+            "SELECT id FROM teams WHERE LOWER(canonical_name) = %s LIMIT 1",
+            (n,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        # Alias match (any source)
+        cur.execute(
+            "SELECT team_id FROM team_aliases WHERE LOWER(alias) = %s LIMIT 1",
+            (name.lower(),))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+
+        # Substring on canonical name (last resort, both directions)
+        if len(n) >= 5:
+            cur.execute(
+                "SELECT id FROM teams WHERE LOWER(canonical_name) LIKE %s LIMIT 1",
+                (f'%{n}%',))
+            row = cur.fetchone()
+            if row:
+                return row[0]
+            # Try the other direction: canonical name is a substring of our query
+            cur.execute(
+                "SELECT id FROM teams WHERE %s LIKE '%%' || LOWER(canonical_name) || '%%' "
+                "AND LENGTH(canonical_name) >= 5 ORDER BY LENGTH(canonical_name) DESC LIMIT 1",
+                (n,))
+            row = cur.fetchone()
+            if row:
+                return row[0]
+
+        return None
+
+    cur = conn.cursor()
+    home_id = _find_team_id(cur, home_name)
+    away_id = _find_team_id(cur, away_name)
+
+    if not home_id or not away_id:
+        return None
+
+    if kickoff_date:
+        cur.execute("""
+            SELECT id FROM matches
+            WHERE home_team_id = %s AND away_team_id = %s
+              AND kickoff_utc BETWEEN %s::date - INTERVAL '%s days'
+                                  AND %s::date + INTERVAL '%s days'
+            ORDER BY ABS(EXTRACT(EPOCH FROM kickoff_utc - %s::date)) ASC
+            LIMIT 1
+        """, (home_id, away_id, kickoff_date, days_window,
+              kickoff_date, days_window, kickoff_date))
+    else:
+        cur.execute("""
+            SELECT id FROM matches
+            WHERE home_team_id = %s AND away_team_id = %s
+              AND kickoff_utc BETWEEN NOW() - INTERVAL '1 day'
+                                  AND NOW() + INTERVAL '%s days'
+            ORDER BY kickoff_utc ASC
+            LIMIT 1
+        """, (home_id, away_id, days_window))
+
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def log_agent_run(
     agent_name: str,
     action: str,

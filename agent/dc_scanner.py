@@ -32,6 +32,9 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../ingest/.env"
 sys.path.insert(0, os.path.dirname(__file__))
 from dixon_coles import DixonColesModel
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
+from db import find_match_id
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 GAMMA_API = "https://gamma-api.polymarket.com"
 PARAMS_PATH = os.path.join(os.path.dirname(__file__), "dc_model_params.json")
@@ -134,7 +137,7 @@ def _already_traded(conn, strategy_id: int, market_db_id: int, outcome: str) -> 
 
 def _write_trade(conn, strategy_id: int, market_db_id: int, outcome: str,
                  entry_price: float, dc_prob: float, edge_pp: float,
-                 reasoning: str) -> Optional[int]:
+                 reasoning: str, match_id: Optional[int] = None) -> Optional[int]:
     if _already_traded(conn, strategy_id, market_db_id, outcome):
         return None
     entry_odds = round(1 / entry_price, 4) if entry_price > 0 else None
@@ -142,14 +145,14 @@ def _write_trade(conn, strategy_id: int, market_db_id: int, outcome: str,
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO paper_trades (
-            strategy_id, market_id, outcome,
+            strategy_id, market_id, match_id, outcome,
             entry_price, entry_odds,
             model_probability, sharp_consensus_price, sharp_consensus_sources,
             expected_edge, confidence, stake_units, reasoning, placed_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, NOW())
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, NOW())
         RETURNING id
     """, (
-        strategy_id, market_db_id, outcome,
+        strategy_id, market_db_id, match_id, outcome,
         entry_price, entry_odds,
         dc_prob, dc_prob,
         json.dumps({"source": "DC Model xG", "dc_prob": round(dc_prob, 4)}),
@@ -390,9 +393,22 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                 question = best["mkt"].get("question", "")
                 market_db_id = _upsert_pm_market(conn, ext_id, question, end_date)
                 if market_db_id:
+                    # Link to matches table for CLV calculation at resolution time
+                    kickoff_date = None
+                    if end_date:
+                        try:
+                            kickoff_date = datetime.fromisoformat(
+                                end_date.replace("Z", "+00:00")).date()
+                        except (ValueError, TypeError):
+                            pass
+                    db_match_id = find_match_id(conn, home, away, kickoff_date)
+                    if db_match_id:
+                        log.info(f"    → Linked to match_id={db_match_id}")
+
                     trade_id = _write_trade(
                         conn, strategy_id, market_db_id, best["outcome_key"],
                         best["yes_p"], best["dc_prob"], best["edge_pp"], best["reasoning"],
+                        match_id=db_match_id,
                     )
                     if trade_id:
                         log.info(f"    → Trade #{trade_id} logged (best edge of {len(match_candidates)} candidates)")

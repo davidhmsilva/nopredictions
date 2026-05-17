@@ -132,8 +132,8 @@ export async function fetchPaperTrades(): Promise<PaperTrade[]> {
     .from('paper_trades')
     .select(`
       *,
-      pm_markets ( title ),
-      strategies ( name )
+      pm_markets!market_id ( title ),
+      strategies!strategy_id ( name )
     `)
     .order('placed_at', { ascending: false })
     .limit(30)

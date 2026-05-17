@@ -563,45 +563,9 @@ button { font-family: var(--font); }
   flex-direction: column;
 }
 
-.scanner-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 32px;
-  border-bottom: 1px solid var(--border);
-  max-width: 1100px;
-  margin: 0 auto;
-  width: 100%;
+@media (max-width: 768px) {
+  .scanner-page { padding-bottom: 60px; }
 }
-
-.scanner-logo {
-  display: flex;
-  flex-direction: column;
-  text-decoration: none;
-}
-
-.scanner-logo-title {
-  font-size: 18px;
-  font-weight: bold;
-  letter-spacing: 4px;
-  color: var(--white);
-}
-
-.scanner-logo-sub {
-  font-size: 9px;
-  letter-spacing: 3px;
-  color: var(--grey);
-  margin-top: 2px;
-}
-
-.scanner-back {
-  font-size: 12px;
-  color: var(--grey);
-  text-decoration: none;
-  letter-spacing: 1px;
-}
-
-.scanner-back:hover { color: var(--accent); }
 
 .scanner-main {
   max-width: 1100px;

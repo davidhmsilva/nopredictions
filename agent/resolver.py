@@ -1,11 +1,14 @@
 """
 Resolver — settles open paper trades after matches finish.
 
-For each open paper trade (result IS NULL):
-  1. Check if the linked match has a result (home_score IS NOT NULL)
-  2. Determine win/loss based on outcome label vs actual result
-  3. Fetch Pinnacle closing odds to calculate CLV
-  4. Update paper_trades.result, payout_units, clv, closing_price, resolved_at
+Two resolution paths:
+  Path A (match-based): trade has match_id → check if match has a result in DB
+  Path B (Polymarket-based): trade has market_id → check if PM market resolved via API
+
+For each resolved trade:
+  1. Determine win/loss
+  2. Fetch Pinnacle closing odds to calculate CLV (when available)
+  3. Update paper_trades.result, payout_units, clv, closing_price, resolved_at
 """
 
 from __future__ import annotations
@@ -17,13 +20,17 @@ from datetime import datetime, timezone
 
 import psycopg2
 import psycopg2.extras
+import requests
 
 import os
 from dotenv import load_dotenv
-from .tools.db import run_analysis_query, log_agent_run
+from .tools.db import run_analysis_query, log_agent_run, find_match_id
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'))
 DATABASE_URL = os.getenv('DATABASE_URL')
+GAMMA_API = 'https://gamma-api.polymarket.com'
+
+RESOLUTION_THRESHOLD = 0.99
 
 
 def _conn():
@@ -110,22 +117,165 @@ def _get_closing_odds_for_outcome(match_id: int, outcome_label: str) -> tuple[fl
     return raw_odds, closing_prob
 
 
+# ─── Polymarket resolution ────────────────────────────────────────────────────
+
+def _check_pm_resolution(external_id: str) -> str | None:
+    """
+    Fetch a Polymarket market and check if it resolved.
+    Returns 'won' if YES resolved, 'lost' if NO resolved, None if still open.
+
+    PM markets are binary Yes/No. outcomePrices[0] = Yes price, [1] = No price.
+    A resolved market has one price ≈ 1.0 and the other ≈ 0.0.
+    """
+    try:
+        r = requests.get(f'{GAMMA_API}/markets/{external_id}', timeout=10)
+        if not r.ok:
+            return None
+        data = r.json()
+    except Exception:
+        return None
+
+    if not data.get('closed'):
+        return None
+
+    raw_prices = data.get('outcomePrices')
+    if not raw_prices:
+        return None
+    prices = json.loads(raw_prices) if isinstance(raw_prices, str) else raw_prices
+    if len(prices) < 2:
+        return None
+
+    yes_price = float(prices[0])
+    no_price = float(prices[1])
+
+    if yes_price >= RESOLUTION_THRESHOLD:
+        return 'yes'
+    if no_price >= RESOLUTION_THRESHOLD:
+        return 'no'
+
+    return None
+
+
+# ─── Settle a single trade ────────────────────────────────────────────────────
+
+def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
+                  stake: float, match_id: int | None, outcome_label: str,
+                  label: str) -> dict | None:
+    if result == 'won':
+        payout = stake * (entry_odds - 1) if entry_odds else stake
+    else:
+        payout = -stake
+
+    closing_odds, closing_prob, clv = None, None, None
+    if match_id:
+        closing_odds, closing_prob = _get_closing_odds_for_outcome(match_id, outcome_label)
+        if entry_odds and closing_odds and closing_odds > 0:
+            clv = round((entry_odds / closing_odds) - 1, 4)
+
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE paper_trades SET
+            result       = %s,
+            payout_units = %s,
+            closing_price = %s,
+            clv          = %s,
+            resolved_at  = NOW()
+        WHERE id = %s
+    """, (result, round(payout, 4), closing_prob, clv, trade_id))
+    conn.commit()
+
+    sign = 'WIN' if result == 'won' else 'LOSS'
+    clv_str = f'CLV={clv:+.3f}' if clv is not None else 'CLV=n/a'
+    log.info(f'[resolver] #{trade_id} {sign} {label} | {outcome_label} | P&L={payout:+.2f}u | {clv_str}')
+
+    return {
+        'trade_id': trade_id,
+        'match': label,
+        'result': result,
+        'payout_units': round(payout, 4),
+        'clv': clv,
+    }
+
+
+# ─── Backfill match_id on unlinked trades ────────────────────────────────────
+
+def _extract_teams_from_title(title: str) -> tuple[str, str] | None:
+    m = re.match(r'(?:will\s+)?(.+?)\s+(?:vs?\.?|versus)\s+(.+?)(?:\s*[\-:\?]|$)', title, re.I)
+    if m:
+        home = re.sub(r'\s+(?:FC|CF|SC|AC|AFC)$', '', m.group(1).strip(), flags=re.I)
+        away = re.sub(r'\s+(?:FC|CF|SC|AC|AFC)$', '', m.group(2).strip(), flags=re.I)
+        return home, away
+    return None
+
+
+def _backfill_match_ids(conn):
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        SELECT pt.id AS trade_id, pm.title AS market_title,
+               pm.resolution_time, e.title AS event_title
+        FROM paper_trades pt
+        JOIN pm_markets pm ON pm.id = pt.market_id
+        LEFT JOIN LATERAL (
+            SELECT title FROM pm_markets
+            WHERE external_id = pm.external_id
+            LIMIT 1
+        ) e ON true
+        WHERE pt.match_id IS NULL AND pt.result IS NULL
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return
+
+    linked = 0
+    for row in rows:
+        title = row.get('event_title') or row.get('market_title') or ''
+        teams = _extract_teams_from_title(title)
+        if not teams:
+            continue
+
+        kickoff_date = None
+        rt = row.get('resolution_time')
+        if rt:
+            try:
+                if isinstance(rt, str):
+                    rt = datetime.fromisoformat(rt.replace('Z', '+00:00'))
+                kickoff_date = rt.date() if hasattr(rt, 'date') else None
+            except (ValueError, TypeError):
+                pass
+
+        mid = find_match_id(conn, teams[0], teams[1], kickoff_date, days_window=5)
+        if mid:
+            cur2 = conn.cursor()
+            cur2.execute("UPDATE paper_trades SET match_id = %s WHERE id = %s",
+                         (mid, row['trade_id']))
+            linked += 1
+
+    if linked:
+        conn.commit()
+        log.info(f'[resolver] Backfilled match_id on {linked} trade(s)')
+
+
 # ─── Main resolver ────────────────────────────────────────────────────────────
 
 def run() -> list[dict]:
     """
-    Resolve all open paper trades for matches that have finished.
-    Returns list of resolved trade summaries.
+    Resolve all open paper trades via two paths:
+      A) Match-based: trade has match_id + match has score in DB
+      B) Polymarket-based: trade has market_id → check PM API for resolution
     """
     log.info('[resolver] Checking for settled trades...')
 
     conn = _conn()
     resolved = []
+    resolved_ids = set()
 
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Find open trades where the linked match has a result
+        # ── Backfill: link unlinked trades to matches ──
+        _backfill_match_ids(conn)
+
+        # ── Path A: match-based resolution ──
         cur.execute("""
             SELECT
                 pt.id       AS trade_id,
@@ -136,7 +286,6 @@ def run() -> list[dict]:
                 pt.match_id,
                 m.home_score,
                 m.away_score,
-                m.kickoff_utc,
                 th.canonical_name AS home_team,
                 ta.canonical_name AS away_team
             FROM paper_trades pt
@@ -146,79 +295,87 @@ def run() -> list[dict]:
             WHERE pt.result IS NULL
               AND m.home_score IS NOT NULL
               AND m.away_score IS NOT NULL
-            ORDER BY m.kickoff_utc
         """)
-        open_trades = [dict(r) for r in cur.fetchall()]
 
-        if not open_trades:
-            log.info('[resolver] No settled trades to resolve')
-            log_agent_run('resolver', 'complete', 'Nothing to resolve')
-            return []
-
-        log.info(f'[resolver] {len(open_trades)} trade(s) to resolve')
-
-        for trade in open_trades:
-            tid          = trade['trade_id']
-            outcome_label = trade['outcome_label']
-            home_score   = trade['home_score']
-            away_score   = trade['away_score']
-            match_id     = trade['match_id']
-            entry_price  = float(trade['entry_price']) if trade['entry_price'] else None
-            stake        = float(trade['stake_units'])
-            home_team    = trade['home_team']
-            away_team    = trade['away_team']
-
-            result = _determine_result(outcome_label, home_score, away_score)
+        for trade in cur.fetchall():
+            trade = dict(trade)
+            tid = trade['trade_id']
+            result = _determine_result(trade['outcome_label'], trade['home_score'], trade['away_score'])
             if result is None:
-                log.warning(f'[resolver] Trade #{tid}: cannot parse outcome "{outcome_label}" — skipping')
+                log.warning(f'[resolver] Trade #{tid}: cannot parse outcome "{trade["outcome_label"]}" — skipping')
                 continue
 
-            # P&L
+            entry_price = float(trade['entry_price']) if trade['entry_price'] else None
             entry_odds = float(trade['entry_odds']) if trade['entry_odds'] else (1 / entry_price if entry_price else None)
-            if result == 'won':
-                payout = stake * (entry_odds - 1) if entry_odds else stake
+            label = f'{trade["home_team"]} vs {trade["away_team"]} ({trade["home_score"]}-{trade["away_score"]})'
+
+            info = _settle_trade(conn, tid, result, entry_odds,
+                                 float(trade['stake_units']), trade['match_id'],
+                                 trade['outcome_label'], label)
+            if info:
+                resolved.append(info)
+                resolved_ids.add(tid)
+
+        # ── Path B: Polymarket-based resolution ──
+        cur.execute("""
+            SELECT
+                pt.id       AS trade_id,
+                pt.outcome  AS outcome_label,
+                pt.entry_price,
+                pt.entry_odds,
+                pt.stake_units,
+                pt.match_id,
+                pt.market_id,
+                pm.external_id,
+                pm.title AS market_title
+            FROM paper_trades pt
+            JOIN pm_markets pm ON pm.id = pt.market_id
+            WHERE pt.result IS NULL
+        """)
+
+        pm_trades = [dict(r) for r in cur.fetchall()]
+        pm_trades = [t for t in pm_trades if t['trade_id'] not in resolved_ids]
+
+        if pm_trades:
+            log.info(f'[resolver] Checking {len(pm_trades)} trade(s) via Polymarket API...')
+
+        for trade in pm_trades:
+            tid = trade['trade_id']
+            ext_id = trade['external_id']
+            if not ext_id:
+                continue
+
+            pm_resolution = _check_pm_resolution(ext_id)
+            if pm_resolution is None:
+                continue
+
+            # Map PM yes/no resolution to won/lost based on trade position.
+            # Most trades are YES bets (e.g. "Will X win?" → outcome=home).
+            # Trades with "not" in the outcome are NO bets.
+            outcome_lower = (trade['outcome_label'] or '').lower()
+            is_no_bet = outcome_lower.startswith('not ') or outcome_lower.startswith('no ')
+            if is_no_bet:
+                result = 'won' if pm_resolution == 'no' else 'lost'
             else:
-                payout = -stake
+                result = 'won' if pm_resolution == 'yes' else 'lost'
 
-            # CLV
-            closing_odds, closing_prob = _get_closing_odds_for_outcome(match_id, outcome_label)
-            clv = None
-            if entry_odds and closing_odds and closing_odds > 0:
-                clv = round((entry_odds / closing_odds) - 1, 4)
+            entry_price = float(trade['entry_price']) if trade['entry_price'] else None
+            entry_odds = float(trade['entry_odds']) if trade['entry_odds'] else (1 / entry_price if entry_price else None)
+            label = trade['market_title'] or f'PM market {ext_id}'
 
-            # Update
-            update_cur = conn.cursor()
-            update_cur.execute("""
-                UPDATE paper_trades SET
-                    result       = %s,
-                    payout_units = %s,
-                    closing_price = %s,
-                    clv          = %s,
-                    resolved_at  = NOW()
-                WHERE id = %s
-            """, (result, round(payout, 4), closing_prob, clv, tid))
-            conn.commit()
+            info = _settle_trade(conn, tid, result, entry_odds,
+                                 float(trade['stake_units']), trade.get('match_id'),
+                                 trade['outcome_label'], label)
+            if info:
+                resolved.append(info)
 
-            sign = '✅' if result == 'won' else '❌'
-            clv_str = f'CLV={clv:+.3f}' if clv is not None else 'CLV=n/a'
-            log.info(
-                f'[resolver] #{tid} {sign} {home_team} vs {away_team} '
-                f'({home_score}-{away_score}) | {outcome_label} | '
-                f'P&L={payout:+.2f}u | {clv_str}'
-            )
-
-            resolved.append({
-                'trade_id':     tid,
-                'match':        f'{home_team} vs {away_team}',
-                'result':       result,
-                'payout_units': round(payout, 4),
-                'clv':          clv,
-            })
+        if not resolved:
+            log.info('[resolver] No settled trades to resolve')
 
         log_agent_run(
             'resolver', 'complete',
-            f'Resolved {len(resolved)} trade(s)',
-            {'resolved': resolved},
+            f'Resolved {len(resolved)} trade(s)' if resolved else 'Nothing to resolve',
+            {'resolved': resolved} if resolved else None,
         )
 
     finally:

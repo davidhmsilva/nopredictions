@@ -267,7 +267,7 @@ async function analyzeEvent(event: any) {
     }
 
     const edgePp = fairProb != null ? (fairProb - yesPrice) * 100 : null
-    const isEdge = edgePp != null && edgePp >= EDGE_THRESHOLD_PP
+    const sharpEdge = edgePp != null && edgePp >= EDGE_THRESHOLD_PP
 
     // DC model prob for this outcome
     let dcProb: number | null = null
@@ -284,13 +284,19 @@ async function analyzeEvent(event: any) {
       if (dcKey) dcProb = (dcModel as Record<string, number>)[dcKey] ?? null
     }
     const dcEdgePp = dcProb != null ? Math.round((dcProb - yesPrice) * 1000) / 10 : null
+    const isEdge = sharpEdge || (dcEdgePp != null && dcEdgePp >= EDGE_THRESHOLD_PP)
 
     let reasoning = ''
     if (fairProb != null && edgePp != null) {
       reasoning = edgeReasoning(yesPrice, fairProb, edgePp, outcome.label, home, away, EDGE_THRESHOLD_PP)
       if (source) reasoning = `[${source}] ${reasoning}`
+    } else if (dcProb != null && dcEdgePp != null) {
+      const dcAbs = Math.abs(dcEdgePp)
+      const dir = dcEdgePp > 0 ? 'underpriced' : 'overpriced'
+      reasoning = `[DC Model] ${outcome.label}: PM=${(yesPrice * 100).toFixed(1)}% vs Model=${(dcProb * 100).toFixed(1)}% — ${dir} by ${dcAbs.toFixed(1)}pp.`
+      if (dcAbs >= EDGE_THRESHOLD_PP) reasoning += ' Edge detected.'
     } else {
-      reasoning = `${outcome.label}: PM=${(yesPrice * 100).toFixed(1)}% — no sharp benchmark available for comparison.`
+      reasoning = `${outcome.label}: PM=${(yesPrice * 100).toFixed(1)}% — teams not in our model and no sharp odds available.`
     }
 
     pmMarkets.push({

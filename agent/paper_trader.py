@@ -1,21 +1,22 @@
 """
-Paper Trader — pre-match edge detector: Polymarket vs sharp consensus (today only).
+Paper Trader — pre-match edge detector: Polymarket vs fair-value benchmark (today only).
 
 Flow:
   1. Fetch today's football markets from Polymarket Gamma API
-  2. Fetch today's sharp odds from The Odds API (Pinnacle + Betfair, real-time)
-     → builds a lookup table: {(home_team, away_team) → sharp_probs}
-  3. For each PM market, fuzzy-match to an Odds API event
-  4. Compare PM implied probability vs sharp consensus probability
-  5. Edge = sharp_prob − pm_price (in percentage points)
-  6. Log paper_trade for edges > EDGE_THRESHOLD_PP
+  2. Determine fair-value source (tried in order of reliability):
+       a. The Odds API — live Pinnacle + Betfair sharp consensus  (EDGE_THRESHOLD_PP = 4pp)
+       b. DB Pinnacle closing odds — for fixtures already loaded in match_odds
+       c. Model Pricer  — Poisson form model from historical DB + ClubElo fallback
+                          (MODEL_EDGE_THRESHOLD_PP = 7pp — higher bar for model edges)
+  3. For each PM market, fuzzy-match to a fair-value event
+  4. Edge = fair_prob − pm_price (in percentage points)
+  5. Log paper_trade for edges > threshold (depends on source)
 
-No dependency on Stage A / DB fixtures being up to date.
-DB is only used to: store trades, load team aliases, check active strategies.
+DB is used to: store trades, load team aliases, check active strategies.
 
 Requirements:
-  THE_ODDS_API_KEY in ingest/.env  (free tier: 500 req/month; ~7 req per scan)
-  If key is missing: falls back to DB Pinnacle odds for any loaded fixtures.
+  THE_ODDS_API_KEY in ingest/.env  (optional — free at the-odds-api.com)
+  DATABASE_URL in ingest/.env       (required)
 
 Usage:
     python -m agent.paper_trader --dry-run      # scan + print, no DB writes
@@ -43,6 +44,8 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'))
 
+from .tools.db import find_match_id
+
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -53,31 +56,97 @@ GAMMA_API       = os.getenv('POLYMARKET_GAMMA_API', 'https://gamma-api.polymarke
 ODDS_API_KEY    = os.getenv('THE_ODDS_API_KEY', '')
 ODDS_API_BASE   = 'https://api.the-odds-api.com/v4'
 
-EDGE_THRESHOLD_PP = 4.0   # minimum edge in pp to log a trade
-STAKE_UNITS       = 1.0
-DAYS_AHEAD        = 0     # 0 = today only; use --days 1 to include tomorrow too
+EDGE_THRESHOLD_PP       = 4.0   # minimum edge (pp) for sharp-consensus edges (Odds API / DB Pinnacle)
+MODEL_EDGE_THRESHOLD_PP = 7.0   # higher bar for model-priced edges (less reliable than sharp)
+STAKE_UNITS             = 1.0
+DAYS_AHEAD              = 0     # 0 = today only; use --days 1 to include tomorrow too
+
+# Active fair-value source for the current scan (set at runtime)
+_FAIR_VALUE_SOURCE: str = 'unknown'   # 'odds_api' | 'db_pinnacle' | 'model'
 
 # Sharp books and their weights for consensus
 SHARP_BOOKS = {'pinnacle': 0.65, 'betfair_ex_eu': 0.35}
 
 # Football sport keys on The Odds API
 TARGET_SPORTS = [
+    # Top 5 European leagues
     'soccer_epl',
     'soccer_spain_la_liga',
     'soccer_germany_bundesliga',
     'soccer_italy_serie_a',
     'soccer_france_ligue_one',
+    # European cups
     'soccer_uefa_champs_league',
     'soccer_uefa_europa_league',
     'soccer_uefa_europa_conference_league',
+    # Second divisions
     'soccer_england_championship',
     'soccer_spain_segunda_division',
     'soccer_germany_bundesliga2',
     'soccer_italy_serie_b',
     'soccer_france_ligue_deux',
+    # Other European
     'soccer_netherlands_eredivisie',
     'soccer_portugal_primeira_liga',
+    'soccer_turkey_super_league',
+    'soccer_spl',                          # Scotland
+    'soccer_belgium_first_div',
+    'soccer_austria_bundesliga',
+    'soccer_netherlands_eredivisie',
+    'soccer_denmark_superliga',
+    'soccer_norway_eliteserien',
+    'soccer_sweden_allsvenskan',
+    'soccer_switzerland_superleague',
+    'soccer_poland_ekstraklasa',
+    'soccer_greece_super_league',
+    # South America
+    'soccer_conmebol_copa_libertadores',
+    'soccer_conmebol_copa_sudamericana',
+    'soccer_argentina_primera_division',
+    'soccer_brazil_campeonato',
+    # Asia
+    'soccer_japan_j_league',               # J1 — J2 not on Pinnacle
+    'soccer_china_superleague',
+    'soccer_korea_kleague1',
+    'soccer_saudi_arabia_pro_league',
+    # Americas
+    'soccer_usa_mls',
+    'soccer_mexico_ligamx',
 ]
+
+# Polymarket competition tag → Odds API sport key
+# Derived from PM event tags observed in production
+PM_TAG_TO_SPORT: dict[str, str] = {
+    'UCL':                          'soccer_uefa_champs_league',
+    'UEL':                          'soccer_uefa_europa_league',
+    'UECL':                         'soccer_uefa_europa_conference_league',
+    'Europa Conference League':     'soccer_uefa_europa_conference_league',
+    'Europa League':                'soccer_uefa_europa_league',
+    'bundesliga':                   'soccer_germany_bundesliga',
+    'Bundesliga 2':                 'soccer_germany_bundesliga2',
+    'La Liga':                      'soccer_spain_la_liga',
+    'La Liga 2':                    'soccer_spain_segunda_division',
+    'Ligue 1':                      'soccer_france_ligue_one',
+    'Serie B':                      'soccer_italy_serie_b',
+    'EFL Championship':             'soccer_efl_champ',
+    'Copa Libertadores':            'soccer_conmebol_copa_libertadores',
+    'Copa Sudamericana':            'soccer_conmebol_copa_sudamericana',
+    'Japan J League':               'soccer_japan_j_league',
+    'Chinese Super League':         'soccer_china_superleague',
+    'Saudi Professional League':    'soccer_saudi_arabia_pro_league',
+    'MLS':                          'soccer_usa_mls',
+    'Denmark Superliga':            'soccer_denmark_superliga',
+    'Norway Eliteserien':           'soccer_norway_eliteserien',
+    'Turkey Super League':          'soccer_turkey_super_league',
+    'Scottish Premiership':         'soccer_spl',
+    'Belgium First Division':       'soccer_belgium_first_div',
+    'K League 1':                   'soccer_korea_kleague1',
+    # Tags with no Pinnacle coverage — silently ignored
+    # 'Japan J2 League': None   (Pinnacle doesn't offer J2)
+    # 'Ukraine Premier Liha': None
+    # 'Liga Nacional Guatemala': None
+    # 'CONCACAF Champions Cup': None
+}
 
 # PM football detection keywords
 FOOTBALL_KEYWORDS = [
@@ -204,7 +273,7 @@ def _is_1x2_market(question: str) -> bool:
     # Reject derivative market types
     reject_patterns = [
         r'\bby\s+\d',        # "win by 2-0"
-        r'\b\d{1,2}\s*-\s*\d{1,2}\b(?![\d-])',  # scorelines like 2-0, 3-1 (not dates like 2026-05-02)
+        r'(?<!-)\b\d{1,2}\s*-\s*\d{1,2}\b(?![\d-])',  # scorelines like 2-0, 3-1 (not dates like 2026-05-03)
         r'exact',            # exact score
         r'halftime',         # half-time
         r'half.?time',
@@ -232,6 +301,26 @@ def _is_1x2_market(question: str) -> bool:
         r'^will .{2,50} (beat|defeat)',
     ]
     return any(re.search(p, q) for p in accept_patterns)
+
+
+def _is_totals_market(question: str) -> bool:
+    """Return True for Over/Under goals and Both Teams to Score markets."""
+    q = question.lower()
+    reject_patterns = [
+        r'corners',
+        r'cards',
+        r'halftime',
+        r'half.?time',
+        r'spread',
+        r'exact',
+        r'goalscorer',
+        r'anytime',
+        r'first goal',
+    ]
+    for pat in reject_patterns:
+        if re.search(pat, q):
+            return False
+    return bool(re.search(r'o/u\s*[\d.]|over\s*[\d.]|under\s*[\d.]|both teams to score|btts', q))
 
 
 def _extract_home_away_from_event_title(title: str) -> tuple[str, str] | None:
@@ -263,7 +352,9 @@ def fetch_pm_markets_today() -> list[dict]:
     if DAYS_AHEAD == 0:
         end_cutoff = now.replace(hour=23, minute=59, second=59, microsecond=999999)
     else:
-        end_cutoff = now + timedelta(days=DAYS_AHEAD)
+        end_cutoff = (now + timedelta(days=DAYS_AHEAD)).replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
 
     try:
         events = _get(f'{GAMMA_API}/events', params={
@@ -299,6 +390,10 @@ def fetch_pm_markets_today() -> list[dict]:
         teams = _extract_home_away_from_event_title(event_title)
         home_team = teams[0] if teams else None
         away_team = teams[1] if teams else None
+        event_tags = [
+            t.get('label', '') for t in event.get('tags', [])
+            if t.get('label') and t.get('label') not in ('Soccer', 'Sports', 'Games', 'sea')
+        ]
 
         for mkt in event.get('markets', []):
             if not mkt.get('active') or mkt.get('closed'):
@@ -310,8 +405,8 @@ def fetch_pm_markets_today() -> list[dict]:
                 continue
             seen.add(dedup_key)
 
-            # Only keep plain 1X2 markets — skip exact score, O/U, halftime, etc.
-            if not _is_1x2_market(question):
+            # Keep 1X2 markets + O/U totals + BTTS
+            if not (_is_1x2_market(question) or _is_totals_market(question)):
                 continue
 
             yes_p = _yes_price_from_market(mkt)
@@ -326,6 +421,7 @@ def fetch_pm_markets_today() -> list[dict]:
             mkt['_home_team']       = home_team
             mkt['_away_team']       = away_team
             mkt['_event_title']     = event_title
+            mkt['_event_tags']      = event_tags
             mkt['question']         = question
             markets_out.append(mkt)
 
@@ -337,13 +433,16 @@ def fetch_pm_markets_today() -> list[dict]:
 
 # ─── Step 2: Fetch today's sharp odds from The Odds API ───────────────────────
 
-def fetch_sharp_odds_today(team_hints: list[str] | None = None) -> dict[str, dict]:
+def fetch_sharp_odds_today(
+    team_hints: list[str] | None = None,
+    tag_hints:  list[str] | None = None,
+) -> dict[str, dict]:
     """
     Fetch pre-match h2h odds from The Odds API for today's events.
 
-    team_hints: list of team name fragments from PM markets — used to pick
-    only the relevant sports rather than scanning all 15 (saves API quota + time).
-    Falls back to all TARGET_SPORTS if no hints or no match found.
+    Uses PM event tags (tag_hints) as primary sport selector via PM_TAG_TO_SPORT,
+    then supplements with team-name heuristics (team_hints).
+    Falls back to all TARGET_SPORTS when neither gives coverage.
 
     Returns {} if no API key or quota exceeded.
     """
@@ -351,16 +450,28 @@ def fetch_sharp_odds_today(team_hints: list[str] | None = None) -> dict[str, dic
         log.warning('[paper_trader] THE_ODDS_API_KEY not set — cannot fetch live sharp odds')
         return {}
 
-    # Smart sport selection: map known team → sport key to avoid 15 sequential calls
+    found_sports: set[str] = set()
+
+    # 1. Tag-based selection (most reliable — directly from PM competition tags)
+    if tag_hints:
+        for tag in tag_hints:
+            sport = PM_TAG_TO_SPORT.get(tag)
+            if sport:
+                found_sports.add(sport)
+
+    # 2. Team-name heuristics (catches top clubs not tagged with a competition)
     TEAM_TO_SPORT: dict[str, str] = {
         'liverpool': 'soccer_epl', 'arsenal': 'soccer_epl', 'chelsea': 'soccer_epl',
         'manchester': 'soccer_epl', 'man city': 'soccer_epl', 'man utd': 'soccer_epl',
         'tottenham': 'soccer_epl', 'newcastle': 'soccer_epl', 'aston villa': 'soccer_epl',
+        'wolves': 'soccer_epl', 'brighton': 'soccer_epl', 'nottingham': 'soccer_epl',
         'real madrid': 'soccer_spain_la_liga', 'barcelona': 'soccer_spain_la_liga',
         'atletico': 'soccer_spain_la_liga', 'sevilla': 'soccer_spain_la_liga',
-        'villarreal': 'soccer_spain_la_liga', 'athletic': 'soccer_spain_la_liga',
+        'villarreal': 'soccer_spain_la_liga', 'betis': 'soccer_spain_la_liga',
+        'osasuna': 'soccer_spain_la_liga', 'levante': 'soccer_spain_la_liga',
         'bayern': 'soccer_germany_bundesliga', 'dortmund': 'soccer_germany_bundesliga',
         'leverkusen': 'soccer_germany_bundesliga', 'leipzig': 'soccer_germany_bundesliga',
+        'frankfurt': 'soccer_germany_bundesliga', 'freiburg': 'soccer_germany_bundesliga',
         'juventus': 'soccer_italy_serie_a', 'inter': 'soccer_italy_serie_a',
         'milan': 'soccer_italy_serie_a', 'napoli': 'soccer_italy_serie_a',
         'roma': 'soccer_italy_serie_a', 'lazio': 'soccer_italy_serie_a',
@@ -369,38 +480,34 @@ def fetch_sharp_odds_today(team_hints: list[str] | None = None) -> dict[str, dic
         'porto': 'soccer_portugal_primeira_liga', 'benfica': 'soccer_portugal_primeira_liga',
         'sporting': 'soccer_portugal_primeira_liga', 'braga': 'soccer_portugal_primeira_liga',
         'ajax': 'soccer_netherlands_eredivisie', 'psv': 'soccer_netherlands_eredivisie',
-        'barcelona': 'soccer_spain_la_liga', 'celta': 'soccer_spain_la_liga',
-        'espanyol': 'soccer_spain_la_liga', 'betis': 'soccer_spain_la_liga',
-        'valencia': 'soccer_spain_la_liga', 'sociedad': 'soccer_spain_la_liga',
-        'monaco': 'soccer_france_ligue_one', 'marseille': 'soccer_france_ligue_one',
-        'leverkusen': 'soccer_germany_bundesliga', 'frankfurt': 'soccer_germany_bundesliga',
+        'feyenoord': 'soccer_netherlands_eredivisie',
+        'flamengo': 'soccer_brazil_campeonato', 'palmeiras': 'soccer_brazil_campeonato',
+        'river': 'soccer_argentina_primera_division', 'boca': 'soccer_argentina_primera_division',
     }
-    # Champions League / Europa: always include when any major club is spotted
     CL_CLUBS = {'real madrid', 'barcelona', 'arsenal', 'liverpool', 'manchester',
-                'chelsea', 'tottenham', 'inter', 'milan', 'juventus', 'bayern', 'dortmund'}
+                'chelsea', 'tottenham', 'inter', 'milan', 'juventus', 'bayern', 'dortmund',
+                'atletico', 'psg', 'porto', 'benfica', 'ajax', 'psv', 'feyenoord'}
 
-    sports_to_fetch: list[str] = []
     if team_hints:
         hints_lower = ' '.join(h.lower() for h in team_hints)
-        found_sports: set[str] = set()
         for kw, sport in TEAM_TO_SPORT.items():
             if kw in hints_lower:
                 found_sports.add(sport)
         if any(c in hints_lower for c in CL_CLUBS):
             found_sports.add('soccer_uefa_champs_league')
             found_sports.add('soccer_uefa_europa_league')
-        sports_to_fetch = list(found_sports) if found_sports else TARGET_SPORTS[:5]
-    else:
-        sports_to_fetch = TARGET_SPORTS[:5]  # top 5 if no hints
+
+    # 3. Fallback: fetch everything in TARGET_SPORTS when hints give no coverage
+    sports_to_fetch = sorted(found_sports) if found_sports else TARGET_SPORTS
 
     log.info(f'[paper_trader] Fetching sharp odds ({len(sports_to_fetch)} sport(s))...')
     now = datetime.now(timezone.utc)
-    # For today-only mode: scan until end of today UTC (catches evening kickoffs)
-    # For multi-day mode: roll forward by DAYS_AHEAD days
     if DAYS_AHEAD == 0:
         cutoff = now.replace(hour=23, minute=59, second=59, microsecond=999999)
     else:
-        cutoff = now + timedelta(days=DAYS_AHEAD)
+        cutoff = (now + timedelta(days=DAYS_AHEAD)).replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
     lookup: dict[str, dict] = {}
     total_events = 0
 
@@ -409,7 +516,7 @@ def fetch_sharp_odds_today(team_hints: list[str] | None = None) -> dict[str, dic
             events = _get(f'{ODDS_API_BASE}/sports/{sport}/odds', params={
                 'apiKey':     ODDS_API_KEY,
                 'regions':    'eu',
-                'markets':    'h2h',
+                'markets':    'h2h,totals',
                 'bookmakers': ','.join(SHARP_BOOKS.keys()),
                 'oddsFormat': 'decimal',
             }, timeout=8)
@@ -450,34 +557,53 @@ def fetch_sharp_odds_today(team_hints: list[str] | None = None) -> dict[str, dic
 
 
 def _vig_remove(event: dict) -> dict | None:
-    """Vig-remove Pinnacle + Betfair odds → consensus implied probabilities."""
+    """Vig-remove Pinnacle + Betfair odds → consensus implied probabilities (h2h + totals)."""
     home = event.get('home_team', '')
     away = event.get('away_team', '')
     book_probs: dict[str, dict] = {}
+    book_totals: dict[str, dict] = {}
 
     for bk in event.get('bookmakers', []):
         key = bk['key']
         if key not in SHARP_BOOKS:
             continue
         for mkt in bk.get('markets', []):
-            if mkt['key'] != 'h2h':
-                continue
-            raw = {o['name']: float(o['price']) for o in mkt['outcomes']}
-            ho = raw.get(home)
-            do = raw.get('Draw')
-            ao = raw.get(away)
-            if not (ho and ao):
-                continue
-            h_imp = 1 / ho
-            d_imp = (1 / do) if do else 0.0
-            a_imp = 1 / ao
-            total = h_imp + d_imp + a_imp
-            book_probs[key] = {
-                'home': h_imp / total,
-                'draw': d_imp / total if do else None,
-                'away': a_imp / total,
-                'home_odds': ho, 'draw_odds': do, 'away_odds': ao,
-            }
+            if mkt['key'] == 'h2h':
+                raw = {o['name']: float(o['price']) for o in mkt['outcomes']}
+                ho = raw.get(home)
+                do = raw.get('Draw')
+                ao = raw.get(away)
+                if not (ho and ao):
+                    continue
+                h_imp = 1 / ho
+                d_imp = (1 / do) if do else 0.0
+                a_imp = 1 / ao
+                total = h_imp + d_imp + a_imp
+                book_probs[key] = {
+                    'home': h_imp / total,
+                    'draw': d_imp / total if do else None,
+                    'away': a_imp / total,
+                    'home_odds': ho, 'draw_odds': do, 'away_odds': ao,
+                }
+            elif mkt['key'] == 'totals':
+                over_o = under_o = point = None
+                for o in mkt['outcomes']:
+                    if o['name'] == 'Over':
+                        over_o = float(o['price'])
+                        point = float(o.get('point', 0))
+                    elif o['name'] == 'Under':
+                        under_o = float(o['price'])
+                if over_o and under_o and point:
+                    imp_over = 1 / over_o
+                    imp_under = 1 / under_o
+                    tot = imp_over + imp_under
+                    book_totals[key] = {
+                        'line': point,
+                        'over_prob': imp_over / tot,
+                        'under_prob': imp_under / tot,
+                        'over_odds': over_o,
+                        'under_odds': under_o,
+                    }
 
     if not book_probs:
         return None
@@ -496,19 +622,41 @@ def _vig_remove(event: dict) -> dict | None:
         return None
 
     total = (hp or 0) + (dp or 0) + (ap or 0)
-    return {
+    result = {
         'home_prob': hp / total,
         'draw_prob': dp / total if dp else None,
         'away_prob': ap / total,
         'sources':   book_probs,
     }
 
+    # Add totals consensus if available
+    if book_totals:
+        def wavg_totals(field):
+            vals = [(book_totals[k][field], SHARP_BOOKS[k])
+                    for k in book_totals if book_totals[k].get(field) is not None]
+            if not vals:
+                return None
+            return sum(v * w for v, w in vals) / sum(w for _, w in vals)
+
+        result['totals'] = {}
+        for bk_key, td in book_totals.items():
+            line = td['line']
+            line_key = f'{line:.1f}'.replace('.0', '.0')
+            if line_key not in result['totals']:
+                result['totals'][line_key] = {
+                    'line': line,
+                    'over_prob': wavg_totals('over_prob'),
+                    'under_prob': wavg_totals('under_prob'),
+                }
+
+    return result
+
 
 def _norm(s: str) -> str:
     """Normalise team name for matching: lowercase, strip punctuation, collapse spaces."""
     s = s.lower()
     s = re.sub(r'[^a-z0-9 ]', '', s)
-    s = re.sub(r'\b(fc|cf|sc|ac|ss|afc|bsc|1\.|vfb|vfl|rb|sv|fk|sk|bv|borussia)\b', '', s)
+    s = re.sub(r'\b(fc|cf|sc|ac|ss|afc|bsc|1\.|vfb|vfl|rb|sv|fk|sk|bv|borussia|club|de|da|do|dos|la|el|al|cd|ca|cs)\b', '', s)
     return re.sub(r'\s+', ' ', s).strip()
 
 
@@ -572,11 +720,11 @@ def _classify_outcome(title: str, home: str, away: str) -> tuple[str, str] | Non
     if 'draw' in t and 'no draw' not in t and 'spread' not in t:
         return ('draw', 'Draw')
 
-    if 'over' in t and '2.5' in t:  return ('over_2.5', 'Over 2.5 goals')
-    if 'under' in t and '2.5' in t: return ('under_2.5', 'Under 2.5 goals')
-    if 'over' in t and '1.5' in t:  return ('over_1.5', 'Over 1.5 goals')
-    if 'under' in t and '1.5' in t: return ('under_1.5', 'Under 1.5 goals')
-    if 'over' in t and '3.5' in t:  return ('over_3.5', 'Over 3.5 goals')
+    ou_match = re.search(r'(?:o/u|over|under)\s*([\d.]+)', t)
+    if ou_match:
+        line = ou_match.group(1)
+        direction = 'under' if 'under' in t else 'over'
+        return (f'{direction}_{line}', f'{direction.title()} {line} goals')
     if 'both teams to score' in t or 'btts' in t:
         return ('btts_no' if 'no' in t.split('btts')[-1] else 'btts_yes',
                 'BTTS No' if 'no' in t.split('btts')[-1] else 'BTTS Yes')
@@ -645,7 +793,22 @@ def _sharp_prob_for_outcome(outcome_key: str, event: dict) -> float | None:
     if outcome_key == 'home':  return event.get('home_prob')
     if outcome_key == 'draw':  return event.get('draw_prob')
     if outcome_key == 'away':  return event.get('away_prob')
-    # O/U and BTTS not available from h2h market — skip for now
+
+    # Totals: match PM line to sharp line (exact match only)
+    totals = event.get('totals', {})
+    if not totals:
+        return None
+
+    m = re.match(r'(over|under)_([\d.]+)', outcome_key)
+    if m:
+        direction = m.group(1)  # 'over' or 'under'
+        pm_line = m.group(2)    # e.g. '2.5'
+        for line_key, td in totals.items():
+            sharp_line = td['line']
+            if float(pm_line) == sharp_line:
+                return td[f'{direction}_prob']
+        return None
+
     return None
 
 
@@ -709,7 +872,7 @@ def _upsert_pm_market(conn, market: dict) -> int | None:
 
 def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
                        entry_price, sharp_prob, sharp_sources,
-                       edge_pp, reasoning) -> int | None:
+                       edge_pp, reasoning, match_id=None) -> int | None:
     cur = conn.cursor()
     # Dedup: skip same market+outcome logged in last 30 min
     if market_db_id:
@@ -724,13 +887,13 @@ def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
     entry_odds = round(1 / entry_price, 4) if entry_price > 0 else None
     cur.execute("""
         INSERT INTO paper_trades (
-            strategy_id, market_id, outcome, entry_price, entry_odds,
+            strategy_id, market_id, match_id, outcome, entry_price, entry_odds,
             model_probability, sharp_consensus_price, sharp_consensus_sources,
             expected_edge, confidence, stake_units, reasoning, placed_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, NOW())
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, NOW())
         RETURNING id
     """, (
-        strategy_id, market_db_id, outcome,
+        strategy_id, market_db_id, match_id, outcome,
         entry_price, entry_odds,
         sharp_prob, sharp_prob,
         json.dumps(sharp_sources, default=_serial),
@@ -812,25 +975,52 @@ def run(dry_run: bool = False) -> list[dict]:
         return []
 
     # 2. Fetch today's sharp odds
-    #    Extract team name hints from PM market titles to fetch only relevant sports
+    #    Extract team name hints + competition tags from PM markets
     team_hints = [
         market.get('question') or market.get('title') or ''
         for market in pm_markets
     ]
+    tag_hints: list[str] = []
+    for market in pm_markets:
+        tag_hints.extend(market.get('_event_tags', []))
 
-    #    Try The Odds API first; fall back to DB Pinnacle odds
-    sharp_lookup = fetch_sharp_odds_today(team_hints=team_hints)
-    if not sharp_lookup:
+    #    Try The Odds API first; fall back to DB Pinnacle odds; then model pricer
+    global _FAIR_VALUE_SOURCE  # noqa: PLW0603
+    sharp_lookup = fetch_sharp_odds_today(team_hints=team_hints, tag_hints=tag_hints)
+    if sharp_lookup:
+        _FAIR_VALUE_SOURCE = 'odds_api'
+    else:
         log.info('[paper_trader] Odds API unavailable — trying DB fallback...')
         conn_temp = _conn()
         sharp_lookup = _db_sharp_odds_today(conn_temp)
         conn_temp.close()
         if sharp_lookup:
             _cache_sharp_odds(sharp_lookup)
+            _FAIR_VALUE_SOURCE = 'db_pinnacle'
+
+    if not sharp_lookup:
+        log.info('[paper_trader] No sharp odds from API or DB — trying model pricer...')
+        try:
+            from . import model_pricer as _mp
+            conn_model = _conn()
+            try:
+                sharp_lookup = _mp.build_lookup(conn_model, pm_markets)
+            finally:
+                conn_model.close()
+            if sharp_lookup:
+                _cache_sharp_odds(sharp_lookup)
+                _FAIR_VALUE_SOURCE = 'model'
+                log.info(
+                    f'[paper_trader] Model pricer active — '
+                    f'{len(set(id(v) for v in sharp_lookup.values()))} matches priced '
+                    f'(threshold raised to {MODEL_EDGE_THRESHOLD_PP}pp)'
+                )
+        except Exception as e:
+            log.error(f'[paper_trader] Model pricer error: {e}')
 
     if not sharp_lookup:
         log.warning(
-            '[paper_trader] No sharp odds available.\n'
+            '[paper_trader] No fair-value source available.\n'
             '  → Set THE_ODDS_API_KEY in ingest/.env (free at the-odds-api.com)\n'
             '  → Or run: python3 ingest/stage_a_football_data.py --seasons 2025-26'
         )
@@ -843,7 +1033,21 @@ def run(dry_run: bool = False) -> list[dict]:
     try:
         strategy_id = None if dry_run else _get_or_create_scan_strategy(conn)
 
-        log.info(f'[paper_trader] Scanning {len(pm_markets)} PM markets...\n')
+        # Use higher threshold when fair-value comes from our own model
+        active_threshold = (
+            MODEL_EDGE_THRESHOLD_PP if _FAIR_VALUE_SOURCE == 'model'
+            else EDGE_THRESHOLD_PP
+        )
+        source_label = {
+            'odds_api':   'Pinnacle+Betfair (Odds API)',
+            'db_pinnacle': 'Pinnacle (DB closing)',
+            'model':      'Poisson form model',
+        }.get(_FAIR_VALUE_SOURCE, 'unknown')
+
+        log.info(
+            f'[paper_trader] Scanning {len(pm_markets)} PM markets '
+            f'[source={_FAIR_VALUE_SOURCE}, threshold={active_threshold}pp]...\n'
+        )
 
         for market in pm_markets:
             title     = market.get('question') or market.get('title') or ''
@@ -899,12 +1103,9 @@ def run(dry_run: bool = False) -> list[dict]:
             edge_pp_yes = (sharp_prob - yes_price) * 100
             sides.append(('yes', yes_price, sharp_prob, outcome_label, edge_pp_yes))
 
-            # No side — only for binary outcome markets (home/draw/away win)
-            # "No" on "Will X win?" = draw + loss combined
+            # No side — for 1X2 and totals binary markets
             no_price = market.get('_no_price') or _no_price(market)
-            if no_price is not None and 0.03 < no_price < 0.97 and outcome_key in ('home', 'away', 'draw'):
-                # Sharp prob for the "No" side = 1 - sharp_prob (for home/away/draw)
-                # For home: no_sharp = 1 - home_prob = draw_prob + away_prob
+            if no_price is not None and 0.03 < no_price < 0.97:
                 no_sharp_prob = 1.0 - sharp_prob
                 no_label = f'NOT {outcome_label}'
                 edge_pp_no = (no_sharp_prob - no_price) * 100
@@ -913,26 +1114,27 @@ def run(dry_run: bool = False) -> list[dict]:
             for (side, pm_p, sh_p, label, edge_pp) in sides:
                 pm_odds    = round(1 / pm_p, 3)
                 sharp_odds = round(1 / sh_p, 3)
-                sign = ('✅' if edge_pp >= EDGE_THRESHOLD_PP else
+                sign = ('✅' if edge_pp >= active_threshold else
                         '~' if edge_pp > 1 else
                         '·' if abs(edge_pp) <= 1 else '❌')
 
                 log.info(f'  {sign} {home} vs {away}  [{kickoff_str} UTC]')
                 log.info(f'     {label} [{side.upper()}]: PM={pm_p:.3f} ({pm_odds}x) | '
-                         f'Sharp={sh_p:.3f} ({sharp_odds}x) | Edge={edge_pp:+.2f}pp')
+                         f'Model={sh_p:.3f} ({sharp_odds}x) | Edge={edge_pp:+.2f}pp')
 
-                if edge_pp < EDGE_THRESHOLD_PP:
+                if edge_pp < active_threshold:
                     continue
 
                 # 8. Build reasoning + log trade
                 reasoning = (
-                    f'Pre-match PM edge.\n'
+                    f'Pre-match PM edge ({source_label}).\n'
                     f'Match: {home} vs {away}  [kickoff {kickoff_str} UTC]\n'
                     f'Selection: {label} [{side.upper()}]\n\n'
-                    f'PM price:   {pm_p:.4f}  (odds {pm_odds})\n'
-                    f'Sharp:      {sh_p:.4f}  (odds {sharp_odds})\n'
-                    f'Edge:       +{edge_pp:.2f}pp\n'
-                    f'Sources:    {source_str}\n\n'
+                    f'PM price:    {pm_p:.4f}  (odds {pm_odds})\n'
+                    f'Fair value:  {sh_p:.4f}  (odds {sharp_odds})\n'
+                    f'Edge:        +{edge_pp:.2f}pp\n'
+                    f'Source:      {source_str}\n'
+                    f'Threshold:   {active_threshold}pp\n\n'
                     f'PM market:  {title}\n'
                     f'Resolves:   {res_time.strftime("%Y-%m-%d %H:%M UTC")}\n'
                 )
@@ -954,10 +1156,14 @@ def run(dry_run: bool = False) -> list[dict]:
 
                 if not dry_run:
                     market_db_id = _upsert_pm_market(conn, market)
+                    kickoff_dt = event.get('commence_time')
+                    kd = kickoff_dt.date() if hasattr(kickoff_dt, 'date') else None
+                    db_match_id = find_match_id(conn, home, away, kd)
                     trade_id = _write_paper_trade(
                         conn, strategy_id, market_db_id,
                         label, pm_p, sh_p,
                         sources, edge_pp, reasoning,
+                        match_id=db_match_id,
                     )
                     if trade_id:
                         log.info(f'     → Paper trade #{trade_id} logged ✅')

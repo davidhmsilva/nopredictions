@@ -1,17 +1,15 @@
 import type { Section } from '../lib/types'
 
 const NAV_LINKS: { id: Section; label: string }[] = [
-  { id: 'strategies', label: 'AGENT' },
-  { id: 'leaderboard', label: 'LEADERBOARD' },
+  { id: 'agent', label: 'AGENT' },
   { id: 'newsletter', label: 'NEWSLETTER' },
   { id: 'about', label: 'ABOUT' },
 ]
 
 const MOBILE_NAV: { id: Section; icn: string; label: string }[] = [
-  { id: 'home',        icn: '◆', label: 'HOME' },
-  { id: 'strategies',  icn: '◇', label: 'AGENT' },
-  { id: 'leaderboard', icn: '▲', label: 'RANK' },
-  { id: 'about',       icn: '◌', label: 'ABOUT' },
+  { id: 'home',   icn: '◆', label: 'HOME' },
+  { id: 'agent',  icn: '◇', label: 'AGENT' },
+  { id: 'about',  icn: '◌', label: 'ABOUT' },
 ]
 
 const SCANNER_LINK = { icn: '⊕', label: 'SCAN' }
