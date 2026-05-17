@@ -339,41 +339,45 @@ def _extract_home_away_from_event_title(title: str) -> tuple[str, str] | None:
 
 def fetch_pm_markets_today() -> list[dict]:
     """
-    Fetch today's soccer markets from Polymarket via /events?tag_slug=soccer.
-    Uses the events endpoint which correctly returns all football markets including
-    negRisk/restricted ones that don't appear in the general /markets endpoint.
+    Fetch today's match markets from Polymarket via /events with date-range filter.
+
+    IMPORTANT: The Gamma API only returns restricted/negRisk events (which includes
+    all individual match markets) when end_date_min/max use simple YYYY-MM-DD format.
+    ISO timestamps cause the API to silently exclude these events.
+    The tag_slug parameter is also unreliable and omitted.
+
+    Paginates through all results (100 per page) to capture the full set.
 
     Returns flat list of market dicts, each enriched with:
       _yes_price, _no_price, _resolution_time, _home_team, _away_team, _event_title
     """
-    log.info('[paper_trader] Fetching Polymarket soccer events...')
+    log.info('[paper_trader] Fetching Polymarket match events...')
 
     now = datetime.now(timezone.utc)
-    if DAYS_AHEAD == 0:
-        end_cutoff = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-    else:
-        end_cutoff = (now + timedelta(days=DAYS_AHEAD)).replace(
-            hour=23, minute=59, second=59, microsecond=999999
-        )
+    date_min = now.strftime('%Y-%m-%d')
+    end_cutoff = now + timedelta(days=max(DAYS_AHEAD, 1))
+    date_max = end_cutoff.strftime('%Y-%m-%d')
 
-    try:
-        events = _get(f'{GAMMA_API}/events', params={
-            'tag_slug':    'soccer',
-            'closed':      'false',
-            'active':      'true',
-            'limit':       200,
-            'order':       'volume24hr',
-            'ascending':   'false',
-            'end_date_min': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'end_date_max': end_cutoff.strftime('%Y-%m-%dT%H:%M:%SZ'),
-        })
-    except RuntimeError as e:
-        log.error(f'[paper_trader] Gamma /events error: {e}')
-        return []
+    events: list[dict] = []
+    page_size = 100
+    for offset in range(0, 2000, page_size):
+        try:
+            page = _get(f'{GAMMA_API}/events', params={
+                'closed':       'false',
+                'active':       'true',
+                'limit':        page_size,
+                'offset':       offset,
+                'end_date_min': date_min,
+                'end_date_max': date_max,
+            })
+        except RuntimeError as e:
+            log.error(f'[paper_trader] Gamma /events error at offset {offset}: {e}')
+            break
+        if not isinstance(page, list) or not page:
+            break
+        events.extend(page)
 
-    if not isinstance(events, list):
-        log.error(f'[paper_trader] Unexpected /events response type: {type(events)}')
-        return []
+    log.info(f'[paper_trader] Fetched {len(events)} events across date range {date_min} → {date_max}')
 
     markets_out: list[dict] = []
     seen: set[tuple] = set()   # (event_id, question) dedup
@@ -383,7 +387,7 @@ def fetch_pm_markets_today() -> list[dict]:
         end_date    = _parse_dt(event.get('endDate'))
         event_id    = event.get('id', '')
 
-        if end_date is None or end_date < now:
+        if end_date is None or end_date < now - timedelta(hours=3):
             continue
 
         # Extract home/away team names directly from the event title
@@ -423,6 +427,11 @@ def fetch_pm_markets_today() -> list[dict]:
             mkt['_event_title']     = event_title
             mkt['_event_tags']      = event_tags
             mkt['question']         = question
+            mkt['_live']            = event.get('live', False)
+            mkt['_ended']           = event.get('ended', False)
+            mkt['_score']           = event.get('score')
+            mkt['_elapsed']         = event.get('elapsed')
+            mkt['_period']          = event.get('period')
             markets_out.append(mkt)
 
     window = 'today' if DAYS_AHEAD == 0 else f'next {DAYS_AHEAD} day(s)'
@@ -885,6 +894,7 @@ def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
             return None
 
     entry_odds = round(1 / entry_price, 4) if entry_price > 0 else None
+    sharp_prob_f = float(sharp_prob) if sharp_prob is not None else None
     cur.execute("""
         INSERT INTO paper_trades (
             strategy_id, market_id, match_id, outcome, entry_price, entry_odds,
@@ -894,8 +904,8 @@ def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
         RETURNING id
     """, (
         strategy_id, market_db_id, match_id, outcome,
-        entry_price, entry_odds,
-        sharp_prob, sharp_prob,
+        float(entry_price), entry_odds,
+        sharp_prob_f, sharp_prob_f,
         json.dumps(sharp_sources, default=_serial),
         round(edge_pp / 100, 6),
         min(round(edge_pp / 15.0, 3), 1.0),

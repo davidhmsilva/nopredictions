@@ -122,10 +122,11 @@ def _get_closing_odds_for_outcome(match_id: int, outcome_label: str) -> tuple[fl
 def _check_pm_resolution(external_id: str) -> str | None:
     """
     Fetch a Polymarket market and check if it resolved.
-    Returns 'won' if YES resolved, 'lost' if NO resolved, None if still open.
+    Returns 'yes' if YES resolved, 'no' if NO resolved, None if still open.
 
-    PM markets are binary Yes/No. outcomePrices[0] = Yes price, [1] = No price.
-    A resolved market has one price ≈ 1.0 and the other ≈ 0.0.
+    PM sports markets often reach extreme prices (0.00/1.00) before being
+    officially marked ``closed``.  We treat a market as resolved when it is
+    either closed OR when both the game has ended and prices hit 0/1.
     """
     try:
         r = requests.get(f'{GAMMA_API}/markets/{external_id}', timeout=10)
@@ -133,9 +134,6 @@ def _check_pm_resolution(external_id: str) -> str | None:
             return None
         data = r.json()
     except Exception:
-        return None
-
-    if not data.get('closed'):
         return None
 
     raw_prices = data.get('outcomePrices')
@@ -147,6 +145,12 @@ def _check_pm_resolution(external_id: str) -> str | None:
 
     yes_price = float(prices[0])
     no_price = float(prices[1])
+
+    is_closed = data.get('closed', False)
+    prices_terminal = yes_price >= RESOLUTION_THRESHOLD or no_price >= RESOLUTION_THRESHOLD
+
+    if not is_closed and not prices_terminal:
+        return None
 
     if yes_price >= RESOLUTION_THRESHOLD:
         return 'yes'
@@ -162,9 +166,9 @@ def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
                   stake: float, match_id: int | None, outcome_label: str,
                   label: str) -> dict | None:
     if result == 'won':
-        payout = stake * (entry_odds - 1) if entry_odds else stake
+        payout = stake * entry_odds if entry_odds else stake
     else:
-        payout = -stake
+        payout = 0.0
 
     closing_odds, closing_prob, clv = None, None, None
     if match_id:

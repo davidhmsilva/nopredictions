@@ -457,36 +457,63 @@ def _fetch_scores_odds_api() -> dict[str, dict]:
     return scores
 
 
-# ─── PM score extraction (zero API cost fallback) ────────────────────────────
+# ─── PM score extraction (primary source — zero API cost) ────────────────────
 
 def _get_live_scores_from_pm(pm_markets: list[dict]) -> dict[str, dict]:
     """
-    Extract live score + minute from PM market metadata.
-    Best-effort fallback when no external live API is available.
+    Extract live score + minute directly from PM event data.
+
+    The Gamma API provides ``score``, ``elapsed``, ``period``, ``live``,
+    and ``ended`` fields on match events.  These are passed through by
+    ``fetch_pm_markets_today`` as ``_score``, ``_elapsed``, etc.
+
+    This is the primary live-score source — it requires no external API
+    key and covers every market PM has open.
     """
-    scores = {}
-    now = datetime.now(timezone.utc)
+    scores: dict[str, dict] = {}
 
     for mkt in pm_markets:
         event_title = mkt.get('_event_title', '')
         if not event_title or event_title in scores:
             continue
 
-        commence = mkt.get('_commence_time')
-        if commence and isinstance(commence, datetime):
-            elapsed = (now - commence).total_seconds() / 60
-            if 0 <= elapsed <= 105:
-                scores[event_title] = {
-                    'home_goals': None,
-                    'away_goals': None,
-                    'minute': int(min(elapsed, 90)),
-                    'score_known': False,
-                    'home_reds': 0,
-                    'away_reds': 0,
-                    'home_shots_on': None,
-                    'away_shots_on': None,
-                    'source': 'pm-inferred',
-                }
+        if not mkt.get('_live') or mkt.get('_ended'):
+            continue
+
+        raw_score = mkt.get('_score')
+        elapsed = mkt.get('_elapsed')
+        if not raw_score or not elapsed:
+            continue
+        try:
+            elapsed = int(elapsed)
+        except (ValueError, TypeError):
+            continue
+
+        parts = str(raw_score).split('-')
+        if len(parts) != 2:
+            continue
+        try:
+            hg, ag = int(parts[0].strip()), int(parts[1].strip())
+        except (ValueError, TypeError):
+            continue
+
+        home_pm = mkt.get('_home_team', '')
+        away_pm = mkt.get('_away_team', '')
+
+        match_data = {
+            'home_goals': hg,
+            'away_goals': ag,
+            'minute': elapsed,
+            'score_known': True,
+            'home_reds': 0,
+            'away_reds': 0,
+            'home_shots_on': None,
+            'away_shots_on': None,
+            'source': 'pm-live',
+            'period': mkt.get('_period', ''),
+        }
+        for key in _match_keys(home_pm, away_pm):
+            scores[key] = match_data
 
     return scores
 
@@ -582,21 +609,43 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
         log.info('[poisson] No DC model and no cached sharp odds — cannot price')
         return []
 
-    # 3. Get live scores
-    live_scores = _fetch_live_scores_api()
+    # 3. Fetch current PM markets (includes live score data from Gamma API)
+    pm_markets = fetch_pm_markets_today()
+    if not pm_markets:
+        log.info('[poisson] No PM markets available')
+        return []
+
+    # 4. Build live scores — PM event data is the primary source (zero API cost,
+    #    covers every match PM has open).  api-football enriches with red cards
+    #    and shots when available.
+    live_scores = _get_live_scores_from_pm(pm_markets)
+
+    # Enrich with api-football data (red cards, shots on target)
+    api_scores = _fetch_live_scores_api()
+    for key, api_data in api_scores.items():
+        if key in live_scores:
+            live_scores[key]['home_reds'] = api_data.get('home_reds', 0)
+            live_scores[key]['away_reds'] = api_data.get('away_reds', 0)
+            live_scores[key]['home_shots_on'] = api_data.get('home_shots_on')
+            live_scores[key]['away_shots_on'] = api_data.get('away_shots_on')
+            if api_data.get('source') == 'api-football':
+                live_scores[key]['minute'] = api_data['minute']
+        else:
+            live_scores[key] = api_data
+
     if not live_scores:
-        log.info('[poisson] No live scores available — skipping in-play scan')
-        log.info('[poisson] Set FOOTBALL_API_KEY or THE_ODDS_API_KEY in ingest/.env')
+        log.info('[poisson] No live matches found — skipping in-play scan')
         return []
 
     log.info(f'[poisson] {len(live_scores)} live match(es) found')
     for key, sd in live_scores.items():
         reds_info = ''
         if sd.get('home_reds') or sd.get('away_reds'):
-            reds_info = f'  🟥 home={sd["home_reds"]} away={sd["away_reds"]}'
-        log.info(f'  • {key}: {sd["home_goals"]}-{sd["away_goals"]} ({sd["minute"]}\'){reds_info}')
+            reds_info = f'  red H={sd["home_reds"]} A={sd["away_reds"]}'
+        src = sd.get('source', '?')
+        log.info(f'  {key}: {sd["home_goals"]}-{sd["away_goals"]} ({sd["minute"]}\') [{src}]{reds_info}')
 
-    # 3b. Poll live tracker for pressure signals (if available)
+    # 4b. Poll live tracker for pressure signals (if available)
     pressure_signals = {}
     edge_signals_by_match = {}
     if tracker:
@@ -608,18 +657,12 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
                 if edges:
                     match_key = f'{_norm(sig.home)}_{_norm(sig.away)}'
                     edge_signals_by_match[match_key] = edges
-                    log.info(f'  📊 {sig.home} vs {sig.away}: danger H={sig.home_danger_index:.0f} '
+                    log.info(f'  {sig.home} vs {sig.away}: danger H={sig.home_danger_index:.0f} '
                              f'A={sig.away_danger_index:.0f} | {len(edges)} signal(s)')
                     for es in edges:
-                        log.info(f'     🎯 [{es.signal_type}] {es.direction} conf={es.confidence:.0%}')
+                        log.info(f'     [{es.signal_type}] {es.direction} conf={es.confidence:.0%}')
         except Exception as e:
             log.warning(f'[poisson] Tracker error (non-fatal): {e}')
-
-    # 4. Fetch current PM markets
-    pm_markets = fetch_pm_markets_today()
-    if not pm_markets:
-        log.info('[poisson] No PM markets available')
-        return []
 
     # 5. Match PM markets to live scores and price
     conn = _conn() if not dry_run else None

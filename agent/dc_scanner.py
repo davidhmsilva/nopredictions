@@ -266,20 +266,35 @@ def _classify_market(question: str, home: str, away: str) -> Optional[str]:
 # ── Fetch PM events ───────────────────────────────────────────────────────────
 
 def _fetch_pm_events(days_ahead: int) -> list[dict]:
+    """Paginate Gamma /events using simple YYYY-MM-DD dates.
+
+    The Gamma API silently excludes restricted/negRisk events (all individual
+    match markets) when end_date_min/max use ISO timestamps.  Simple date
+    strings work correctly.  tag_slug is unreliable and omitted.
+    """
     now = datetime.now(timezone.utc)
-    end = now + timedelta(days=days_ahead)
-    resp = requests.get(f"{GAMMA_API}/events", params={
-        "tag_slug": "soccer",
-        "closed": "false",
-        "active": "true",
-        "limit": "200",
-        "order": "volume24hr",
-        "ascending": "false",
-        "end_date_min": now.isoformat(),
-        "end_date_max": end.isoformat(),
-    }, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    date_min = now.strftime("%Y-%m-%d")
+    date_max = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+    events: list[dict] = []
+    page_size = 100
+    for offset in range(0, 2000, page_size):
+        resp = requests.get(f"{GAMMA_API}/events", params={
+            "closed": "false",
+            "active": "true",
+            "limit": page_size,
+            "offset": offset,
+            "end_date_min": date_min,
+            "end_date_max": date_max,
+        }, timeout=15)
+        resp.raise_for_status()
+        page = resp.json()
+        if not isinstance(page, list) or not page:
+            break
+        events.extend(page)
+
+    log.info(f"Fetched {len(events)} PM events ({date_min} → {date_max})")
+    return events
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
