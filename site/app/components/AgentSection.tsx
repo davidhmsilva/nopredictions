@@ -33,7 +33,7 @@ export function AgentSection({
   )
   const settled = trades.filter((t) => !!t.resolved_at)
   const recentSettled = settled.slice(0, 10)
-  const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)
+  const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
   const wins = settled.filter(t => t.result === 'won').length
   const winRate = settled.length > 0 ? (wins / settled.length) * 100 : 0
 

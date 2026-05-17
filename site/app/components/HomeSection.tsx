@@ -25,7 +25,7 @@ export function HomeSection({
     .sort((a, b) => (b.total_pnl ?? 0) - (a.total_pnl ?? 0))
     .slice(0, 3)
   const settledTrades = trades.filter(t => !!t.resolved_at)
-  const totalPnl = settledTrades.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)
+  const totalPnl = settledTrades.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
   const wins = settledTrades.filter(t => t.result === 'won').length
   const winRate = settledTrades.length > 0 ? (wins / settledTrades.length) * 100 : 0
   const activeTrades = trades.filter(t => !t.resolved_at)

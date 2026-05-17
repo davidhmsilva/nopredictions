@@ -14,7 +14,7 @@ export function Ticker({ trades }: { trades?: PaperTrade[] }) {
   const open = trades?.filter(t => !t.resolved_at) ?? []
   const wins = settled.filter(t => t.result === 'won').length
   const losses = settled.length - wins
-  const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0), 0)
+  const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
   const pnlStr = settled.length > 0
     ? `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}u`
     : '—'
