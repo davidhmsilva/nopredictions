@@ -137,7 +137,7 @@ export async function fetchPaperTrades(): Promise<PaperTrade[]> {
       strategies!strategy_id ( name )
     `)
     .order('placed_at', { ascending: false })
-    .limit(30)
+    .limit(200)
 
   if (error) {
     console.error('fetchPaperTrades error:', error)

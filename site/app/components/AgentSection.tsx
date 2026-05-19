@@ -14,22 +14,8 @@ export function AgentSection({
 }) {
   if (loading) return <SectionWrap><Spinner /></SectionWrap>
 
-  // Deduplicate active trades — keep one per game (highest edge)
-  function matchKey(t: PaperTrade): string {
-    const m = (t.reasoning ?? '').match(/^DC Model:\s*(.+?)\s*—/)
-    return m ? m[1].toLowerCase().trim() : `id:${t.id}`
-  }
-  const activeAll = trades.filter((t) => !t.resolved_at)
-  const bestByMatch = new Map<string, PaperTrade>()
-  for (const t of activeAll) {
-    const key = matchKey(t)
-    const existing = bestByMatch.get(key)
-    if (!existing || Number(t.expected_edge) > Number(existing.expected_edge)) {
-      bestByMatch.set(key, t)
-    }
-  }
-  const active = Array.from(bestByMatch.values()).sort(
-    (a, b) => new Date(b.placed_at).getTime() - new Date(a.placed_at).getTime()
+  const active = trades.filter((t) => !t.resolved_at).sort(
+    (a, b) => new Date(a.game_time ?? a.placed_at).getTime() - new Date(b.game_time ?? b.placed_at).getTime()
   )
   const settled = trades.filter((t) => !!t.resolved_at)
   const recentSettled = settled.slice(0, 10)

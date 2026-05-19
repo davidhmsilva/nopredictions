@@ -883,12 +883,11 @@ def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
                        entry_price, sharp_prob, sharp_sources,
                        edge_pp, reasoning, match_id=None) -> int | None:
     cur = conn.cursor()
-    # Dedup: skip same market+outcome logged in last 30 min
     if market_db_id:
         cur.execute("""
             SELECT id FROM paper_trades
             WHERE market_id = %s AND outcome = %s AND strategy_id = %s
-              AND placed_at >= NOW() - INTERVAL '30 minutes' LIMIT 1
+              AND result IS NULL LIMIT 1
         """, (market_db_id, outcome, strategy_id))
         if cur.fetchone():
             return None
@@ -907,8 +906,8 @@ def _write_paper_trade(conn, strategy_id, market_db_id, outcome,
         float(entry_price), entry_odds,
         sharp_prob_f, sharp_prob_f,
         json.dumps(sharp_sources, default=_serial),
-        round(edge_pp / 100, 6),
-        min(round(edge_pp / 15.0, 3), 1.0),
+        round(float(edge_pp) / 100, 6),
+        min(round(float(edge_pp) / 15.0, 3), 1.0),
         STAKE_UNITS, reasoning,
     ))
     trade_id = cur.fetchone()[0]
@@ -1059,6 +1058,9 @@ def run(dry_run: bool = False) -> list[dict]:
             f'[source={_FAIR_VALUE_SOURCE}, threshold={active_threshold}pp]...\n'
         )
 
+        # Collect best edge per match, then log only one trade per match
+        match_candidates: dict[str, dict] = {}  # match_key → best candidate
+
         for market in pm_markets:
             title     = market.get('question') or market.get('title') or ''
             yes_price = market['_yes_price']
@@ -1067,7 +1069,6 @@ def run(dry_run: bool = False) -> list[dict]:
             away_pm   = market.get('_away_team')
 
             # 4. Find matching sharp event
-            # Prefer _home_team/_away_team from event (reliable), fall back to title parsing
             if home_pm and away_pm:
                 event = _fuzzy_find_event_two(home_pm, away_pm, sharp_lookup)
             else:
@@ -1087,6 +1088,7 @@ def run(dry_run: bool = False) -> list[dict]:
 
             home = event['home']
             away = event['away']
+            match_key = f'{home} vs {away}'.lower()
 
             # 5. Classify PM market outcome
             outcome_info = _classify_outcome(title, home, away)
@@ -1135,7 +1137,12 @@ def run(dry_run: bool = False) -> list[dict]:
                 if edge_pp < active_threshold:
                     continue
 
-                # 8. Build reasoning + log trade
+                # Keep only the best edge per match
+                existing = match_candidates.get(match_key)
+                if existing and existing['edge_pp'] >= edge_pp:
+                    log.info(f'     → Better edge already found for this match ({existing["edge_pp"]:.2f}pp)')
+                    continue
+
                 reasoning = (
                     f'Pre-match PM edge ({source_label}).\n'
                     f'Match: {home} vs {away}  [kickoff {kickoff_str} UTC]\n'
@@ -1149,37 +1156,50 @@ def run(dry_run: bool = False) -> list[dict]:
                     f'Resolves:   {res_time.strftime("%Y-%m-%d %H:%M UTC")}\n'
                 )
 
-                trade_info = {
-                    'match':      f'{home} vs {away}',
-                    'kickoff':    kickoff_str,
-                    'outcome':    label,
-                    'side':       side,
-                    'pm_price':   pm_p,
-                    'pm_odds':    pm_odds,
-                    'sharp_prob': round(sh_p, 4),
-                    'sharp_odds': sharp_odds,
-                    'edge_pp':    round(edge_pp, 2),
-                    'sources':    source_str,
-                    'pm_market':  title,
+                match_candidates[match_key] = {
+                    'market': market, 'event': event,
+                    'label': label, 'side': side,
+                    'pm_p': pm_p, 'pm_odds': pm_odds,
+                    'sh_p': sh_p, 'sharp_odds': sharp_odds,
+                    'edge_pp': edge_pp, 'sources': sources,
+                    'source_str': source_str, 'reasoning': reasoning,
+                    'title': title, 'res_time': res_time,
+                    'home': home, 'away': away, 'kickoff_str': kickoff_str,
                 }
-                trades_found.append(trade_info)
 
-                if not dry_run:
-                    market_db_id = _upsert_pm_market(conn, market)
-                    kickoff_dt = event.get('commence_time')
-                    kd = kickoff_dt.date() if hasattr(kickoff_dt, 'date') else None
-                    db_match_id = find_match_id(conn, home, away, kd)
-                    trade_id = _write_paper_trade(
-                        conn, strategy_id, market_db_id,
-                        label, pm_p, sh_p,
-                        sources, edge_pp, reasoning,
-                        match_id=db_match_id,
-                    )
-                    if trade_id:
-                        log.info(f'     → Paper trade #{trade_id} logged ✅')
-                        trade_info['trade_id'] = trade_id
-                    else:
-                        log.info(f'     → Skipped (duplicate within 30 min)')
+        # 8. Log one trade per match (best edge only)
+        for match_key, c in match_candidates.items():
+            trade_info = {
+                'match':      f'{c["home"]} vs {c["away"]}',
+                'kickoff':    c['kickoff_str'],
+                'outcome':    c['label'],
+                'side':       c['side'],
+                'pm_price':   c['pm_p'],
+                'pm_odds':    c['pm_odds'],
+                'sharp_prob': round(c['sh_p'], 4),
+                'sharp_odds': c['sharp_odds'],
+                'edge_pp':    round(c['edge_pp'], 2),
+                'sources':    c['source_str'],
+                'pm_market':  c['title'],
+            }
+            trades_found.append(trade_info)
+
+            if not dry_run:
+                market_db_id = _upsert_pm_market(conn, c['market'])
+                kickoff_dt = c['event'].get('commence_time')
+                kd = kickoff_dt.date() if hasattr(kickoff_dt, 'date') else None
+                db_match_id = find_match_id(conn, c['home'], c['away'], kd)
+                trade_id = _write_paper_trade(
+                    conn, strategy_id, market_db_id,
+                    c['label'], c['pm_p'], c['sh_p'],
+                    c['sources'], c['edge_pp'], c['reasoning'],
+                    match_id=db_match_id,
+                )
+                if trade_id:
+                    log.info(f'  → {c["home"]} vs {c["away"]}: trade #{trade_id} logged (best edge +{c["edge_pp"]:.1f}pp) ✅')
+                    trade_info['trade_id'] = trade_id
+                else:
+                    log.info(f'  → {c["home"]} vs {c["away"]}: skipped (already traded)')
 
     finally:
         conn.close()
