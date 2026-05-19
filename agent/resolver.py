@@ -167,6 +167,9 @@ def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
                   label: str) -> dict | None:
     if result == 'won':
         payout = stake * entry_odds if entry_odds else stake
+    elif result == 'void':
+        # Match abandoned / postponed → stake refunded
+        payout = stake
     else:
         payout = 0.0
 
@@ -188,9 +191,10 @@ def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
     """, (result, round(payout, 4), closing_prob, clv, trade_id))
     conn.commit()
 
-    sign = 'WIN' if result == 'won' else 'LOSS'
+    sign = {'won': 'WIN', 'lost': 'LOSS', 'void': 'VOID'}.get(result, result.upper())
+    pl = payout - stake
     clv_str = f'CLV={clv:+.3f}' if clv is not None else 'CLV=n/a'
-    log.info(f'[resolver] #{trade_id} {sign} {label} | {outcome_label} | P&L={payout:+.2f}u | {clv_str}')
+    log.info(f'[resolver] #{trade_id} {sign} {label} | {outcome_label} | P&L={pl:+.2f}u | {clv_str}')
 
     return {
         'trade_id': trade_id,
