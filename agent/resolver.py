@@ -24,7 +24,15 @@ import requests
 
 import os
 from dotenv import load_dotenv
-from .tools.db import run_analysis_query, log_agent_run, find_match_id
+
+# Support both package import (from agent import resolver) and
+# standalone import (import resolver) used by dc_scanner.py
+try:
+    from .tools.db import run_analysis_query, log_agent_run, find_match_id
+except ImportError:
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
+    from db import run_analysis_query, log_agent_run, find_match_id
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'))
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -220,7 +228,7 @@ def _backfill_match_ids(conn):
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT pt.id AS trade_id, pm.title AS market_title,
-               pm.resolution_time, e.title AS event_title
+               pm.resolution_time, pm.market_type, e.title AS event_title
         FROM paper_trades pt
         JOIN pm_markets pm ON pm.id = pt.market_id
         LEFT JOIN LATERAL (
@@ -251,7 +259,7 @@ def _backfill_match_ids(conn):
             except (ValueError, TypeError):
                 pass
 
-        mid = find_match_id(conn, teams[0], teams[1], kickoff_date, days_window=5)
+        mid = find_match_id(conn, teams[0], teams[1], kickoff_date, days_window=1)
         if mid:
             cur2 = conn.cursor()
             cur2.execute("UPDATE paper_trades SET match_id = %s WHERE id = %s",
@@ -325,6 +333,8 @@ def run() -> list[dict]:
                 resolved_ids.add(tid)
 
         # ── Path B: Polymarket-based resolution ──
+        # Only check markets whose resolution_time is in the past
+        # to avoid resolving future games on transient PM API data.
         cur.execute("""
             SELECT
                 pt.id       AS trade_id,
@@ -339,6 +349,8 @@ def run() -> list[dict]:
             FROM paper_trades pt
             JOIN pm_markets pm ON pm.id = pt.market_id
             WHERE pt.result IS NULL
+              AND (pm.resolution_time IS NULL
+                   OR pm.resolution_time <= NOW() + INTERVAL '2 hours')
         """)
 
         pm_trades = [dict(r) for r in cur.fetchall()]
