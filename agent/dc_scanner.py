@@ -31,6 +31,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../ingest/.env"
 
 sys.path.insert(0, os.path.dirname(__file__))
 from dixon_coles import DixonColesModel
+import resolver as _resolver
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 from db import find_match_id
@@ -171,7 +172,8 @@ def _upsert_pm_market(conn, ext_id: str, title: str, resolution_time: Optional[s
 
 
 def _already_traded(conn, strategy_id: int, market_db_id: int, outcome: str,
-                    match_id: int | None = None) -> bool:
+                    match_id: int | None = None,
+                    home: str | None = None, away: str | None = None) -> bool:
     cur = conn.cursor()
     if match_id:
         cur.execute("""
@@ -179,6 +181,17 @@ def _already_traded(conn, strategy_id: int, market_db_id: int, outcome: str,
             WHERE strategy_id = %s AND match_id = %s AND result IS NULL
             LIMIT 1
         """, (strategy_id, match_id))
+        if cur.fetchone():
+            return True
+    # Check by team names in reasoning — catches cases where the same match
+    # gets a different "best edge" outcome on a subsequent scanner run
+    if home and away:
+        pattern = f"%{home} vs {away}%"
+        cur.execute("""
+            SELECT id FROM paper_trades
+            WHERE strategy_id = %s AND reasoning LIKE %s AND result IS NULL
+            LIMIT 1
+        """, (strategy_id, pattern))
         if cur.fetchone():
             return True
     cur.execute("""
@@ -192,8 +205,10 @@ def _already_traded(conn, strategy_id: int, market_db_id: int, outcome: str,
 
 def _write_trade(conn, strategy_id: int, market_db_id: int, outcome: str,
                  entry_price: float, dc_prob: float, edge_pp: float,
-                 reasoning: str, match_id: Optional[int] = None) -> Optional[int]:
-    if _already_traded(conn, strategy_id, market_db_id, outcome, match_id=match_id):
+                 reasoning: str, match_id: Optional[int] = None,
+                 home: str | None = None, away: str | None = None) -> Optional[int]:
+    if _already_traded(conn, strategy_id, market_db_id, outcome,
+                       match_id=match_id, home=home, away=away):
         return None
     entry_odds = round(1 / entry_price, 4) if entry_price > 0 else None
     confidence = min(round(edge_pp / 15.0, 3), 1.0)
@@ -531,7 +546,7 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     trade_id = _write_trade(
                         conn, strategy_id, market_db_id, best["outcome_key"],
                         best["yes_p"], best["dc_prob"], best["edge_pp"], best["reasoning"],
-                        match_id=db_match_id,
+                        match_id=db_match_id, home=home, away=away,
                     )
                     if trade_id:
                         log.info(f"    → Trade #{trade_id} logged (best edge of {len(match_candidates)} candidates)")
@@ -604,7 +619,7 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     trade_id = _write_trade(
                         conn, no_bias_strategy_id, market_db_id, best["outcome_key"],
                         best["no_p"], best["dc_no_prob"], best["edge_pp"], best["reasoning"],
-                        match_id=db_match_id,
+                        match_id=db_match_id, home=home, away=away,
                     )
                     if trade_id:
                         log.info(f"    → No Bias trade #{trade_id} logged")
@@ -615,6 +630,16 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
         if not dry_run:
             _log_run(conn, len(events), n_matched, n_edges + n_no_bias_edges, dry_run)
 
+        # ── Resolver: settle any open trades whose markets have now closed ──
+        resolved = []
+        if not dry_run:
+            try:
+                resolved = _resolver.run()
+                if resolved:
+                    log.info(f"[resolver] Settled {len(resolved)} trade(s) after scan")
+            except Exception as exc:
+                log.warning(f"[resolver] Failed to run after scan: {exc}")
+
         summary = {
             "events_scanned": len(events),
             "non_football_skipped": n_skipped_non_football,
@@ -623,6 +648,7 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
             "dc_trades_logged": len(trades_logged),
             "no_bias_edges_found": n_no_bias_edges,
             "no_bias_trades_logged": len(no_bias_trades_logged),
+            "resolved_trades": len(resolved),
             "dry_run": dry_run,
         }
         log.info(
