@@ -32,6 +32,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../ingest/.env"
 sys.path.insert(0, os.path.dirname(__file__))
 from dixon_coles import DixonColesModel
 import resolver as _resolver
+from injury_tracker import InjuryTracker
+from market_flow import MarketFlow
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 from db import find_match_id
@@ -369,6 +371,94 @@ def _classify_market(question: str, home: str, away: str) -> Optional[str]:
     return None
 
 
+# ── Injury adjustments ────────────────────────────────────────────────────────
+
+def _get_team_ids_api(home: str, away: str) -> tuple[int, int] | None:
+    """Look up api-football team IDs by team names."""
+    api_key = os.getenv('FOOTBALL_API_KEY', '')
+    if not api_key:
+        return None
+    try:
+        resp = requests.get(
+            'https://v3.football.api-sports.io/fixtures',
+            params={'live': 'all'},
+            headers={'x-apisports-key': api_key},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return None
+        for fixture in resp.json().get('response', []):
+            h_name = fixture.get('teams', {}).get('home', {}).get('name', '').lower()
+            a_name = fixture.get('teams', {}).get('away', {}).get('name', '').lower()
+            if h_name == home.lower() and a_name == away.lower():
+                h_id = fixture.get('teams', {}).get('home', {}).get('id')
+                a_id = fixture.get('teams', {}).get('away', {}).get('id')
+                if h_id and a_id:
+                    return int(h_id), int(a_id)
+        return None
+    except Exception:
+        return None
+
+
+def _apply_injury_adjustments(pred: dict, home: str, away: str) -> dict:
+    """Apply injury adjustments to DC model prediction and recalculate probabilities."""
+    try:
+        from scipy.stats import poisson as poisson_dist
+
+        injury_tracker = InjuryTracker()
+        team_ids = _get_team_ids_api(home, away)
+        if not team_ids:
+            return pred
+
+        home_tid, away_tid = team_ids
+        inj_adj = injury_tracker.get_fixture_adjustments(0, home_tid, away_tid)
+
+        # If no significant injuries, return unchanged
+        if inj_adj['home'] >= 0.99 and inj_adj['away'] >= 0.99:
+            return pred
+
+        # Apply adjustments to lambdas
+        lam_h = pred.get('lambda_home', 1.0) * inj_adj['home']
+        lam_a = pred.get('lambda_away', 1.0) * inj_adj['away']
+
+        # Recalculate 1x2 probabilities
+        MAX_GOALS = 8
+        p_home = 0.0
+        p_draw = 0.0
+        p_away = 0.0
+        for i in range(MAX_GOALS + 1):
+            p_i = poisson_dist.pmf(i, lam_h)
+            for j in range(MAX_GOALS + 1):
+                p_j = poisson_dist.pmf(j, lam_a)
+                p_ij = p_i * p_j
+                if i > j:
+                    p_home += p_ij
+                elif i == j:
+                    p_draw += p_ij
+                else:
+                    p_away += p_ij
+
+        total = p_home + p_draw + p_away
+        if total > 0:
+            p_home /= total
+            p_draw /= total
+            p_away /= total
+
+        # Update prediction with adjusted values
+        pred_adj = pred.copy()
+        pred_adj['lambda_home'] = lam_h
+        pred_adj['lambda_away'] = lam_a
+        pred_adj['home_win'] = p_home
+        pred_adj['draw'] = p_draw
+        pred_adj['away_win'] = p_away
+        pred_adj['injury_adjustment'] = inj_adj
+
+        return pred_adj
+    except Exception as e:
+        log.debug(f"Injury adjustment error (non-fatal): {e}")
+        return pred
+
+
 # ── Fetch PM events ───────────────────────────────────────────────────────────
 
 def _fetch_pm_events(days_ahead: int) -> list[dict]:
@@ -411,6 +501,9 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
 
     log.info(f"Loading DC model from {PARAMS_PATH}...")
     model = DixonColesModel.load(PARAMS_PATH)
+
+    # Initialize market flow tracker
+    market_flow = MarketFlow()
 
     # Build normalised team index for fuzzy lookup
     norm_idx: dict[str, int] = {_norm(t): i for i, t in enumerate(model.teams)}
@@ -470,6 +563,8 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
 
             try:
                 pred = model.predict(home, away)
+                # Apply injury adjustments to prediction
+                pred = _apply_injury_adjustments(pred, home, away)
             except Exception:
                 continue
 
@@ -515,17 +610,36 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     continue
 
                 n_edges += 1
+                inj_note = ""
+                if pred.get('injury_adjustment'):
+                    inj_adj = pred.get('injury_adjustment')
+                    inj_note = f" [Injuries: H={inj_adj['home']:.2%} A={inj_adj['away']:.2%}]"
+
+                # Check market flow for smart money agreement
+                flow_note = ""
+                try:
+                    if mkt.get('id'):
+                        market_id = mkt.get('id')
+                        # For pre-match, "yes" edge means betting on the yes side
+                        flow_direction = 'yes' if edge_pp > 0 else 'no'
+                        flow_signal = market_flow.detect_smart_money_signal(market_id, flow_direction)
+                        if flow_signal and flow_signal.whale_volume >= 10000:
+                            if flow_signal.confidence >= 0.7:
+                                flow_note = f" | Whale {flow_signal.whale_side}"
+                except Exception:
+                    pass
+
                 reasoning = (
                     f"DC Model: {home} vs {away} — {question}. "
                     f"PM price: {yes_p*100:.1f}% ({1/yes_p:.2f}). "
                     f"DC fair value: {dc_prob*100:.1f}% ({1/dc_prob:.2f}). "
                     f"Edge: +{edge_pp:.1f}pp. "
-                    f"λ home={pred['lambda_home']:.2f} λ away={pred['lambda_away']:.2f}."
+                    f"λ home={pred['lambda_home']:.2f} λ away={pred['lambda_away']:.2f}.{inj_note}"
                 )
 
                 log.info(
                     f"  EDGE +{edge_pp:.1f}pp | {home} vs {away} | {outcome_key} | "
-                    f"PM={yes_p*100:.1f}% DC={dc_prob*100:.1f}%"
+                    f"PM={yes_p*100:.1f}% DC={dc_prob*100:.1f}%{inj_note}{flow_note}"
                 )
 
                 match_candidates.append({

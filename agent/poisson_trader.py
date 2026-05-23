@@ -37,11 +37,15 @@ from .paper_trader import (
     _conn, _serial, EDGE_THRESHOLD_PP, STAKE_UNITS, GAMMA_API, _get,
 )
 from .tools.db import log_agent_run
+from .live_odds import LiveOddsTracker, get_pm_vs_bookmaker_edge
+from .injury_tracker import InjuryTracker
+from .market_flow import MarketFlow
 
 log = logging.getLogger(__name__)
 
 INPLAY_EDGE_THRESHOLD_PP = 5.0
 MAX_GOALS = 8
+WHALE_VOLUME_USDC = 10000  # threshold for significant whale activity
 
 # ─── DC model loader ────────────────────────────────────────────────────────
 
@@ -107,12 +111,18 @@ def derive_lambdas(p_home: float, p_draw: float, p_away: float) -> tuple[float, 
 RED_CARD_LAMBDA_PENALTY = 0.80    # 10-man team scores at 80% of base rate
 RED_CARD_LAMBDA_BOOST = 1.10      # opponent scores at 110% against 10 men
 TRAILING_PUSH_MINUTE = 70         # when trailing-team boost kicks in
-TRAILING_PUSH_FACTOR = 1.15       # trailing team attacks 15% harder after 70'
+# Aggressive trailing push: 1 goal down = 1.25x, 2+ down = 1.40x
+TRAILING_PUSH_FACTOR_1G = 1.25    # trailing by 1 attacks 25% harder after 70'
+TRAILING_PUSH_FACTOR_2G = 1.40    # trailing by 2+ attacks 40% harder after 80'
 TRAILING_DRAW_SQUEEZE = 0.90      # draw becomes 10% less likely when team pushes
 
 # Goal-driven intensity shift: each goal changes momentum
 GOAL_MOMENTUM_LEADING = 0.92     # team that scores tends to sit back slightly
 GOAL_MOMENTUM_TRAILING = 1.08    # team that concedes pushes harder
+
+# Sit-back adjustments: leading team parks the bus
+LEADING_DEFENSIVE_1G = 0.75      # leading by 1 after 85' = 0.75x lambda
+LEADING_DEFENSIVE_2G = 0.65      # leading by 2+ after 85' = 0.65x lambda
 
 
 def _effective_minute(minute: int) -> float:
@@ -159,8 +169,8 @@ def _adjust_lambdas_for_score(
 ) -> tuple[float, float]:
     """
     Adjust lambdas based on current score and game phase.
-    - Trailing team pushes harder (especially after 70')
-    - Leading team sits back slightly
+    - Trailing team: aggressive push after 70', scale by goal deficit
+    - Leading team: sits back (especially if 2+ up)
     """
     adj_h = lam_h
     adj_a = lam_a
@@ -178,14 +188,31 @@ def _adjust_lambdas_for_score(
             adj_a *= GOAL_MOMENTUM_LEADING
             adj_h *= GOAL_MOMENTUM_TRAILING
 
-        # Late-game trailing-team push
+        # Late-game trailing-team push (aggressive)
         if minute >= TRAILING_PUSH_MINUTE:
             progress = min(1.0, (minute - TRAILING_PUSH_MINUTE) / 20.0)
-            push = 1.0 + (TRAILING_PUSH_FACTOR - 1.0) * progress
+            # Scale push by goal deficit
+            if abs(goal_diff) == 1:
+                push = 1.0 + (TRAILING_PUSH_FACTOR_1G - 1.0) * progress
+            else:  # 2+
+                push = 1.0 + (TRAILING_PUSH_FACTOR_2G - 1.0) * progress
+
             if goal_diff > 0:
                 adj_a *= push
             else:
                 adj_h *= push
+
+        # Late-game sit-back: leading team parks the bus
+        if minute >= 85:
+            progress = min(1.0, (minute - 85) / 5.0)
+            if goal_diff > 0:
+                # Home leading
+                sit_back = 1.0 - (1.0 - (LEADING_DEFENSIVE_1G if abs(goal_diff) == 1 else LEADING_DEFENSIVE_2G)) * progress
+                adj_h *= sit_back
+            else:
+                # Away leading
+                sit_back = 1.0 - (1.0 - (LEADING_DEFENSIVE_1G if abs(goal_diff) == 1 else LEADING_DEFENSIVE_2G)) * progress
+                adj_a *= sit_back
 
     return adj_h, adj_a
 
@@ -258,6 +285,30 @@ def inplay_probs(
     if total > 0:
         btts /= total
 
+    # Spread distribution: using normal approximation (CDF) with stdev ~16.5 for single match
+    # Spread 0.5 = home score - away score > 0.5
+    spread_dist = {}
+    spread_stdev = 16.5  # empirical from PM spread odds
+    for k in range(MAX_GOALS + 1):
+        pk = poisson_dist.pmf(k, lam_h_rem) if lam_h_rem > 0 else (1.0 if k == 0 else 0.0)
+        for j in range(MAX_GOALS + 1):
+            pj = poisson_dist.pmf(j, lam_a_rem) if lam_a_rem > 0 else (1.0 if j == 0 else 0.0)
+            spread = (home_goals + k) - (away_goals + j)
+            spread_dist[spread] = spread_dist.get(spread, 0.0) + pk * pj
+
+    # Common spread lines: H -0.5, -1.5, +0.5, +1.5
+    spread_0_5_home = sum(p for s, p in spread_dist.items() if s > 0.5)
+    spread_1_5_home = sum(p for s, p in spread_dist.items() if s > 1.5)
+    spread_0_5_away = sum(p for s, p in spread_dist.items() if s < -0.5)
+    spread_1_5_away = sum(p for s, p in spread_dist.items() if s < -1.5)
+
+    total = p_home + p_draw + p_away
+    if total > 0:
+        spread_0_5_home /= total
+        spread_1_5_home /= total
+        spread_0_5_away /= total
+        spread_1_5_away /= total
+
     return {
         'home': p_home,
         'draw': p_draw,
@@ -267,6 +318,10 @@ def inplay_probs(
         'over_1_5': over_1_5,
         'under_1_5': under_1_5,
         'btts': btts,
+        'spread_0_5_home': spread_0_5_home,
+        'spread_1_5_home': spread_1_5_home,
+        'spread_0_5_away': spread_0_5_away,
+        'spread_1_5_away': spread_1_5_away,
         'lambda_home_adj': lam_h,
         'lambda_away_adj': lam_a,
         'remaining_fraction': remaining,
@@ -296,6 +351,34 @@ def _get_lambdas_sharp(event: dict) -> tuple[float, float] | None:
     if dp is None or dp <= 0:
         dp = max(0.01, 1.0 - hp - ap)
     return derive_lambdas(hp, dp, ap)
+
+
+def _get_team_ids(home: str, away: str) -> tuple[int, int] | None:
+    """Look up api-football team IDs by team names (from live fixture lookup)."""
+    api_key = os.getenv('FOOTBALL_API_KEY', '')
+    if not api_key:
+        return None
+    try:
+        import requests as _req
+        resp = _req.get(
+            'https://v3.football.api-sports.io/fixtures',
+            params={'live': 'all'},
+            headers={'x-apisports-key': api_key},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return None
+        for fixture in resp.json().get('response', []):
+            h_name = fixture.get('teams', {}).get('home', {}).get('name', '').lower()
+            a_name = fixture.get('teams', {}).get('away', {}).get('name', '').lower()
+            if h_name == home.lower() and a_name == away.lower():
+                h_id = fixture.get('teams', {}).get('home', {}).get('id')
+                a_id = fixture.get('teams', {}).get('away', {}).get('id')
+                if h_id and a_id:
+                    return int(h_id), int(a_id)
+        return None
+    except Exception:
+        return None
 
 
 # ─── Live data fetching ──────────────────────────────────────────────────────
@@ -555,8 +638,34 @@ def _get_or_create_poisson_strategy(conn) -> int:
 # ─── Outcome classification ──────────────────────────────────────────────────
 
 def _classify_pm_outcome(title: str, home: str, away: str) -> str | None:
-    """Classify a PM market question into an outcome key."""
+    """Classify a PM market question into an outcome key (1x2, totals, spreads, etc)."""
     t = title.lower()
+
+    # Spreads: "X -1.5", "Y +0.5", etc
+    # Detect spreads with format like "-1.5" or "+0.5"
+    if any(spread in t for spread in ['-1.5', '-0.5', '+0.5', '+1.5', 'spread']):
+        if '-1.5' in t:
+            if _norm(home)[:6] in _norm(t):
+                return 'spread_h_minus_1_5'
+            if _norm(away)[:6] in _norm(t):
+                return 'spread_a_minus_1_5'
+        if '-0.5' in t:
+            if _norm(home)[:6] in _norm(t):
+                return 'spread_h_minus_0_5'
+            if _norm(away)[:6] in _norm(t):
+                return 'spread_a_minus_0_5'
+        if '+0.5' in t or ('+' in t and '0.5' in t):
+            if _norm(home)[:6] in _norm(t):
+                return 'spread_h_plus_0_5'
+            if _norm(away)[:6] in _norm(t):
+                return 'spread_a_plus_0_5'
+        if '+1.5' in t or ('+' in t and '1.5' in t):
+            if _norm(home)[:6] in _norm(t):
+                return 'spread_h_plus_1_5'
+            if _norm(away)[:6] in _norm(t):
+                return 'spread_a_plus_1_5'
+
+    # Totals
     if 'draw' in t:
         return 'draw'
     if 'over' in t and '2.5' in t:
@@ -569,11 +678,13 @@ def _classify_pm_outcome(title: str, home: str, away: str) -> str | None:
         return 'under_1_5'
     if 'both teams' in t or 'btts' in t:
         return 'btts'
+
     # Home/away win
     if _norm(home)[:6] in _norm(t):
         return 'home'
     if _norm(away)[:6] in _norm(t):
         return 'away'
+
     # Check for "win" patterns
     if 'win' in t:
         home_n = _norm(home)
@@ -583,6 +694,7 @@ def _classify_pm_outcome(title: str, home: str, away: str) -> str | None:
             return 'home'
         if away_n[:5] in t_n:
             return 'away'
+
     return None
 
 
@@ -592,6 +704,7 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
     """
     Scan for in-play Poisson edges on Polymarket.
     Uses DC model lambdas (primary) or sharp odds (fallback).
+    Validates with live bookmaker consensus (Pinnacle/Betfair/Smarkets).
     Optionally accepts a LiveMatchTracker for pressure-based lambda adjustments.
     Returns list of trade dicts.
     """
@@ -602,6 +715,15 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
 
     # 1. Try to load DC model
     dc = _load_dc_model()
+
+    # 1b. Initialize live odds tracker (for Pinnacle/Betfair consensus)
+    odds_tracker = LiveOddsTracker()
+
+    # 1c. Initialize injury tracker
+    injury_tracker = InjuryTracker()
+
+    # 1d. Initialize market flow tracker (for smart money signals)
+    market_flow = MarketFlow()
 
     # 2. Get cached sharp odds (fallback)
     sharp_lookup = paper_trader.get_cached_sharp_odds()
@@ -700,6 +822,7 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
             # Get lambdas: DC model first, sharp odds fallback
             lam_h, lam_a = None, None
             lambda_source = ''
+            injury_adjustments = None
 
             # Try DC model
             dc_lambdas = _get_lambdas_dc(home_pm, away_pm)
@@ -718,6 +841,19 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
 
             if lam_h is None:
                 continue
+
+            # Apply injury adjustments
+            try:
+                team_ids = _get_team_ids(home_pm, away_pm)
+                if team_ids:
+                    home_tid, away_tid = team_ids
+                    inj_adj = injury_tracker.get_fixture_adjustments(0, home_tid, away_tid)
+                    if inj_adj and (inj_adj['home'] < 1.0 or inj_adj['away'] < 1.0):
+                        lam_h *= inj_adj['home']
+                        lam_a *= inj_adj['away']
+                        injury_adjustments = inj_adj
+            except Exception as e:
+                log.debug(f'[poisson] Injury lookup error (non-fatal): {e}')
 
             home = home_pm
             away = away_pm
@@ -738,6 +874,9 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
                 adj_info = []
                 if home_reds or away_reds:
                     adj_info.append(f'reds: H={home_reds} A={away_reds}')
+                if injury_adjustments and (injury_adjustments['home'] < 1.0 or injury_adjustments['away'] < 1.0):
+                    inj_str = f'injuries: H={injury_adjustments["home"]:.2%} A={injury_adjustments["away"]:.2%}'
+                    adj_info.append(inj_str)
                 if minute >= TRAILING_PUSH_MINUTE and home_goals != away_goals:
                     adj_info.append('trailing push active')
                 if pressure_adjustments:
@@ -758,8 +897,33 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
             if not outcome_key:
                 continue
 
+            # Map spread outcomes to fair probabilities
             fair_prob = fair.get(outcome_key, 0)
+
+            # If outcome not in fair dict, check for spread mappings
             if fair_prob <= 0:
+                if outcome_key == 'spread_h_minus_0_5':
+                    fair_prob = fair.get('spread_0_5_home', 0)
+                elif outcome_key == 'spread_h_minus_1_5':
+                    fair_prob = fair.get('spread_1_5_home', 0)
+                elif outcome_key == 'spread_a_minus_0_5':
+                    fair_prob = fair.get('spread_0_5_away', 0)
+                elif outcome_key == 'spread_a_minus_1_5':
+                    fair_prob = fair.get('spread_1_5_away', 0)
+                elif outcome_key == 'spread_h_plus_0_5':
+                    # Home +0.5 = Home doesn't lose by more than 0 = 1 - (spread_0_5_away)
+                    fair_prob = 1.0 - fair.get('spread_0_5_away', 0)
+                elif outcome_key == 'spread_h_plus_1_5':
+                    # Home +1.5 = Home doesn't lose by more than 1 = 1 - (spread_1_5_away)
+                    fair_prob = 1.0 - fair.get('spread_1_5_away', 0)
+                elif outcome_key == 'spread_a_plus_0_5':
+                    # Away +0.5 = Away doesn't lose by more than 0 = 1 - (spread_0_5_home)
+                    fair_prob = 1.0 - fair.get('spread_0_5_home', 0)
+                elif outcome_key == 'spread_a_plus_1_5':
+                    # Away +1.5 = Away doesn't lose by more than 1 = 1 - (spread_1_5_home)
+                    fair_prob = 1.0 - fair.get('spread_1_5_home', 0)
+
+            if fair_prob <= 0 or fair_prob >= 1.0:
                 continue
 
             edge_pp = (fair_prob - yes_price) * 100
@@ -768,10 +932,84 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
             fair_odds = round(1 / fair_prob, 3)
             score_str = f'{home_goals}-{away_goals}'
 
+            # Fetch live bookmaker consensus (Pinnacle/Betfair/Smarkets)
+            consensus_info = ''
+            consensus_validation = ''
+            line_movement_info = ''
+            try:
+                # Find fixture_id from home/away names
+                fixture_id = odds_tracker.get_fixture_id(home, away)
+                if fixture_id:
+                    # Determine bet type from outcome
+                    bet_type_map = {
+                        'home': 'Match Winner', 'draw': 'Match Winner', 'away': 'Match Winner',
+                        'over_2_5': 'Over 2.5', 'under_2_5': 'Over 2.5',
+                        'over_1_5': 'Over 1.5', 'under_1_5': 'Over 1.5',
+                        'btts': 'BTTS',
+                    }
+                    bet_type = bet_type_map.get(outcome_key, 'Match Winner')
+
+                    # Get current consensus
+                    consensus = odds_tracker.get_consensus(
+                        fixture_id, home, away, bet_type=bet_type
+                    )
+                    if consensus:
+                        edge_vs_bm = get_pm_vs_bookmaker_edge(yes_price, consensus, outcome_key)
+                        if edge_vs_bm:
+                            bm_used = edge_vs_bm.get('bookmakers_used', [])
+                            bm_edge = edge_vs_bm.get('edge_pp', 0)
+                            conf = edge_vs_bm.get('confidence', '?')
+                            consensus_info = f' | Bookmakers={bm_used} {bm_edge:+.1f}pp ✓'
+                            # Consensus validation: if both model and bookmakers agree, confidence ↑
+                            if abs(bm_edge) >= 2.0 and abs(edge_pp) >= 2.0 and (bm_edge * edge_pp > 0):
+                                consensus_validation = ' [STRONG]'
+
+                    # Detect line movement from kickoff
+                    line_moves = odds_tracker.get_line_movement(fixture_id, home, away, bet_type=bet_type)
+                    if line_moves:
+                        moves_str = ' | '.join([f'{k}={v:+.1f}pp' for k, v in line_moves.items()])
+                        line_movement_info = f' | LineMove: {moves_str}'
+                        # Line movement is a smart money signal — boost confidence if in our direction
+                        for key, move_pp in line_moves.items():
+                            if outcome_key in key and move_pp * edge_pp > 0:  # same direction
+                                consensus_validation = ' [VERY STRONG]'
+
+            except Exception as e:
+                log.debug(f'[poisson] Consensus/LineMove error: {e}')
+
+            # Check for smart money signals (market flow)
+            market_flow_info = ''
+            smart_money_validation = ''
+            try:
+                if mkt.get('id'):
+                    market_id = mkt.get('id')
+                    # Map outcome to direction for market flow check
+                    flow_direction = {
+                        'home': 'yes', 'draw': 'yes', 'away': 'no',
+                        'over_2_5': 'yes', 'over_1_5': 'yes',
+                        'under_2_5': 'no', 'under_1_5': 'no',
+                        'btts': 'yes'
+                    }.get(outcome_key, 'neutral')
+
+                    if edge_pp > 0:
+                        flow_direction = 'yes'
+                    elif edge_pp < 0:
+                        flow_direction = 'no'
+
+                    flow_signal = market_flow.detect_smart_money_signal(market_id, flow_direction)
+                    if flow_signal and flow_signal.whale_volume >= WHALE_VOLUME_USDC:
+                        market_flow_info = f' | Whale: {flow_signal.whale_side} {flow_signal.whale_volume/1000:.0f}k'
+                        if flow_signal.confidence >= 0.7 and flow_signal.whale_side == flow_direction:
+                            smart_money_validation = ' [WHALE ✓]'
+                        elif flow_signal.whale_side != flow_direction and flow_direction != 'neutral':
+                            smart_money_validation = ' [whale opposes]'
+            except Exception as e:
+                log.debug(f'[poisson] MarketFlow error (non-fatal): {e}')
+
             sign = ('✅' if edge_pp >= INPLAY_EDGE_THRESHOLD_PP else
                     '~' if edge_pp > 1 else '·')
             log.info(f'  {sign} {outcome_key.upper()}: PM={yes_price:.3f} ({pm_odds}x) | '
-                     f'Model={fair_prob:.3f} ({fair_odds}x) | Edge={edge_pp:+.1f}pp')
+                     f'Model={fair_prob:.3f} ({fair_odds}x) | Edge={edge_pp:+.1f}pp{consensus_info}{market_flow_info}{line_movement_info}{consensus_validation}{smart_money_validation}')
 
             if edge_pp < INPLAY_EDGE_THRESHOLD_PP:
                 continue
