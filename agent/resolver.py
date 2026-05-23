@@ -127,14 +127,14 @@ def _get_closing_odds_for_outcome(match_id: int, outcome_label: str) -> tuple[fl
 
 # ─── Polymarket resolution ────────────────────────────────────────────────────
 
-def _check_pm_resolution(external_id: str) -> str | None:
+def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -> str | None:
     """
     Fetch a Polymarket market and check if it resolved.
     Returns 'yes' if YES resolved, 'no' if NO resolved, None if still open.
 
     PM sports markets often reach extreme prices (0.00/1.00) before being
     officially marked ``closed``.  We treat a market as resolved when it is
-    either closed OR when both the game has ended and prices hit 0/1.
+    closed, OR when resolution_time is past and prices hit extreme levels.
     """
     try:
         r = requests.get(f'{GAMMA_API}/markets/{external_id}', timeout=10)
@@ -155,7 +155,7 @@ def _check_pm_resolution(external_id: str) -> str | None:
     no_price = float(prices[1])
 
     is_closed = data.get('closed', False)
-    if not is_closed:
+    if not is_closed and not past_resolution_time:
         return None
 
     if yes_price >= RESOLUTION_THRESHOLD:
@@ -363,7 +363,7 @@ def run() -> list[dict]:
             if not ext_id:
                 continue
 
-            pm_resolution = _check_pm_resolution(ext_id)
+            pm_resolution = _check_pm_resolution(ext_id, past_resolution_time=True)
             if pm_resolution is None:
                 continue
 

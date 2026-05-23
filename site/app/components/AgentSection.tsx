@@ -1,7 +1,11 @@
+'use client'
+
+import { useState } from 'react'
 import { fmtPnl, fmtPct } from '../lib/helpers'
 import type { PaperTrade, Strategy } from '../lib/supabase'
 import { SectionWrap, SectionTitle, Spinner } from './ui'
 import { TradeCard } from './TradeCard'
+import { StrategyDetail } from './StrategyDetail'
 
 export function AgentSection({
   trades,
@@ -12,7 +16,21 @@ export function AgentSection({
   strategies: Strategy[]
   loading: boolean
 }) {
+  const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null)
+
   if (loading) return <SectionWrap><Spinner /></SectionWrap>
+
+  if (selectedStrategy) {
+    return (
+      <SectionWrap>
+        <StrategyDetail
+          strategy={selectedStrategy}
+          trades={trades}
+          onBack={() => setSelectedStrategy(null)}
+        />
+      </SectionWrap>
+    )
+  }
 
   const active = trades.filter((t) => !t.resolved_at).sort(
     (a, b) => new Date(a.game_time ?? a.placed_at).getTime() - new Date(b.game_time ?? b.placed_at).getTime()
@@ -97,7 +115,25 @@ export function AgentSection({
 
                   return (
                     <tr key={s.id}>
-                      <td style={{ color: 'var(--white)', letterSpacing: '1px' }}>{s.name}</td>
+                      <td>
+                        <button
+                          onClick={() => setSelectedStrategy(s)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            fontFamily: 'var(--font)',
+                            fontSize: 'inherit',
+                            color: 'var(--accent)',
+                            letterSpacing: '1px',
+                            cursor: 'pointer',
+                            padding: 0,
+                            textDecoration: 'underline',
+                            textUnderlineOffset: '3px',
+                          }}
+                        >
+                          {s.name}
+                        </button>
+                      </td>
                       <td>{s.total_bets ?? 0}</td>
                       <td>
                         {s.total_bets ? `${((s.win_rate ?? 0) * 100).toFixed(0)}%` : '—'}
