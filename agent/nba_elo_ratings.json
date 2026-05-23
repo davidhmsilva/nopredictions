@@ -1,0 +1,42 @@
+{
+  "ratings": {
+    "San Antonio Spurs": 1816.7718682323007,
+    "Oklahoma City Thunder": 1812.486287576932,
+    "New York Knicks": 1748.3886652334108,
+    "Detroit Pistons": 1670.8205159472923,
+    "Boston Celtics": 1659.7400725934401,
+    "Cleveland Cavaliers": 1651.906910212327,
+    "Denver Nuggets": 1641.991938779303,
+    "Charlotte Hornets": 1640.8447228933826,
+    "Los Angeles Lakers": 1614.256699690832,
+    "Minnesota Timberwolves": 1602.023377340221,
+    "Houston Rockets": 1598.5054357776992,
+    "Orlando Magic": 1566.128828813087,
+    "Atlanta Hawks": 1556.7150332619065,
+    "Toronto Raptors": 1552.5054813241773,
+    "LA Clippers": 1546.572864215608,
+    "Philadelphia 76ers": 1541.7137962526447,
+    "Portland Trail Blazers": 1523.6241028633592,
+    "Miami Heat": 1516.725746938876,
+    "Phoenix Suns": 1514.3606597516239,
+    "Los Angeles Clippers": 1508.5508807362285,
+    "Golden State Warriors": 1399.1920441396403,
+    "New Orleans Pelicans": 1378.82662697326,
+    "Milwaukee Bucks": 1338.3518126347078,
+    "Dallas Mavericks": 1324.9585126575348,
+    "Chicago Bulls": 1314.1196265411766,
+    "Sacramento Kings": 1304.8159381071741,
+    "Indiana Pacers": 1293.720494745182,
+    "Memphis Grizzlies": 1243.2494841307619,
+    "Utah Jazz": 1233.8006608105372,
+    "Brooklyn Nets": 1224.8778056236656,
+    "Washington Wizards": 1159.453105201708
+  },
+  "params": {
+    "k": 20,
+    "home_adv": 100,
+    "season_regress": 0.25,
+    "n_games": 15415
+  },
+  "updated_at": "2026-05-21T02:05:20.802559"
+}

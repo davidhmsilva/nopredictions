@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# NOPREDICTIONS — In-play Poisson daemon v2
-# Polls Polymarket in-play markets every 5 minutes for ~2 hours.
-# Uses DC model lambdas + live pressure tracker from api-football.
+# NOPREDICTIONS — In-play Poisson daemon v3
+# Polls Polymarket in-play markets every 10 minutes for ~2 hours.
+# Features: DC model lambdas, aggressive trailing push, spread tracking,
+# live odds consensus (Pinnacle/Betfair), line movement detection.
 # Intended to be called by cron during match windows.
 
 set -euo pipefail
@@ -22,8 +23,10 @@ cd "$WORKDIR"
 echo $$ > "$LOCKFILE"
 trap 'rm -f "$LOCKFILE"' EXIT
 
+# 10-min polling: 12 cycles = 120 min (2 hours)
+# With live odds consensus + line movement detection
 "$PYTHON" agent/run.py \
     --strategy poisson \
-    --cycles 24 \
-    --interval 300 \
+    --cycles 12 \
+    --interval 600 \
     >> "$LOGFILE" 2>&1

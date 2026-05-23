@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://nopredictions.com'),
   title: 'NOPREDICTIONS — AI vs Prediction Markets',
   description:
-    'An AI agent hunting football mispricings on Polymarket. Every hypothesis, every position, every failure — public.',
+    'An AI agent hunting sports mispricings on Polymarket. Football, NBA, and more. Every position, every failure — public.',
   icons: {
     icon: [
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'NOPREDICTIONS — AI vs Prediction Markets',
     description:
-      'No predictions. Just edges. An AI agent finding football mispricings on prediction markets. Live, public, accountable.',
+      'No predictions. Just edges. An AI agent finding sports mispricings on prediction markets. Live, public, accountable.',
     images: ['/banner.jpg'],
   },
 }

@@ -68,7 +68,24 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── run.py                         ← CLI entry point ✅
 │   ├── orchestrator.py                ← simplified control loop ✅
 │   ├── paper_trader.py                ← Strategy 1: PM-vs-Sharp Consensus ✅
-│   ├── poisson_trader.py              ← Strategy 2: PM-vs-Poisson In-Play ✅
+│   ├── poisson_trader.py              ← Strategy 2: PM-vs-Poisson In-Play (legacy) ✅
+│   ├── dixon_coles.py                 ← Dixon-Coles xG model ✅
+│   ├── dc_scanner.py                  ← Strategy 4: DC Model Pre-Match scanner ✅
+│   ├── elo_model.py                   ← Strategy 3: ELO+Poisson model ✅
+│   ├── nba_scanner.py                 ← Strategy 5: NBA Elo Pre-Match scanner ✅
+│   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
+│   ├── market_flow.py                 ← whale activity + smart money signals ✅
+│   ├── live_tracker.py                ← rolling-window pressure signals ✅
+│   ├── sim/                           ← Monte Carlo match simulator ✅ NEW
+│   │   ├── state.py                   ←   vectorized MatchState
+│   │   ├── rates.py                   ←   λ → per-minute rates
+│   │   ├── adjustments.py             ←   state-dependent rate modifiers
+│   │   ├── simulator.py               ←   vectorized MC loop
+│   │   ├── pricer.py                  ←   sim → market probabilities
+│   │   └── calibrator.py              ←   vs analytical Poisson sanity check
+│   ├── sim_demo.py                    ← sim engine demo + calibration check ✅ NEW
+│   ├── sim_scanner.py                 ← Strategy 6: Sim Model Pre-Match ✅ NEW
+│   ├── inplay_sim_scanner.py          ← Strategy 7: Sim Model In-Play ✅ NEW
 │   ├── resolver.py                    ← resolves trades + calculates CLV ✅
 │   ├── tools/
 │   │   └── db.py                      ← DB read/write helpers
@@ -110,7 +127,7 @@ Schema is live. Key tables:
 | `match_odds` | Opening + closing odds (Pinnacle, Bet365, Betfair Exchange, etc.) |
 | `research_hypotheses` | Legacy — hypothesis log from retired research pipeline |
 | `backtest_runs` | Legacy — backtest results |
-| `strategies` | Active trading strategies (PM-vs-Sharp Consensus, PM-vs-Poisson) |
+| `strategies` | Active trading strategies (Sharp Consensus, Poisson, ELO, DC, NBA Elo, Sim Pre-Match, Sim In-Play) |
 | `paper_trades` | Every position the agent takes on Polymarket ✅ ACTIVE |
 | `pm_markets` | Polymarket market metadata + snapshots |
 | `agent_runs` | Log of agent invocations ✅ ACTIVE |
@@ -206,6 +223,15 @@ python run.py --strategy consensus         # only pre-match scan
 python run.py --strategy poisson           # only in-play scan
 python run.py --cycles 5 --interval 900   # 5 cycles, 15 min apart (in-play daemon)
 python run.py --dry-run                    # no DB writes
+
+# Standalone scanners (not in run.py)
+python dc_scanner.py                       # DC pre-match (cron: 8:00 UTC)
+python sim_scanner.py                      # MC sim pre-match (new — runs every market type)
+python inplay_sim_scanner.py               # MC sim in-play (new — same engine + live state)
+python nba_scanner.py                      # NBA Elo pre-match
+
+# Sim engine demo / calibration
+python sim_demo.py                         # sanity-check sim vs analytical Poisson
 ```
 
 **API keys** in `ingest/.env`:
@@ -215,7 +241,7 @@ python run.py --dry-run                    # no DB writes
 
 ---
 
-## Current pipeline state (as of 2026-05-03)
+## Current pipeline state (as of 2026-05-23)
 
 | Stage | Status |
 |---|---|
@@ -227,14 +253,22 @@ python run.py --dry-run                    # no DB writes
 | Stage C (v2) — ClubElo ratings | ✅ ELO histories loaded |
 | Stage D — The Odds API (sharp) | ✅ Live Pinnacle + Betfair odds |
 | Stage E — In-Play Monitor | ✅ Built (needs FOOTBALL_API_KEY) |
+| Stage F — NBA pipeline | ✅ 15k games, Elo model, scanner |
 | Odds — Pinnacle opening | ✅ ~95k records ("Pinnacle (legacy)") |
 | Odds — Pinnacle closing | ✅ ~95k records ("Pinnacle (closing)") |
 | Odds — Betfair Exchange closing | ✅ ~13k records |
 | Strategy 1 — PM-vs-Sharp Consensus | ✅ Built and running |
-| Strategy 2 — PM-vs-Poisson In-Play | ✅ Built (needs live score API key) |
+| Strategy 2 — PM-vs-Poisson In-Play (legacy) | ✅ Built; O/U classifier bug fixed 2026-05-23 |
+| Strategy 3 — PM-vs-ELO Pre-Match | ✅ Built |
+| Strategy 4 — DC Model Pre-Match | ✅ Daily cron at 8:00 UTC |
+| Strategy 5 — NBA Elo Pre-Match | ✅ All PM market types (ML/spreads/totals) |
+| Strategy 6 — Sim Model Pre-Match | ✅ NEW — MC sim, 15 market keys (HT/FT/totals/BTTS/handicaps) |
+| Strategy 7 — Sim Model In-Play | ✅ NEW — same MC sim from in-play state |
+| Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
+| InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
 | Resolver | ✅ Settles trades + calculates CLV |
 | Public website | ✅ Live at [nopredictions.com](https://nopredictions.com) |
-| Git repo | ✅ Initialized (local, no remote yet) |
+| Git repo | ✅ Remote: github.com/davidhmsilva/nopredictions |
 | X / Twitter launch | ⏳ Pending first edge results |
 
 ---

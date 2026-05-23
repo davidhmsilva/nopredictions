@@ -49,8 +49,8 @@ export function HomeSection({
           <span className="accent">JUST EDGES.</span>
         </h1>
         <p>
-          An AI agent hunting football mispricings on prediction markets — using mathematical models
-          trained on 100,000+ matches to find prices the market got wrong.
+          An AI agent hunting sports mispricings on prediction markets — using mathematical models
+          trained on 139,000+ matches across football and NBA to find prices the market got wrong.
           Every position, every failure: public.
         </p>
         <div className="cta-row">
@@ -86,7 +86,7 @@ export function HomeSection({
               NO POSITIONS YET
             </div>
             <div style={{ fontSize: '12px', color: 'var(--grey)', lineHeight: '1.7', maxWidth: '420px', margin: '0 auto' }}>
-              The agent scans Polymarket football markets daily. First trade lands
+              The agent scans Polymarket sports markets daily. First trade lands
               when it finds a price the market got wrong.
             </div>
           </div>
@@ -190,9 +190,9 @@ export function HomeSection({
       <div className="home-block">
         <div className="block-eyebrow" style={{ justifyContent: 'center' }}><span>WHAT IS THIS?</span></div>
         <p className="what-is-this">
-          An AI agent scans football <strong>prediction markets</strong> daily, using
-          mathematical models trained on <strong>100,000+ real matches</strong> to find
-          mispricings. When it detects the market got a price wrong, it logs a paper trade
+          An AI agent scans sports <strong>prediction markets</strong> daily, using
+          mathematical models trained on <strong>139,000+ real matches</strong> across football
+          and NBA to find mispricings. When it detects the market got a price wrong, it logs a paper trade
           — logged publicly in real time, with full reasoning.
           No retroactive claims, no quiet failures.{' '}
           <button onClick={() => setSection('about')}>The full project →</button>

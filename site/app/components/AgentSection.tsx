@@ -38,8 +38,8 @@ export function AgentSection({
           color: 'var(--grey)',
           lineHeight: '1.9',
         }}>
-          Our AI scans football prediction markets every day, comparing prices against
-          its own mathematical models trained on 100,000+ matches.
+          Our AI scans sports prediction markets every day — football and NBA — comparing
+          prices against its own mathematical models trained on 139,000+ matches.
           When the market price is wrong, the agent bets — and logs everything here
           with full transparency, in real time.
         </p>
@@ -137,7 +137,7 @@ export function AgentSection({
             NO POSITIONS YET
           </div>
           <div style={{ fontSize: '12px', color: 'var(--grey)', lineHeight: '1.8', maxWidth: '480px', margin: '0 auto' }}>
-            The agent scans Polymarket football markets every morning.
+            The agent scans Polymarket sports markets every day.
             When it finds a mispricing, it logs a paper trade here — publicly, in real time.
           </div>
         </div>

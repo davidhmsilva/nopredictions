@@ -12,7 +12,7 @@ export function Footer({ setSection }: { setSection: (s: Section) => void }) {
       }}
     >
       <div className="footer-inner">
-      <div>NOPREDICTIONS © 2026 · AI VS POLYMARKET · NOT FINANCIAL ADVICE</div>
+      <div>NOPREDICTIONS © 2026 · AI VS SPORTS PREDICTION MARKETS · NOT FINANCIAL ADVICE</div>
       <div className="footer-links">
         <a
           href="https://x.com"

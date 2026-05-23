@@ -5,18 +5,20 @@ import { formatDate, formatDateTime } from '../lib/helpers'
 import type { PaperTrade } from '../lib/supabase'
 
 export function extractMatchName(trade: PaperTrade): string {
-  // 1. Try DC Model reasoning: "DC Model: Team A vs Team B —"
   if (trade.reasoning) {
-    const m = trade.reasoning.match(/DC Model:\s*(.+?)\s*[—\-]/i)
-    if (m) return m[1].trim()
+    // NBA Elo reasoning: "NBA Elo [type]: Team A (1234) vs Team B (5678)..."
+    const nba = trade.reasoning.match(/NBA Elo.*?:\s*(.+?)\s*\(\d+.*?\)\s+vs\s+(.+?)\s*\(\d+.*?\)/i)
+    if (nba) return `${nba[1].trim()} vs ${nba[2].trim()}`
+    // DC Model or MC Sim reasoning: "DC Model: Team A vs Team B —" / "MC Sim: Team A vs Team B —"
+    const model = trade.reasoning.match(/(?:DC Model|MC Sim):\s*(.+?)\s*[—\-]/i)
+    if (model) return model[1].trim()
     const m2 = trade.reasoning.match(/Match:\s*(.+?)\s*\[/i)
     if (m2) return m2[1].trim()
   }
-  // 2. Try market_title with "vs"
+  // Try market_title with "vs"
   if (trade.market_title && trade.market_title !== '—') {
     const m = trade.market_title.match(/(?:Will\s+)?(.+?)\s+(?:vs\.?|versus)\s+(.+?)(?:\s+end|\s+win|\?|$)/i)
     if (m) return `${m[1].trim()} vs ${m[2].trim()}`
-    // 3. "Will X win on date?" → extract just X
     const m2 = trade.market_title.match(/Will\s+(.+?)\s+win\b/i)
     if (m2) return m2[1].trim()
     return trade.market_title
@@ -24,15 +26,49 @@ export function extractMatchName(trade: PaperTrade): string {
   return '—'
 }
 
+export function formatOutcome(outcome: string | null | undefined): string {
+  if (!outcome) return '—'
+  const o = outcome.toLowerCase()
+
+  // Direct labels
+  const direct: Record<string, string> = {
+    'home': 'HOME WIN',
+    'home_win': 'HOME WIN',
+    'away': 'AWAY WIN',
+    'away_win': 'AWAY WIN',
+    'draw': 'DRAW',
+    'ht_home_win': 'HOME WIN (1H)',
+    'ht_draw': 'DRAW (1H)',
+    'ht_away_win': 'AWAY WIN (1H)',
+    'btts': 'BTTS',
+    'no_btts': 'NO BTTS',
+    'home_wins_by_2plus': 'HOME -1.5',
+    'home_wins_by_3plus': 'HOME -2.5',
+    'away_wins_by_2plus': 'AWAY -1.5',
+    'away_wins_by_3plus': 'AWAY -2.5',
+  }
+  if (direct[o]) return direct[o]
+
+  // Totals: "over_2_5", "over_2.5", "under_3_5", etc.
+  const tot = o.match(/^(over|under)_(\d+)[._](\d+)$/)
+  if (tot) return `${tot[1].toUpperCase()} ${tot[2]}.${tot[3]}`
+
+  // "NOT <team> win" (No Bias strategy) — leave as-is but uppercase
+  return outcome.toUpperCase()
+}
+
 export function TradeCard({ trade }: { trade: PaperTrade }) {
   const [open, setOpen] = useState(false)
   const isResolved = !!trade.resolved_at
   const isWon      = trade.result === 'won'
+  const isVoid     = trade.result === 'void'
 
   const src = trade.sharp_consensus_sources as Record<string, unknown> | null
   const score  = src?.score  as string | undefined
   const minute = src?.minute as number | undefined
   const isInPlay = !!score
+  const isNba = trade.strategy_name?.toLowerCase().includes('nba') ||
+                trade.reasoning?.includes('NBA Elo')
 
   const edgePp = Number(trade.expected_edge) * 100
   const pnl = Number(trade.payout_units ?? 0) - Number(trade.stake_units ?? 0)
@@ -61,15 +97,26 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          {isNba && (
+            <span style={{ fontSize: '10px', letterSpacing: '2px', color: '#f97316', border: '1px solid #f97316', padding: '2px 6px' }}>
+              NBA
+            </span>
+          )}
           {isInPlay && (
             <span style={{ fontSize: '10px', letterSpacing: '2px', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '2px 6px' }}>
               IN-PLAY
             </span>
           )}
           {isResolved ? (
-            <span className="badge" style={{ borderColor: isWon ? 'var(--green)' : 'var(--red)', color: isWon ? 'var(--green)' : 'var(--red)' }}>
-              {isWon ? 'WON' : 'LOST'}
-            </span>
+            isVoid ? (
+              <span className="badge" style={{ borderColor: 'var(--grey)', color: 'var(--grey)' }}>
+                VOID
+              </span>
+            ) : (
+              <span className="badge" style={{ borderColor: isWon ? 'var(--green)' : 'var(--red)', color: isWon ? 'var(--green)' : 'var(--red)' }}>
+                {isWon ? 'WON' : 'LOST'}
+              </span>
+            )
           ) : (
             <span className="badge badge-status-live">OPEN</span>
           )}
@@ -78,7 +125,7 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
 
       {/* Pick */}
       <div style={{ marginBottom: '20px', fontSize: '14px', color: 'var(--accent)', letterSpacing: '1px' }}>
-        PICK: {trade.outcome?.toUpperCase()}
+        PICK: {formatOutcome(trade.outcome)}
       </div>
 
       {/* Stats grid */}
@@ -99,8 +146,8 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>P&L</div>
-          <div style={{ fontSize: '20px', color: isResolved ? (pnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
-            {isResolved ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}u` : 'OPEN'}
+          <div style={{ fontSize: '20px', color: isVoid ? 'var(--grey)' : (isResolved ? (pnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)') }}>
+            {isVoid ? '—' : (isResolved ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}u` : 'OPEN')}
           </div>
         </div>
       </div>

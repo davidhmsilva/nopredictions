@@ -11,9 +11,9 @@ export function AboutSection({ stats, loading }: { stats: DbStats | null; loadin
       <div style={{ maxWidth: '560px', margin: '0 auto', textAlign: 'center' }}>
 
         <p style={{ fontSize: '14px', color: '#aaa', lineHeight: '2', marginBottom: '32px' }}>
-          This is a live experiment. An AI agent scans football prediction markets every day,
-          looking for prices the market got wrong. When it finds one, it bets — and logs
-          everything here in real time.
+          This is a live experiment. An AI agent scans sports prediction markets every day —
+          football and NBA — looking for prices the market got wrong. When it finds one,
+          it bets — and logs everything here in real time.
         </p>
 
         <p style={{ fontSize: '14px', color: '#aaa', lineHeight: '2', marginBottom: '32px' }}>

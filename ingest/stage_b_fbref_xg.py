@@ -62,14 +62,24 @@ RATE_SECS    = 3.5   # slightly above 3s to be safe with FBref
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Big 5 + UCL. xg_from = first season where FBref has xG data.
+# Big 5 + UCL + Americas.  xg_from = first season where FBref has xG data.
+# calendar_year = True → season URL uses "2024" not "2023-2024", DB label is "2024".
 LEAGUES: dict[str, dict] = {
+    # --- Europe (split-season: 2023-2024) ---
     'ENG-PR':  {'fbref_id': 9,  'fbref_name': 'Premier-League',        'xg_from': 2017},
     'GER-BL1': {'fbref_id': 20, 'fbref_name': 'Bundesliga',             'xg_from': 2017},
     'ITA-SA':  {'fbref_id': 11, 'fbref_name': 'Serie-A',                'xg_from': 2017},
     'ESP-LL':  {'fbref_id': 12, 'fbref_name': 'La-Liga',                'xg_from': 2017},
     'FRA-L1':  {'fbref_id': 13, 'fbref_name': 'Ligue-1',                'xg_from': 2018},
     'UEFA-CL': {'fbref_id': 8,  'fbref_name': 'Champions-League',       'xg_from': 2017},
+    # --- Americas (calendar-year: 2024) ---
+    'USA-MLS':      {'fbref_id': 22, 'fbref_name': 'Major-League-Soccer',  'xg_from': 2017, 'calendar_year': True},
+    'BRA-SA':       {'fbref_id': 24, 'fbref_name': 'Serie-A',              'xg_from': 2018, 'calendar_year': True},
+    'ARG-PD':       {'fbref_id': 21, 'fbref_name': 'Primera-Division',     'xg_from': 2019, 'calendar_year': True},
+    'MEX-LMX':      {'fbref_id': 31, 'fbref_name': 'Liga-MX',             'xg_from': 2018, 'calendar_year': True},
+    'COL-PA':       {'fbref_id': 41, 'fbref_name': 'Primera-A',            'xg_from': 2020, 'calendar_year': True},
+    'CHL-PD':       {'fbref_id': 35, 'fbref_name': 'Primera-Division',     'xg_from': 2020, 'calendar_year': True},
+    'CONMEBOL-CL':  {'fbref_id': 14, 'fbref_name': 'Copa-Libertadores',    'xg_from': 2018, 'calendar_year': True},
 }
 
 XG_START_YEAR = 2017
@@ -103,6 +113,27 @@ KNOWN_ALIASES: dict[str, str] = {
     "olympique marseille":            "marseille",
     "olympique lyonnais":             "lyon",
     "as monaco":                      "monaco",
+    # --- MLS ---
+    "la galaxy":                      "los angeles galaxy",
+    "new york red bulls":             "ny red bulls",
+    "sporting kansas city":           "sporting kc",
+    "columbus crew":                  "columbus crew sc",
+    "cf montréal":                    "montreal impact",
+    "inter miami":                    "inter miami cf",
+    "st. louis city":                 "st. louis city sc",
+    # --- Brazil ---
+    "são paulo":                      "sao paulo",
+    "grêmio":                         "gremio",
+    "athletico paranaense":           "ath paranaense",
+    "atlético mineiro":               "atl mineiro",
+    "red bull bragantino":            "bragantino",
+    # --- Argentina ---
+    "ca independiente":               "independiente",
+    "boca juniors":                   "boca jrs",
+    "newell's old boys":              "newells old boys",
+    # --- Mexico ---
+    "club américa":                   "america",
+    "cruz azul":                      "cruz azul fc",
 }
 
 
@@ -112,16 +143,24 @@ def generate_seasons(start_year: int, end_year_excl: int) -> list[str]:
 
 DEFAULT_SEASONS = generate_seasons(XG_START_YEAR, 2026)
 
+CALENDAR_YEAR_SEASONS = [str(y) for y in range(XG_START_YEAR, 2026)]
 
-def season_to_fbref(season: str) -> str:
-    """'2023-24' → '2023-2024'"""
+
+def is_calendar_year(league_code: str) -> bool:
+    return LEAGUES.get(league_code, {}).get('calendar_year', False)
+
+
+def season_to_fbref(season: str, league_code: str) -> str:
+    """'2023-24' → '2023-2024' for split-season; '2024' stays '2024' for calendar-year."""
+    if is_calendar_year(league_code):
+        return season.split('-')[0]
     start, _ = season.split('-')
     return f'{start}-{int(start) + 1}'
 
 
 def build_url(league_code: str, season: str) -> str:
     cfg = LEAGUES[league_code]
-    fs  = season_to_fbref(season)
+    fs  = season_to_fbref(season, league_code)
     return (
         f'{FBREF_BASE}/en/comps/{cfg["fbref_id"]}/{fs}/schedule/'
         f'{fs}-{cfg["fbref_name"]}-Scores-and-Fixtures'
@@ -181,11 +220,22 @@ def fetch(url: str, cache_dir: Path) -> str | None:
 # HTML parsing
 # ---------------------------------------------------------------------------
 
+def _parse_score(score_str: str) -> tuple[int, int] | None:
+    for sep in ('–', '-', '−'):
+        if sep in score_str:
+            parts = score_str.split(sep)
+            try:
+                return int(parts[0].strip()), int(parts[1].strip())
+            except (ValueError, IndexError):
+                continue
+    return None
+
+
 def parse_schedule(html: str, league_code: str, season: str) -> list[dict]:
     """
     Parse FBref schedule page.
-    Returns list of dicts: {date, home_team, away_team, home_xg, away_xg}.
-    Rows without xG are dropped.
+    Returns list of dicts with: date, home_team, away_team, home_xg, away_xg,
+    home_goals, away_goals.  Rows without xG are dropped.
     """
     soup  = BeautifulSoup(html, 'html.parser')
     table = soup.find('table', id=lambda x: x and x.startswith('sched_'))
@@ -199,7 +249,6 @@ def parse_schedule(html: str, league_code: str, season: str) -> list[dict]:
 
     rows = []
     for tr in table.select('tbody tr'):
-        # Skip divider/header rows inserted by FBref
         if 'class' in tr.attrs and any(c in tr['class'] for c in ('thead', 'spacer')):
             continue
 
@@ -207,14 +256,16 @@ def parse_schedule(html: str, league_code: str, season: str) -> list[dict]:
         home_team  = cell(tr, 'home_team')
         away_team  = cell(tr, 'away_team')
         score      = cell(tr, 'score')
-        xg_home_s  = cell(tr, 'xg')     # home xG column
-        xg_away_s  = cell(tr, 'xg_2')   # away xG column
+        xg_home_s  = cell(tr, 'xg')
+        xg_away_s  = cell(tr, 'xg_2')
 
-        # Must have date, teams, and a played score
         if not date_str or not home_team or not away_team:
             continue
-        if not score or '–' not in score and '-' not in score:
-            continue   # not yet played
+        if not score:
+            continue
+        parsed = _parse_score(score)
+        if parsed is None:
+            continue
 
         try:
             match_date = datetime.strptime(date_str.strip(), '%Y-%m-%d').date()
@@ -232,16 +283,18 @@ def parse_schedule(html: str, league_code: str, season: str) -> list[dict]:
         home_xg = to_float(xg_home_s)
         away_xg = to_float(xg_away_s)
 
-        # Only keep rows that actually have xG
         if home_xg is None and away_xg is None:
             continue
 
+        hg, ag = parsed
         rows.append({
-            'date':      match_date,
-            'home_team': home_team.strip(),
-            'away_team': away_team.strip(),
-            'home_xg':   home_xg,
-            'away_xg':   away_xg,
+            'date':       match_date,
+            'home_team':  home_team.strip(),
+            'away_team':  away_team.strip(),
+            'home_goals': hg,
+            'away_goals': ag,
+            'home_xg':    home_xg,
+            'away_xg':    away_xg,
         })
 
     return rows
@@ -316,6 +369,25 @@ def resolve_team(cur, fbref_name: str,
     return None
 
 
+def _ensure_team(cur, fbref_name: str,
+                  canonical_map: dict[str, int],
+                  alias_map: dict[str, int]) -> int:
+    """Create a new team from its FBref name, register alias, return team_id."""
+    key = fbref_name.lower()
+    if key in canonical_map:
+        team_id = canonical_map[key]
+    else:
+        cur.execute(
+            'INSERT INTO teams (canonical_name) VALUES (%s) RETURNING id',
+            (fbref_name,),
+        )
+        team_id = cur.fetchone()[0]
+        canonical_map[key] = team_id
+        log.debug(f'  auto-created team: "{fbref_name}" (id={team_id})')
+    register_alias(cur, team_id, fbref_name, alias_map)
+    return team_id
+
+
 def upsert_xg(cur, match_id: int, home_xg: float | None, away_xg: float | None):
     """Insert xG into match_stats, updating if row exists but xG is NULL."""
     cur.execute(
@@ -337,6 +409,7 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
     """Returns (updated, unmatched)."""
     start_year = int(season.split('-')[0])
     cfg        = LEAGUES[league_code]
+    cal        = is_calendar_year(league_code)
 
     if start_year < cfg['xg_from']:
         log.info(f'  {league_code}/{season}: skip (xG not on FBref before {cfg["xg_from"]}-XX)')
@@ -366,22 +439,34 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
         return 0, 0
     league_id = r[0]
 
-    cur.execute('SELECT id FROM seasons WHERE league_id = %s AND label = %s', (league_id, season))
+    # Calendar-year leagues use "2024" as DB label; split-season use "2023-24"
+    db_label = str(start_year) if cal else season
+    cur.execute('SELECT id FROM seasons WHERE league_id = %s AND label = %s', (league_id, db_label))
     r = cur.fetchone()
     if not r:
-        log.warning(f'{league_code}/{season}: season not in DB')
+        log.warning(f'{league_code}/{db_label}: season not in DB')
         return 0, 0
     season_id = r[0]
 
     alias_map     = load_team_alias_map(cur)
     canonical_map = load_all_canonical_teams(cur)
 
+    # Leagues not in Football-Data need match rows created from FBref data
+    no_fd = cfg.get('calendar_year', False) and not cfg.get('fd_code')
+
     updated   = 0
+    created   = 0
     unmatched = 0
 
     for row in rows:
         home_id = resolve_team(cur, row['home_team'], alias_map, canonical_map)
         away_id = resolve_team(cur, row['away_team'], alias_map, canonical_map)
+
+        # Auto-create teams for leagues without prior data
+        if no_fd and home_id is None:
+            home_id = _ensure_team(cur, row['home_team'], canonical_map, alias_map)
+        if no_fd and away_id is None:
+            away_id = _ensure_team(cur, row['away_team'], canonical_map, alias_map)
 
         if home_id is None or away_id is None:
             missing = []
@@ -402,6 +487,25 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
         )
         match_row = cur.fetchone()
 
+        if not match_row and no_fd:
+            hg = row.get('home_goals')
+            ag = row.get('away_goals')
+            if hg is not None and ag is not None:
+                result = 'H' if hg > ag else ('A' if ag > hg else 'D')
+                cur.execute(
+                    '''INSERT INTO matches
+                       (season_id, home_team_id, away_team_id, kickoff_utc,
+                        ft_home_goals, ft_away_goals, result)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT DO NOTHING
+                       RETURNING id''',
+                    (season_id, home_id, away_id, row['date'], hg, ag, result),
+                )
+                ins = cur.fetchone()
+                if ins:
+                    match_row = ins
+                    created += 1
+
         if not match_row:
             log.debug(f'  no match in DB: {row["home_team"]} v {row["away_team"]} {row["date"]}')
             unmatched += 1
@@ -411,7 +515,12 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
         updated += 1
 
     conn.commit()
-    log.info(f'  {league_code}/{season}: {updated} updated, {unmatched} unmatched')
+    parts = [f'{updated} xG-updated']
+    if created:
+        parts.append(f'{created} matches created')
+    if unmatched:
+        parts.append(f'{unmatched} unmatched')
+    log.info(f'  {league_code}/{season}: {", ".join(parts)}')
     return updated, unmatched
 
 
@@ -422,9 +531,9 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--leagues', nargs='+', default=list(LEAGUES.keys()),
-                        help='league codes (default: all Big 5 + UCL)')
-    parser.add_argument('--seasons', nargs='+', default=DEFAULT_SEASONS,
-                        help="seasons in 'YYYY-YY' format")
+                        help='league codes (default: all configured leagues)')
+    parser.add_argument('--seasons', nargs='+', default=None,
+                        help="seasons in 'YYYY-YY' format (auto-detected per league if omitted)")
     parser.add_argument('--cache-dir', type=Path, default=Path('.cache/fbref'),
                         help='HTML cache directory')
     parser.add_argument('--dry-run', action='store_true',
@@ -452,7 +561,13 @@ def main():
             if lg not in LEAGUES:
                 log.warning(f'Unknown league {lg}, skipping')
                 continue
-            for s in args.seasons:
+            if args.seasons:
+                seasons = args.seasons
+            elif is_calendar_year(lg):
+                seasons = CALENDAR_YEAR_SEASONS
+            else:
+                seasons = DEFAULT_SEASONS
+            for s in seasons:
                 try:
                     u, un = ingest(conn, lg, s, args.cache_dir, args.dry_run)
                     total_updated   += u

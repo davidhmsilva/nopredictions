@@ -5,8 +5,8 @@ const NARRATIVE_ITEMS = [
   { label: 'AI VS', value: 'THE MARKET' },
   { label: 'EVERY PICK', value: 'LOGGED PUBLICLY' },
   { label: 'WINS AND LOSSES', value: 'ALL ON RECORD' },
-  { label: 'FOOTBALL', value: 'PREDICTION MARKETS' },
-  { label: 'TRAINED ON', value: '100,000+ MATCHES' },
+  { label: 'FOOTBALL + NBA', value: 'PREDICTION MARKETS' },
+  { label: 'TRAINED ON', value: '139,000+ MATCHES' },
 ]
 
 export function Ticker({ trades }: { trades?: PaperTrade[] }) {

@@ -71,6 +71,14 @@ INSERT INTO leagues (code, name, country, tier, fd_code, is_cup) VALUES
     ('UEFA-CL',  'UEFA Champions League',      'UEFA', 1, NULL, FALSE),
     ('UEFA-EL',  'UEFA Europa League',         'UEFA', 2, NULL, FALSE),
     ('UEFA-ECL', 'UEFA Europa Conference League', 'UEFA', 3, NULL, FALSE),
+    -- Americas (7) — FBref-sourced, no Football-Data coverage --------------
+    ('USA-MLS',     'Major League Soccer',  'USA',       1, NULL, FALSE),
+    ('BRA-SA',      'Brasileirão Série A',  'Brazil',    1, NULL, FALSE),
+    ('ARG-PD',      'Primera División',     'Argentina', 1, NULL, FALSE),
+    ('MEX-LMX',     'Liga MX',             'Mexico',    1, NULL, FALSE),
+    ('COL-PA',      'Primera A',           'Colombia',  1, NULL, FALSE),
+    ('CHL-PD',      'Primera División',    'Chile',     1, NULL, FALSE),
+    ('CONMEBOL-CL', 'Copa Libertadores',   'CONMEBOL',  1, NULL, TRUE),
     -- International (2) ---------------------------------------------------
     ('INT-WC',   'FIFA World Cup',             'INTL', 1, NULL, TRUE),
     ('INT-EURO', 'UEFA European Championship', 'INTL', 1, NULL, TRUE)
@@ -81,4 +89,4 @@ ON CONFLICT (code) DO UPDATE SET
     fd_code = EXCLUDED.fd_code,
     is_cup  = EXCLUDED.is_cup;
 
--- Total: 22 FD-covered + 3 UEFA + 2 International = 27 competitions.
+-- Total: 22 FD-covered + 3 UEFA + 7 Americas + 2 International = 34 competitions.

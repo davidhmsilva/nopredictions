@@ -665,9 +665,19 @@ def _classify_pm_outcome(title: str, home: str, away: str) -> str | None:
             if _norm(away)[:6] in _norm(t):
                 return 'spread_a_plus_1_5'
 
-    # Totals
+    # Totals — handle both "Over/Under N.5" and PM's "O/U N.5" format.
+    # PM "X vs Y: O/U N.5" markets price YES = over, NO = under.
     if 'draw' in t:
         return 'draw'
+    if 'both teams' in t or 'btts' in t:
+        return 'btts'
+    # PM "X vs Y: O/U N.5" → YES is over. Legacy Poisson model only computes
+    # over_1_5 / over_2_5; return None for other lines so we DON'T fall through
+    # to the team-name match (that's the bug — Celtic FC misclassified as winner).
+    if 'o/u' in t:
+        if '2.5' in t: return 'over_2_5'
+        if '1.5' in t: return 'over_1_5'
+        return None
     if 'over' in t and '2.5' in t:
         return 'over_2_5'
     if 'under' in t and '2.5' in t:
@@ -676,8 +686,6 @@ def _classify_pm_outcome(title: str, home: str, away: str) -> str | None:
         return 'over_1_5'
     if 'under' in t and '1.5' in t:
         return 'under_1_5'
-    if 'both teams' in t or 'btts' in t:
-        return 'btts'
 
     # Home/away win
     if _norm(home)[:6] in _norm(t):
