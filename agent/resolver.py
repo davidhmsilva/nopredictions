@@ -155,9 +155,7 @@ def _check_pm_resolution(external_id: str) -> str | None:
     no_price = float(prices[1])
 
     is_closed = data.get('closed', False)
-    prices_terminal = yes_price >= RESOLUTION_THRESHOLD or no_price >= RESOLUTION_THRESHOLD
-
-    if not is_closed and not prices_terminal:
+    if not is_closed:
         return None
 
     if yes_price >= RESOLUTION_THRESHOLD:
@@ -349,8 +347,8 @@ def run() -> list[dict]:
             FROM paper_trades pt
             JOIN pm_markets pm ON pm.id = pt.market_id
             WHERE pt.result IS NULL
-              AND (pm.resolution_time IS NULL
-                   OR pm.resolution_time <= NOW() + INTERVAL '2 hours')
+              AND pm.resolution_time IS NOT NULL
+              AND pm.resolution_time <= NOW()
         """)
 
         pm_trades = [dict(r) for r in cur.fetchall()]
