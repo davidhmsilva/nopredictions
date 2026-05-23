@@ -15,7 +15,7 @@ export function StrategyDetail({
 }) {
   const stratTrades = trades
     .filter((t) => t.strategy_id === strategy.id)
-    .sort((a, b) => new Date(b.placed_at).getTime() - new Date(a.placed_at).getTime())
+    .sort((a, b) => new Date(b.game_time ?? b.placed_at).getTime() - new Date(a.game_time ?? a.placed_at).getTime())
 
   const settled = stratTrades.filter((t) => !!t.resolved_at)
   const active = stratTrades.filter((t) => !t.resolved_at)
