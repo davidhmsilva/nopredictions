@@ -37,8 +37,11 @@ export function AgentSection({
   )
   const settled = trades.filter((t) => !!t.resolved_at && t.result !== 'void')
   const recentSettled = trades.filter((t) => !!t.resolved_at).slice(0, 10)
-  const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
-  const wins = settled.filter(t => t.result === 'won').length
+  // Use strategy view totals (no limit) instead of trades array (capped at 200)
+  const totalPnl = strategies.reduce((s, st) => s + (st.total_pnl ?? 0), 0)
+  const wins = strategies.reduce((s, st) => s + (st.wins ?? 0), 0)
+  const losses = strategies.reduce((s, st) => s + (st.losses ?? 0), 0)
+  const totalSettled = wins + losses
 
   return (
     <SectionWrap>
@@ -70,16 +73,16 @@ export function AgentSection({
             <div className="l">OPEN</div>
           </div>
           <div>
-            <div className="v">{settled.length}</div>
+            <div className="v">{totalSettled}</div>
             <div className="l">SETTLED</div>
           </div>
           <div>
-            <div className="v">{settled.length > 0 ? `${wins}W / ${settled.length - wins}L` : '—'}</div>
+            <div className="v">{totalSettled > 0 ? `${wins}W / ${losses}L` : '—'}</div>
             <div className="l">RECORD</div>
           </div>
           <div>
-            <div className="v" style={{ color: settled.length > 0 && totalPnl >= 0 ? 'var(--green)' : settled.length > 0 ? 'var(--red)' : 'var(--grey)' }}>
-              {settled.length > 0 ? `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}u` : '—'}
+            <div className="v" style={{ color: totalSettled > 0 && totalPnl >= 0 ? 'var(--green)' : totalSettled > 0 ? 'var(--red)' : 'var(--grey)' }}>
+              {totalSettled > 0 ? `${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}u` : '—'}
             </div>
             <div className="l">P&amp;L</div>
           </div>
