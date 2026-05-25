@@ -26,6 +26,7 @@ export interface Strategy {
   // aggregated stats
   total_bets?: number
   wins?: number
+  losses?: number
   win_rate?: number
   avg_clv?: number
   total_pnl?: number
@@ -91,9 +92,10 @@ export async function fetchLeaderboard(): Promise<Strategy[]> {
     promoted_at:       r.promoted_at,
     retired_at:        r.retired_at,
     retirement_reason: r.retirement_reason,
-    total_bets:        Number(r.n_trades),
+    total_bets:        Number(r.n_wins) + Number(r.n_losses),
     wins:              Number(r.n_wins),
-    win_rate:          r.n_trades > 0 ? Number(r.n_wins) / Number(r.n_trades) : 0,
+    losses:            Number(r.n_losses),
+    win_rate:          (Number(r.n_wins) + Number(r.n_losses)) > 0 ? Number(r.n_wins) / (Number(r.n_wins) + Number(r.n_losses)) : 0,
     avg_clv:           r.avg_clv != null ? Number(r.avg_clv) : null,
     total_pnl:         Number(r.pl_units),
     yield_pct:         r.yield_pct != null ? Number(r.yield_pct) : null,

@@ -62,11 +62,14 @@ def load_training_data(min_date: str = "2012-01-01") -> list[dict]:
         FROM matches m
         JOIN teams ht ON ht.id = m.home_team_id
         JOIN teams at ON at.id = m.away_team_id
+        JOIN seasons s ON s.id = m.season_id
+        JOIN leagues l ON l.id = s.league_id
         LEFT JOIN match_stats ms ON ms.match_id = m.id
         WHERE m.status = 'finished'
           AND m.home_score IS NOT NULL
           AND m.away_score IS NOT NULL
           AND m.kickoff_utc >= %s
+          AND l.code != 'USA-NBA'
         ORDER BY m.kickoff_utc
     """
     with _conn() as conn:

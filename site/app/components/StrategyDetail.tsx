@@ -17,21 +17,17 @@ export function StrategyDetail({
     .filter((t) => t.strategy_id === strategy.id)
     .sort((a, b) => new Date(b.game_time ?? b.placed_at).getTime() - new Date(a.game_time ?? a.placed_at).getTime())
 
-  const settled = stratTrades.filter((t) => !!t.resolved_at)
   const active = stratTrades.filter((t) => !t.resolved_at)
-  const wins = settled.filter((t) => t.result === 'won').length
-  const losses = settled.filter((t) => t.result === 'lost').length
-  const voids = settled.filter((t) => t.result === 'void').length
-  const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
-  const totalStaked = settled.reduce((s, t) => s + Number(t.stake_units ?? 0), 0)
-  const yieldPct = totalStaked > 0 ? (totalPnl / totalStaked) * 100 : 0
+
+  // Use authoritative stats from DB view (strategy object) — trades array is capped at 200
+  const totalBets = strategy.total_bets ?? 0
+  const wins = strategy.wins ?? 0
+  const losses = strategy.losses ?? 0
+  const totalPnl = strategy.total_pnl ?? 0
+  const yieldPct = strategy.yield_pct ?? 0
   const avgEdge = stratTrades.length > 0
     ? stratTrades.reduce((s, t) => s + Number(t.expected_edge ?? 0), 0) / stratTrades.length * 100
     : 0
-  const avgClv = settled.filter(t => t.clv != null)
-  const avgClvVal = avgClv.length > 0
-    ? avgClv.reduce((s, t) => s + Number(t.clv!), 0) / avgClv.length
-    : null
 
   return (
     <div>
@@ -59,7 +55,7 @@ export function StrategyDetail({
       </div>
       <div style={{ fontSize: '11px', color: 'var(--grey)', marginBottom: '32px' }}>
         {strategy.retired_at ? 'RETIRED' : 'LIVE'}
-        {' · '}{stratTrades.length} TOTAL TRADES
+        {' · '}{stratTrades.length} TRADES LOADED
       </div>
 
       {/* Stats strip */}
@@ -69,22 +65,22 @@ export function StrategyDetail({
           <div className="l">OPEN</div>
         </div>
         <div>
-          <div className="v">{settled.length}</div>
+          <div className="v">{totalBets}</div>
           <div className="l">SETTLED</div>
         </div>
         <div>
-          <div className="v">{settled.length > 0 ? `${wins}W / ${losses}L` : '—'}</div>
+          <div className="v">{totalBets > 0 ? `${wins}W / ${losses}L` : '—'}</div>
           <div className="l">RECORD</div>
         </div>
         <div>
-          <div className="v" style={{ color: settled.length > 0 ? (totalPnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
-            {settled.length > 0 ? fmtPnl(totalPnl) : '—'}
+          <div className="v" style={{ color: totalBets > 0 ? (totalPnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
+            {totalBets > 0 ? fmtPnl(totalPnl) : '—'}
           </div>
           <div className="l">P&L</div>
         </div>
         <div>
-          <div className="v" style={{ color: settled.length > 0 ? (yieldPct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
-            {settled.length > 0 ? fmtPct(yieldPct) : '—'}
+          <div className="v" style={{ color: totalBets > 0 ? (yieldPct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
+            {totalBets > 0 ? fmtPct(yieldPct) : '—'}
           </div>
           <div className="l">YIELD</div>
         </div>

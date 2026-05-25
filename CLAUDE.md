@@ -54,6 +54,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── stage_c_clubelo.py             ← ClubElo ratings ✅
 │   ├── stage_d_odds_api.py            ← The Odds API live sharp odds ✅
 │   ├── stage_e_inplay_monitor.py      ← In-play live score monitor ✅
+│   ├── stage_g_international.py       ← International results (WC, Euro, qualifs) ✅
 │   ├── requirements.txt
 │   ├── .env.example
 │   ├── .env                           ← DB connection string + API keys (gitignored)
@@ -195,6 +196,20 @@ Tables:
 - Feeds the PM-vs-Poisson In-Play strategy
 - Requires `FOOTBALL_API_KEY` in `.env`
 
+### Stage G — International results ✅ COMPLETE
+- **8,394 matches** from Mart Jürisoo's international results dataset
+- Covers: FIFA World Cup (finals + qualifiers), Euro, Nations League, Copa América, CONCACAF, AFCON, AFC Asian Cup, friendlies (2015+)
+- All **48 World Cup 2026 teams** in the DC model
+- Source: `github.com/martj42/international_results`
+- Teams auto-created with `source='international'` aliases
+
+**To run:**
+```bash
+cd ingest && source .venv/bin/activate
+python stage_g_international.py                  # full run (2010+)
+python stage_g_international.py --min-year 2020  # recent only
+```
+
 ### Betfair historical opening prices — PARKED
 Not strictly required — Pinnacle opening odds serve as the entry price proxy and
 Pinnacle closing as the CLV benchmark. Can be added later if needed.
@@ -254,6 +269,7 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Stage D — The Odds API (sharp) | ✅ Live Pinnacle + Betfair odds |
 | Stage E — In-Play Monitor | ✅ Built (needs FOOTBALL_API_KEY) |
 | Stage F — NBA pipeline | ✅ 15k games, Elo model, scanner |
+| Stage G — International results | ✅ 8,394 matches, 48 WC teams in DC model |
 | Odds — Pinnacle opening | ✅ ~95k records ("Pinnacle (legacy)") |
 | Odds — Pinnacle closing | ✅ ~95k records ("Pinnacle (closing)") |
 | Odds — Betfair Exchange closing | ✅ ~13k records |

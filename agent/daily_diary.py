@@ -133,7 +133,7 @@ def fetch_cumulative_stats(conn, up_to_date: date) -> dict:
             COUNT(*) FILTER (WHERE result = 'won') AS wins,
             COUNT(*) FILTER (WHERE result = 'lost') AS losses,
             COUNT(*) FILTER (WHERE result = 'void') AS voids,
-            ROUND(SUM(COALESCE(payout_units, 0))
+            ROUND(SUM(COALESCE(payout_units, 0) - COALESCE(stake_units, 0))
                   FILTER (WHERE result IN ('won', 'lost')), 2) AS net_pnl,
             ROUND(SUM(stake_units)
                   FILTER (WHERE result IN ('won', 'lost')), 2) AS total_staked,
@@ -155,7 +155,7 @@ def fetch_strategy_breakdown(conn, target_date: date) -> list[dict]:
             COUNT(*) FILTER (WHERE pt.resolved_at::date = %s) AS resolved_today,
             COUNT(*) FILTER (WHERE pt.result = 'won' AND pt.resolved_at::date = %s) AS wins_today,
             COUNT(*) FILTER (WHERE pt.result = 'lost' AND pt.resolved_at::date = %s) AS losses_today,
-            ROUND(SUM(COALESCE(pt.payout_units, 0))
+            ROUND(SUM(COALESCE(pt.payout_units, 0) - COALESCE(pt.stake_units, 0))
                   FILTER (WHERE pt.result IN ('won', 'lost') AND pt.resolved_at::date = %s), 2) AS pnl_today,
             ROUND(AVG(pt.clv)
                   FILTER (WHERE pt.clv IS NOT NULL AND pt.resolved_at::date = %s), 4) AS avg_clv_today
@@ -184,7 +184,10 @@ def render_diary(target_date: date, placed: list, resolved: list,
     total_resolved = len(resolved)
     wins = sum(1 for t in resolved if t["result"] == "won")
     losses = sum(1 for t in resolved if t["result"] == "lost")
-    day_pnl = sum(float(t["payout_units"] or 0) for t in resolved if t["result"] in ("won", "lost"))
+    day_pnl = sum(
+        float(t["payout_units"] or 0) - float(t["stake_units"] or 0)
+        for t in resolved if t["result"] in ("won", "lost")
+    )
 
     w("## Day at a Glance")
     w("")

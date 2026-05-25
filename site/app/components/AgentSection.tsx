@@ -35,11 +35,10 @@ export function AgentSection({
   const active = trades.filter((t) => !t.resolved_at).sort(
     (a, b) => new Date(a.game_time ?? a.placed_at).getTime() - new Date(b.game_time ?? b.placed_at).getTime()
   )
-  const settled = trades.filter((t) => !!t.resolved_at)
-  const recentSettled = settled.slice(0, 10)
+  const settled = trades.filter((t) => !!t.resolved_at && t.result !== 'void')
+  const recentSettled = trades.filter((t) => !!t.resolved_at).slice(0, 10)
   const totalPnl = settled.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
   const wins = settled.filter(t => t.result === 'won').length
-  const winRate = settled.length > 0 ? (wins / settled.length) * 100 : 0
 
   return (
     <SectionWrap>

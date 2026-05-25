@@ -90,9 +90,78 @@ def _determine_result(outcome_label: str, home_score: int, away_score: int) -> s
     return None  # unrecognisable
 
 
+def _get_closing_from_sharp_snapshot(closing_sharp_odds: dict | None,
+                                     outcome_label: str) -> float | None:
+    """
+    Extract closing probability from the closing_sharp_odds JSONB blob
+    captured by closing_collector.py.
+    """
+    if not closing_sharp_odds:
+        return None
+
+    ol = outcome_label.lower()
+    h2h = closing_sharp_odds.get('h2h', {})
+
+    # 1X2
+    if 'home_win' == ol or ('home' in ol and 'ht_' not in ol):
+        return h2h.get('home')
+    if 'away_win' == ol or ('away' in ol and 'ht_' not in ol and 'wins_by' not in ol):
+        return h2h.get('away')
+    if 'draw' in ol and 'ht_' not in ol:
+        return h2h.get('draw')
+
+    # Named team wins
+    if 'win' in ol and 'ht_' not in ol:
+        home_name = _norm_team(closing_sharp_odds.get('home', ''))
+        away_name = _norm_team(closing_sharp_odds.get('away', ''))
+        ol_clean = re.sub(r'\b(fc|cf|sc|ac|afc)\b', '', ol, flags=re.I).strip()
+        if home_name and home_name[:6] in ol_clean.lower():
+            return h2h.get('home')
+        if away_name and away_name[:6] in ol_clean.lower():
+            return h2h.get('away')
+
+    # NOT outcomes
+    if ol.startswith('not ') or ol.startswith('no '):
+        inner = re.sub(r'^(not |no )', '', ol).strip()
+        inner_prob = _get_closing_from_sharp_snapshot(closing_sharp_odds, inner)
+        if inner_prob is not None:
+            return round(1.0 - inner_prob, 6)
+
+    # Over/Under totals
+    m = re.search(r'(over|under)[_ ]?(\d+)[_ ](\d+)', ol)
+    if m:
+        key = f'{m.group(1)}_{m.group(2)}_{m.group(3)}'
+        if key in closing_sharp_odds:
+            return closing_sharp_odds[key]
+    m2 = re.search(r'(over|under)\s+([\d.]+)', ol)
+    if m2:
+        line_str = m2.group(2).replace('.', '_')
+        key = f'{m2.group(1)}_{line_str}'
+        if key in closing_sharp_odds:
+            return closing_sharp_odds[key]
+
+    # Handicap/spread
+    m = re.search(r'(home|away)_wins_by_(\d+)plus', ol)
+    if m:
+        side = m.group(1)
+        margin = int(m.group(2))
+        spread_line = -(margin - 0.5)
+        skey = f'spread_{side}_{str(spread_line).replace(".", "_").replace("-", "m")}'
+        return closing_sharp_odds.get(skey)
+
+    return None
+
+
+def _norm_team(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r'[^a-z0-9 ]', '', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
 def _get_closing_odds_for_outcome(match_id: int, outcome_label: str) -> tuple[float | None, float | None]:
     """
-    Returns (closing_odds, closing_probability) from Pinnacle closing odds for outcome.
+    Returns (closing_odds, closing_probability) from Pinnacle closing odds
+    in the match_odds table (Football-Data historical data). Only works for 1X2.
     """
     ol = outcome_label.lower()
 
@@ -132,9 +201,10 @@ def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -
     Fetch a Polymarket market and check if it resolved.
     Returns 'yes' if YES resolved, 'no' if NO resolved, None if still open.
 
-    PM sports markets often reach extreme prices (0.00/1.00) before being
-    officially marked ``closed``.  We treat a market as resolved when it is
-    closed, OR when resolution_time is past and prices hit extreme levels.
+    Requires the market to be officially ``closed`` by Polymarket AND
+    prices at extreme levels (>= 0.99).  We no longer resolve on price
+    alone — NBA/sports markets can have extreme prices before the game
+    finishes (thin liquidity, sentiment moves).
     """
     try:
         r = requests.get(f'{GAMMA_API}/markets/{external_id}', timeout=10)
@@ -142,6 +212,10 @@ def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -
             return None
         data = r.json()
     except Exception:
+        return None
+
+    is_closed = data.get('closed', False)
+    if not is_closed:
         return None
 
     raw_prices = data.get('outcomePrices')
@@ -153,10 +227,6 @@ def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -
 
     yes_price = float(prices[0])
     no_price = float(prices[1])
-
-    is_closed = data.get('closed', False)
-    if not is_closed and not past_resolution_time:
-        return None
 
     if yes_price >= RESOLUTION_THRESHOLD:
         return 'yes'
@@ -170,20 +240,41 @@ def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -
 
 def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
                   stake: float, match_id: int | None, outcome_label: str,
-                  label: str) -> dict | None:
+                  label: str, closing_sharp_odds: dict | None = None,
+                  model_probability: float | None = None) -> dict | None:
     if result == 'won':
         payout = stake * entry_odds if entry_odds else stake
     elif result == 'void':
-        # Match abandoned / postponed → stake refunded
         payout = stake
     else:
         payout = 0.0
 
-    closing_odds, closing_prob, clv = None, None, None
-    if match_id:
-        closing_odds, closing_prob = _get_closing_odds_for_outcome(match_id, outcome_label)
-        if entry_odds and closing_odds and closing_odds > 0:
+    closing_prob, clv = None, None
+    clv_source = None
+
+    # Priority 1: closing_sharp_odds JSONB from closing_collector (all market types)
+    if closing_sharp_odds:
+        closing_prob = _get_closing_from_sharp_snapshot(closing_sharp_odds, outcome_label)
+        if entry_odds and closing_prob and closing_prob > 0:
+            closing_odds = 1.0 / closing_prob
             clv = round((entry_odds / closing_odds) - 1, 4)
+            clv_source = 'sharp_closing'
+
+    # Priority 2: Pinnacle closing from match_odds table (1X2 only, historical)
+    if clv is None and match_id:
+        closing_odds_legacy, closing_prob_legacy = _get_closing_odds_for_outcome(match_id, outcome_label)
+        if closing_prob_legacy:
+            closing_prob = closing_prob_legacy
+        if entry_odds and closing_odds_legacy and closing_odds_legacy > 0:
+            clv = round((entry_odds / closing_odds_legacy) - 1, 4)
+            clv_source = 'pinnacle_fd'
+
+    # Priority 3: model_probability as fair-value proxy (model CLV)
+    if clv is None and model_probability and model_probability > 0 and entry_odds:
+        closing_prob = model_probability
+        model_odds = 1.0 / model_probability
+        clv = round((entry_odds / model_odds) - 1, 4)
+        clv_source = 'model'
 
     cur = conn.cursor()
     cur.execute("""
@@ -199,7 +290,7 @@ def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
 
     sign = {'won': 'WIN', 'lost': 'LOSS', 'void': 'VOID'}.get(result, result.upper())
     pl = payout - stake
-    clv_str = f'CLV={clv:+.3f}' if clv is not None else 'CLV=n/a'
+    clv_str = f'CLV={clv:+.3f} ({clv_source})' if clv is not None else 'CLV=n/a'
     log.info(f'[resolver] #{trade_id} {sign} {label} | {outcome_label} | P&L={pl:+.2f}u | {clv_str}')
 
     return {
@@ -208,6 +299,7 @@ def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
         'result': result,
         'payout_units': round(payout, 4),
         'clv': clv,
+        'clv_source': clv_source,
     }
 
 
@@ -298,6 +390,8 @@ def run() -> list[dict]:
                 pt.entry_odds,
                 pt.stake_units,
                 pt.match_id,
+                pt.closing_sharp_odds,
+                pt.model_probability,
                 m.home_score,
                 m.away_score,
                 th.canonical_name AS home_team,
@@ -323,9 +417,16 @@ def run() -> list[dict]:
             entry_odds = float(trade['entry_odds']) if trade['entry_odds'] else (1 / entry_price if entry_price else None)
             label = f'{trade["home_team"]} vs {trade["away_team"]} ({trade["home_score"]}-{trade["away_score"]})'
 
+            cso = trade.get('closing_sharp_odds')
+            if isinstance(cso, str):
+                cso = json.loads(cso)
+            model_prob = float(trade['model_probability']) if trade.get('model_probability') else None
+
             info = _settle_trade(conn, tid, result, entry_odds,
                                  float(trade['stake_units']), trade['match_id'],
-                                 trade['outcome_label'], label)
+                                 trade['outcome_label'], label,
+                                 closing_sharp_odds=cso,
+                                 model_probability=model_prob)
             if info:
                 resolved.append(info)
                 resolved_ids.add(tid)
@@ -342,6 +443,8 @@ def run() -> list[dict]:
                 pt.stake_units,
                 pt.match_id,
                 pt.market_id,
+                pt.closing_sharp_odds,
+                pt.model_probability,
                 pm.external_id,
                 pm.title AS market_title
             FROM paper_trades pt
@@ -381,9 +484,16 @@ def run() -> list[dict]:
             entry_odds = float(trade['entry_odds']) if trade['entry_odds'] else (1 / entry_price if entry_price else None)
             label = trade['market_title'] or f'PM market {ext_id}'
 
+            cso = trade.get('closing_sharp_odds')
+            if isinstance(cso, str):
+                cso = json.loads(cso)
+            model_prob = float(trade['model_probability']) if trade.get('model_probability') else None
+
             info = _settle_trade(conn, tid, result, entry_odds,
                                  float(trade['stake_units']), trade.get('match_id'),
-                                 trade['outcome_label'], label)
+                                 trade['outcome_label'], label,
+                                 closing_sharp_odds=cso,
+                                 model_probability=model_prob)
             if info:
                 resolved.append(info)
 

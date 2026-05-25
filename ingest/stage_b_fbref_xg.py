@@ -444,8 +444,20 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
     cur.execute('SELECT id FROM seasons WHERE league_id = %s AND label = %s', (league_id, db_label))
     r = cur.fetchone()
     if not r:
-        log.warning(f'{league_code}/{db_label}: season not in DB')
-        return 0, 0
+        # Auto-create season for calendar-year leagues not in Football-Data
+        if cal:
+            cur.execute(
+                '''INSERT INTO seasons (league_id, label, start_date, end_date)
+                   VALUES (%s, %s, %s, %s) RETURNING id''',
+                (league_id, db_label,
+                 f'{start_year}-01-01', f'{start_year}-12-31'),
+            )
+            r = cur.fetchone()
+            conn.commit()
+            log.info(f'  auto-created season {league_code}/{db_label}')
+        else:
+            log.warning(f'{league_code}/{db_label}: season not in DB')
+            return 0, 0
     season_id = r[0]
 
     alias_map     = load_team_alias_map(cur)
@@ -495,11 +507,11 @@ def ingest(conn, league_code: str, season: str, cache_dir: Path, dry_run: bool) 
                 cur.execute(
                     '''INSERT INTO matches
                        (season_id, home_team_id, away_team_id, kickoff_utc,
-                        ft_home_goals, ft_away_goals, result)
+                        home_score, away_score, status)
                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT DO NOTHING
                        RETURNING id''',
-                    (season_id, home_id, away_id, row['date'], hg, ag, result),
+                    (season_id, home_id, away_id, row['date'], hg, ag, 'FT'),
                 )
                 ins = cur.fetchone()
                 if ins:
