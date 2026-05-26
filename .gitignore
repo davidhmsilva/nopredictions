@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .venv/
+.venv-pm/
 
 # Build output
 .next/
@@ -9,6 +10,7 @@ __pycache__/
 
 # Environment & secrets
 .env
+.env.save
 .env.local
 .env.production.local
 

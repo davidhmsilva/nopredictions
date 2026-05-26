@@ -34,6 +34,7 @@ from dixon_coles import DixonColesModel
 import resolver as _resolver
 from injury_tracker import InjuryTracker
 from market_flow import MarketFlow
+import live_executor
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 from db import find_match_id
@@ -236,6 +237,24 @@ def _write_trade(conn, strategy_id: int, market_db_id: int, outcome: str,
     trade_id = cur.fetchone()[0]
     conn.commit()
     return trade_id
+
+
+def _pm_token_id(mkt: dict, side_label: str) -> Optional[str]:
+    """
+    Extract Yes/No token_id from a PM market.
+    side_label is "yes" (=index 0) or "no" (=index 1).
+    PM Gamma serialises clobTokenIds as a JSON string by convention.
+    """
+    raw = mkt.get("clobTokenIds") or mkt.get("clob_token_ids")
+    if not raw:
+        return None
+    try:
+        ids = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(ids, list) or len(ids) < 2:
+        return None
+    return str(ids[0] if side_label == "yes" else ids[1])
 
 
 def _log_run(conn, n_events: int, n_matched: int, n_edges: int, dry_run: bool):
@@ -665,6 +684,11 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     if trade_id:
                         log.info(f"    → Trade #{trade_id} logged (best edge of {len(match_candidates)} candidates)")
                         trades_logged.append(trade_id)
+                        live_executor.try_execute(
+                            conn, trade_id=trade_id,
+                            token_id=_pm_token_id(best["mkt"], "yes"),
+                            side="BUY", price=best["yes_p"],
+                        )
                     else:
                         log.info("    → Already logged today, skipped")
 
@@ -738,6 +762,11 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     if trade_id:
                         log.info(f"    → No Bias trade #{trade_id} logged")
                         no_bias_trades_logged.append(trade_id)
+                        live_executor.try_execute(
+                            conn, trade_id=trade_id,
+                            token_id=_pm_token_id(best["mkt"], "no"),
+                            side="BUY", price=best["no_p"],
+                        )
                     else:
                         log.info("    → No Bias: already logged today, skipped")
 
