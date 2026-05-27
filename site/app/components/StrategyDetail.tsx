@@ -21,7 +21,14 @@ export function StrategyDetail({
     )
     .sort((a, b) => new Date(b.game_time ?? b.placed_at).getTime() - new Date(a.game_time ?? a.placed_at).getTime())
 
-  const active = stratTrades.filter((t) => !t.resolved_at)
+  // Active = open positions. For Live Polymarket we also exclude
+  // cancelled / expired / failed orders since they're no longer on chain.
+  const active = stratTrades.filter((t) =>
+    !t.resolved_at &&
+    (strategy.id !== 9 || ['matched', 'live'].includes(t.pm_order_status ?? ''))
+  )
+  const filledCount = active.filter(t => t.pm_order_status === 'matched').length
+  const restingCount = active.filter(t => t.pm_order_status === 'live').length
 
   // Use authoritative stats from DB view (strategy object) — trades array is capped at 200
   const totalBets = strategy.total_bets ?? 0
@@ -97,6 +104,11 @@ export function StrategyDetail({
         <div>
           <div className="v" style={{ color: 'var(--accent)' }}>{active.length}</div>
           <div className="l">OPEN</div>
+          {strategy.id === 9 && active.length > 0 && (
+            <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '4px', letterSpacing: '1px' }}>
+              {filledCount} FILLED · {restingCount} RESTING
+            </div>
+          )}
         </div>
         <div>
           <div className="v">{totalBets}</div>
@@ -244,11 +256,6 @@ export function StrategyDetail({
                       {isLiveTrade
                         ? `$${liveCost.toFixed(2)}`
                         : `${Number(t.stake_units ?? 1).toFixed(0)}u`}
-                      {isLiveTrade && liveShares > 0 && (
-                        <span style={{ opacity: 0.55, marginLeft: '4px' }}>
-                          ({liveShares.toFixed(0)}×{livePrice.toFixed(2)})
-                        </span>
-                      )}
                     </td>
                     <td>
                       {isResolved ? (
@@ -257,6 +264,16 @@ export function StrategyDetail({
                         ) : (
                           <span style={{ color: isWon ? 'var(--green)' : 'var(--red)' }}>
                             {isWon ? 'WON' : 'LOST'}
+                          </span>
+                        )
+                      ) : isLiveTrade ? (
+                        t.pm_order_status === 'matched' ? (
+                          <span style={{ color: 'var(--green)' }}>FILLED</span>
+                        ) : t.pm_order_status === 'live' ? (
+                          <span style={{ color: 'var(--accent)' }}>RESTING</span>
+                        ) : (
+                          <span style={{ color: 'var(--grey)', fontSize: '10px' }}>
+                            {(t.pm_order_status ?? 'OPEN').toUpperCase().replace('EXPIRED-', '')}
                           </span>
                         )
                       ) : (

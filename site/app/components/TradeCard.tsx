@@ -161,11 +161,6 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
           <div style={{ fontSize: '20px' }}>
             {isLiveTrade ? `$${liveCost.toFixed(2)}` : `${Number(trade.stake_units ?? 1).toFixed(0)}u`}
           </div>
-          {isLiveTrade && (
-            <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>
-              {liveShares.toFixed(0)} × ${livePrice.toFixed(3)}
-            </div>
-          )}
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>P&L</div>
