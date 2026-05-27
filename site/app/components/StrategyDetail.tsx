@@ -53,6 +53,12 @@ export function StrategyDetail({
   const matchedTrades = stratTrades.filter(t => t.pm_cash_pnl !== null && t.pm_cash_pnl !== undefined && !t.resolved_at)
   const unrealizedPnl = matchedTrades.reduce((s, t) => s + Number(t.pm_cash_pnl ?? 0), 0)
   const openValue = matchedTrades.reduce((s, t) => s + Number(t.pm_current_value ?? 0), 0)
+  // Total $ staked across every live trade (open + settled, resting + matched).
+  const totalLiveStaked = isLive
+    ? stratTrades
+        .filter(t => t.pm_live && Number(t.pm_order_size ?? 0) > 0)
+        .reduce((s, t) => s + Number(t.pm_order_size ?? 0) * Number(t.pm_order_price ?? 0), 0)
+    : 0
   // Cost basis is derived so it stays consistent with API: value − pnl = initialValue.
   const openCost = openValue - unrealizedPnl
   const unrealizedPct = openCost > 0 ? (unrealizedPnl / openCost) * 100 : 0
@@ -168,6 +174,19 @@ export function StrategyDetail({
               </div>
             </div>
           </div>
+          <div style={{
+            marginTop: '14px',
+            paddingTop: '12px',
+            borderTop: '1px solid var(--border)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: '11px',
+            color: 'var(--grey)',
+            letterSpacing: '1px',
+          }}>
+            <span>TOTAL STAKED (open + settled)</span>
+            <span style={{ color: 'var(--white)' }}>${totalLiveStaked.toFixed(2)}</span>
+          </div>
         </div>
       )}
 
@@ -186,6 +205,7 @@ export function StrategyDetail({
                 <th>PM ODDS</th>
                 <th>MODEL</th>
                 <th>EDGE</th>
+                <th>STAKE</th>
                 <th>RESULT</th>
                 <th>P&L</th>
                 <th>DATE</th>
@@ -220,6 +240,16 @@ export function StrategyDetail({
                     <td>{entryOdds > 0 ? entryOdds.toFixed(2) : '—'}</td>
                     <td>{modelOdds > 0 ? modelOdds.toFixed(2) : '—'}</td>
                     <td style={{ color: 'var(--green)' }}>+{edgePp.toFixed(1)}%</td>
+                    <td style={{ color: 'var(--grey)', fontSize: '11px' }}>
+                      {isLiveTrade
+                        ? `$${liveCost.toFixed(2)}`
+                        : `${Number(t.stake_units ?? 1).toFixed(0)}u`}
+                      {isLiveTrade && liveShares > 0 && (
+                        <span style={{ opacity: 0.55, marginLeft: '4px' }}>
+                          ({liveShares.toFixed(0)}×{livePrice.toFixed(2)})
+                        </span>
+                      )}
+                    </td>
                     <td>
                       {isResolved ? (
                         isVoid ? (
