@@ -33,3 +33,14 @@ Thumbs.db
 
 # TypeScript build info
 tsconfig.tsbuildinfo
+
+# Agent dev artefacts
+agent/diary/
+agent/package.json
+agent/package-lock.json
+agent/node_modules/
+.claude/scheduled_tasks.lock
+
+# Wallet bootstrap scripts (contain private-key handling)
+ingest/gen_pm_wallet.py
+ingest/add_pm_key.sh

@@ -44,8 +44,10 @@ from dc_scanner import (  # noqa: E402
     _find_team,
     _is_football_event,
     _fetch_pm_events,
+    _pm_token_id,
     NON_FOOTBALL_NAME_TOKENS,
 )
+import live_executor  # noqa: E402
 
 # Sim engine
 from sim.simulator import simulate, SimConfig  # noqa: E402
@@ -708,6 +710,11 @@ def run(
                         f"best of {sum(1 for c in candidates if c['group']==g)} in group)"
                     )
                     trades_logged.append(trade_id)
+                    live_executor.try_execute(
+                        conn, trade_id=trade_id,
+                        token_id=_pm_token_id(best["mkt"], "yes"),
+                        side="BUY", price=best["yes_p"],
+                    )
                 else:
                     log.info(f"    → {g}: already logged, skipped")
 

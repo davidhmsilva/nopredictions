@@ -116,8 +116,28 @@ def try_execute(
         _persist(conn, r, live=False)
         return r
 
-    # Retry safety: don't allow a retry to balloon exposure beyond the original commitment.
+    # Cross-strategy dedup: skip if another paper_trade already has a live/matched
+    # order on the same token (avoids two strategies stacking on the same outcome).
     cur = conn.cursor()
+    cur.execute(
+        """SELECT id, strategy_id, pm_order_status
+           FROM paper_trades
+           WHERE pm_token_id = %s
+             AND pm_live = TRUE
+             AND pm_order_status IN ('live', 'matched')
+             AND id <> %s
+           LIMIT 1""",
+        (token_id, trade_id),
+    )
+    dup = cur.fetchone()
+    if dup:
+        r.pm_order_status = "skipped"
+        r.pm_order_error = f"dedup: trade #{dup[0]} (strategy {dup[1]}) already {dup[2]} on this token"
+        log.info(f"[live_executor] trade #{trade_id} {r.pm_order_error}")
+        _persist(conn, r, live=False)
+        return r
+
+    # Retry safety: don't allow a retry to balloon exposure beyond the original commitment.
     cur.execute(
         """SELECT COALESCE(pm_order_size * pm_order_price, 0)
            FROM paper_trades

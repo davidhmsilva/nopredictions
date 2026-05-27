@@ -124,11 +124,24 @@ export interface PaperTrade {
   clv: number | null
   resolved_at: string | null
   sharp_consensus_sources: Record<string, unknown> | null
+  // PM live trading fields (set when order was actually submitted on-chain)
+  pm_live: boolean | null
+  pm_order_status: string | null
+  pm_order_size: number | null
+  pm_order_price: number | null
+  pm_size_matched: number | null
+  pm_executed_at: string | null
+  pm_current_value: number | null
+  pm_cash_pnl: number | null
+  pm_percent_pnl: number | null
   // joined
   market_title: string
   strategy_name: string
   game_time: string | null
 }
+
+/** Synthetic id for the aggregated "Live Polymarket" strategy (see db/008). */
+export const LIVE_POLYMARKET_STRATEGY_ID = 9
 
 export async function fetchPaperTrades(): Promise<PaperTrade[]> {
   const { data, error } = await supabase

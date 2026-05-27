@@ -13,8 +13,12 @@ export function StrategyDetail({
   trades: PaperTrade[]
   onBack: () => void
 }) {
+  // Strategy 9 ("Live Polymarket") is synthetic: aggregates every paper_trade
+  // that was actually submitted on-chain, regardless of its source strategy.
   const stratTrades = trades
-    .filter((t) => t.strategy_id === strategy.id)
+    .filter((t) =>
+      strategy.id === 9 ? !!t.pm_live : t.strategy_id === strategy.id
+    )
     .sort((a, b) => new Date(b.game_time ?? b.placed_at).getTime() - new Date(a.game_time ?? a.placed_at).getTime())
 
   const active = stratTrades.filter((t) => !t.resolved_at)
@@ -28,6 +32,15 @@ export function StrategyDetail({
   const avgEdge = stratTrades.length > 0
     ? stratTrades.reduce((s, t) => s + Number(t.expected_edge ?? 0), 0) / stratTrades.length * 100
     : 0
+
+  // Live Polymarket only: unrealized mark-to-market metrics for matched positions.
+  const isLive = strategy.id === 9
+  const matchedTrades = stratTrades.filter(t => t.pm_cash_pnl !== null && t.pm_cash_pnl !== undefined && !t.resolved_at)
+  const unrealizedPnl = matchedTrades.reduce((s, t) => s + Number(t.pm_cash_pnl ?? 0), 0)
+  const openValue = matchedTrades.reduce((s, t) => s + Number(t.pm_current_value ?? 0), 0)
+  // Cost basis is derived so it stays consistent with API: value − pnl = initialValue.
+  const openCost = openValue - unrealizedPnl
+  const unrealizedPct = openCost > 0 ? (unrealizedPnl / openCost) * 100 : 0
 
   return (
     <div>
@@ -91,6 +104,53 @@ export function StrategyDetail({
           <div className="l">AVG EDGE</div>
         </div>
       </div>
+
+      {/* Live Polymarket: real-time mark-to-market block */}
+      {isLive && matchedTrades.length > 0 && (
+        <div style={{
+          border: '1px solid var(--border)',
+          padding: '16px 20px',
+          marginBottom: '40px',
+          background: 'rgba(0,0,0,0.2)',
+        }}>
+          <div style={{ fontSize: '11px', letterSpacing: '2px', color: 'var(--grey)', marginBottom: '12px' }}>
+            ON-CHAIN MARK-TO-MARKET · {matchedTrades.length} MATCHED POSITIONS
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+            <div>
+              <div style={{
+                fontSize: '20px',
+                color: unrealizedPnl >= 0 ? 'var(--green)' : 'var(--red)',
+                fontWeight: 600,
+              }}>
+                {unrealizedPnl >= 0 ? '+$' : '-$'}{Math.abs(unrealizedPnl).toFixed(2)}
+                <span style={{ fontSize: '12px', marginLeft: '6px', opacity: 0.7 }}>
+                  ({unrealizedPct >= 0 ? '+' : ''}{unrealizedPct.toFixed(1)}%)
+                </span>
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginTop: '4px' }}>
+                UNREALIZED P&L
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '20px', color: 'var(--white)' }}>
+                ${openValue.toFixed(2)}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginTop: '4px' }}>
+                CURRENT VALUE
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '20px', color: 'var(--white)' }}>
+                ${openCost.toFixed(2)}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginTop: '4px' }}>
+                COST BASIS
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Trades list */}
       {stratTrades.length === 0 ? (
