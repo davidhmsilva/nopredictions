@@ -27,8 +27,23 @@ export function StrategyDetail({
   const totalBets = strategy.total_bets ?? 0
   const wins = strategy.wins ?? 0
   const losses = strategy.losses ?? 0
-  const totalPnl = strategy.total_pnl ?? 0
-  const yieldPct = strategy.yield_pct ?? 0
+  let totalPnl = strategy.total_pnl ?? 0
+  let yieldPct = strategy.yield_pct ?? 0
+  // For Live Polymarket recompute realised P&L in $ from actual fills, not units.
+  if (strategy.id === 9) {
+    const settled = stratTrades.filter(t => t.resolved_at && t.pm_order_size && t.pm_order_price)
+    let pnl$ = 0, cost$ = 0
+    for (const t of settled) {
+      const sh = Number(t.pm_order_size ?? 0)
+      const px = Number(t.pm_order_price ?? 0)
+      const c = sh * px
+      cost$ += c
+      if (t.result === 'won') pnl$ += sh - c
+      else if (t.result === 'lost') pnl$ -= c
+    }
+    totalPnl = pnl$
+    yieldPct = cost$ > 0 ? (pnl$ / cost$) * 100 : 0
+  }
   const avgEdge = stratTrades.length > 0
     ? stratTrades.reduce((s, t) => s + Number(t.expected_edge ?? 0), 0) / stratTrades.length * 100
     : 0
@@ -87,9 +102,13 @@ export function StrategyDetail({
         </div>
         <div>
           <div className="v" style={{ color: totalBets > 0 ? (totalPnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
-            {totalBets > 0 ? fmtPnl(totalPnl) : '—'}
+            {totalBets > 0
+              ? (strategy.id === 9
+                  ? `${totalPnl >= 0 ? '+$' : '-$'}${Math.abs(totalPnl).toFixed(2)}`
+                  : fmtPnl(totalPnl))
+              : '—'}
           </div>
-          <div className="l">P&L</div>
+          <div className="l">{strategy.id === 9 ? 'REALISED P&L' : 'P&L'}</div>
         </div>
         <div>
           <div className="v" style={{ color: totalBets > 0 ? (yieldPct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)' }}>
@@ -174,10 +193,18 @@ export function StrategyDetail({
             </thead>
             <tbody>
               {stratTrades.map((t) => {
-                const pnl = Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0)
                 const isResolved = !!t.resolved_at
                 const isWon = t.result === 'won'
                 const isVoid = t.result === 'void'
+                // For live (on-chain) trades, P&L = $ math (shares - cost when won, -cost when lost).
+                const liveShares = Number(t.pm_order_size ?? 0)
+                const livePrice = Number(t.pm_order_price ?? 0)
+                const liveCost = liveShares * livePrice
+                const isLiveTrade = !!t.pm_live && liveShares > 0 && livePrice > 0
+                const pnl = isLiveTrade && isResolved
+                  ? (isWon ? liveShares - liveCost : isVoid ? 0 : -liveCost)
+                  : Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0)
+                const pnlUnit = isLiveTrade ? '$' : 'u'
                 const entryOdds = t.entry_odds ? Number(t.entry_odds) : (Number(t.entry_price) > 0 ? 1 / Number(t.entry_price) : 0)
                 const modelOdds = Number(t.model_probability) > 0 ? 1 / Number(t.model_probability) : 0
                 const edgePp = Number(t.expected_edge) * 100
@@ -207,7 +234,13 @@ export function StrategyDetail({
                       )}
                     </td>
                     <td style={{ color: isVoid ? 'var(--grey)' : (isResolved ? (pnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)') }}>
-                      {isVoid ? '—' : (isResolved ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}u` : '—')}
+                      {isVoid
+                        ? '—'
+                        : (isResolved
+                          ? (pnlUnit === '$'
+                              ? `${pnl >= 0 ? '+$' : '-$'}${Math.abs(pnl).toFixed(2)}`
+                              : `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}u`)
+                          : '—')}
                     </td>
                     <td style={{ fontSize: '11px', color: 'var(--grey)' }}>
                       {t.game_time ? formatDate(t.game_time) : formatDate(t.placed_at)}

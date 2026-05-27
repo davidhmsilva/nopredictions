@@ -71,7 +71,19 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
                 trade.reasoning?.includes('NBA Elo')
 
   const edgePp = Number(trade.expected_edge) * 100
-  const pnl = Number(trade.payout_units ?? 0) - Number(trade.stake_units ?? 0)
+
+  // For live (on-chain) trades, compute P&L in $ using the actual filled order.
+  // Otherwise fall back to unit-based math.
+  const liveShares = Number(trade.pm_order_size ?? 0)
+  const livePrice = Number(trade.pm_order_price ?? 0)
+  const liveCost = liveShares * livePrice
+  const isLiveTrade = !!trade.pm_live && liveShares > 0 && livePrice > 0
+
+  const pnl = isLiveTrade && isResolved
+    ? (isWon ? liveShares - liveCost : isVoid ? 0 : -liveCost)
+    : Number(trade.payout_units ?? 0) - Number(trade.stake_units ?? 0)
+  const pnlSuffix = isLiveTrade ? '' : 'u'
+  const pnlPrefix = isLiveTrade ? '$' : ''
 
   const matchName = extractMatchName(trade)
   const entryPrice = Number(trade.entry_price)
@@ -147,7 +159,13 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>P&L</div>
           <div style={{ fontSize: '20px', color: isVoid ? 'var(--grey)' : (isResolved ? (pnl >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--grey)') }}>
-            {isVoid ? '—' : (isResolved ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}u` : 'OPEN')}
+            {isVoid
+              ? '—'
+              : (isResolved
+                  ? (pnlPrefix === '$'
+                      ? `${pnl >= 0 ? '+$' : '-$'}${Math.abs(pnl).toFixed(2)}`
+                      : `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}${pnlSuffix}`)
+                  : 'OPEN')}
           </div>
         </div>
       </div>
