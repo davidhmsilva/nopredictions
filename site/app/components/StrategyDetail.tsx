@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { fmtPnl, fmtPct, formatDate, formatDateTime } from '../lib/helpers'
 import type { PaperTrade, Strategy } from '../lib/supabase'
 import { formatOutcome, extractMatchName } from './TradeCard'
@@ -13,6 +14,11 @@ export function StrategyDetail({
   trades: PaperTrade[]
   onBack: () => void
 }) {
+  // Scroll to top whenever a new strategy is opened (desktop + mobile).
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [strategy.id])
+
   // Strategy 9 ("Live Polymarket") is synthetic: aggregates every paper_trade
   // that was actually submitted on-chain, regardless of its source strategy.
   const stratTrades = trades
@@ -99,8 +105,8 @@ export function StrategyDetail({
         {' · '}{stratTrades.length} TRADES LOADED
       </div>
 
-      {/* Stats strip */}
-      <div className="lab-stats-strip" style={{ marginBottom: '40px' }}>
+      {/* Stats strip — 6 cells, so use 3-column variant (3+3 balanced). */}
+      <div className="lab-stats-strip cols-3" style={{ marginBottom: '40px' }}>
         <div>
           <div className="v" style={{ color: 'var(--accent)' }}>{active.length}</div>
           <div className="l">OPEN</div>

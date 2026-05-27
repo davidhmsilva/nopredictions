@@ -359,6 +359,10 @@ button { font-family: var(--font); }
   background: var(--border);
   border: 1px solid var(--border);
 }
+/* 3-column variant for strips that hold 6 cells (3+3 stays balanced). */
+.lab-stats-strip.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
 .lab-stats-strip > div {
   background: var(--bg);
   padding: 18px 16px;
