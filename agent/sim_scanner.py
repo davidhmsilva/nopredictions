@@ -708,61 +708,67 @@ def run(
             if not candidates or dry_run:
                 continue
 
-            # Best per market group (1X2 / halftime / totals / btts / handicap)
-            best_per_group: dict[str, dict] = {}
+            # Group candidates by market group (1X2 / halftime / totals / btts /
+            # handicap). Per group we log the global best (paper measurement) and
+            # separately fund the best *eligible* pick — the group's global best
+            # may be a draw we don't fund, which used to leave an eligible
+            # home/away in the same group unbet.
+            by_group: dict[str, list[dict]] = {}
             for c in candidates:
-                g = c["group"]
-                if g not in best_per_group or c["edge_pp"] > best_per_group[g]["edge_pp"]:
-                    best_per_group[g] = c
+                by_group.setdefault(c["group"], []).append(c)
 
-            for g, best in best_per_group.items():
-                ext_id = str(
-                    best["mkt"].get("id") or best["mkt"].get("conditionId") or ""
+            def _log_and_maybe_execute(cand: dict, *, execute: bool) -> Optional[int]:
+                ext_id = str(cand["mkt"].get("id") or cand["mkt"].get("conditionId") or "")
+                mkt_db = _upsert_pm_market(
+                    conn, ext_id, cand["mkt"].get("question", ""), cand["event"].get("endDate")
                 )
-                question = best["mkt"].get("question", "")
-                market_db_id = _upsert_pm_market(
-                    conn, ext_id, question, best["event"].get("endDate")
+                if not mkt_db:
+                    return None
+                tid = _write_trade(
+                    conn, strategy_id, mkt_db, cand["outcome_key"], cand["yes_p"],
+                    cand["sim_prob"], cand["edge_pp"], cand["sim_se"], cand["reasoning"],
+                    match_id=db_match_id, home=home, away=away,
                 )
-                if not market_db_id:
-                    continue
-                trade_id = _write_trade(
-                    conn,
-                    strategy_id,
-                    market_db_id,
-                    best["outcome_key"],
-                    best["yes_p"],
-                    best["sim_prob"],
-                    best["edge_pp"],
-                    best["sim_se"],
-                    best["reasoning"],
-                    match_id=db_match_id,
-                    home=home,
-                    away=away,
-                )
-                if trade_id:
-                    log.info(
-                        f"    → Trade #{trade_id} logged ({g}, "
-                        f"best of {sum(1 for c in candidates if c['group']==g)} in group)"
+                if not tid:
+                    return None
+                trades_logged.append(tid)
+                if execute:
+                    live_executor.try_execute(
+                        conn, trade_id=tid,
+                        token_id=_pm_token_id(cand["mkt"], "yes"),
+                        side="BUY", price=cand["yes_p"],
+                        ask=cand["mkt"].get("bestAsk"),
+                        fair_prob=cand["sim_prob"],
+                        home=home, away=away, kickoff_date=kickoff_date,
+                        outcome_key=cand["outcome_key"], sim_se=cand["sim_se"],
                     )
-                    trades_logged.append(trade_id)
-                    if _sim_live_eligible(best["outcome_key"], best["edge_pp"]):
-                        live_executor.try_execute(
-                            conn, trade_id=trade_id,
-                            token_id=_pm_token_id(best["mkt"], "yes"),
-                            side="BUY", price=best["yes_p"],
-                            ask=best["mkt"].get("bestAsk"),
-                            fair_prob=best["sim_prob"],
-                            home=home, away=away, kickoff_date=kickoff_date,
-                            outcome_key=best["outcome_key"], sim_se=best["sim_se"],
-                        )
-                    else:
+                return tid
+
+            for g, group_cands in by_group.items():
+                best = max(group_cands, key=lambda c: c["edge_pp"])
+                best_live = max(
+                    (c for c in group_cands
+                     if _sim_live_eligible(c["outcome_key"], c["edge_pp"])),
+                    key=lambda c: c["edge_pp"], default=None,
+                )
+                best_tid = _log_and_maybe_execute(
+                    best, execute=(best_live is not None and best_live is best)
+                )
+                if best_tid:
+                    log.info(f"    → Trade #{best_tid} logged ({g}, best of {len(group_cands)} in group)")
+                if best_live is not None and best_live is not best:
+                    live_tid = _log_and_maybe_execute(best_live, execute=True)
+                    if live_tid:
                         log.info(
-                            f"    → paper-only pocket "
-                            f"({best['outcome_key']} edge {best['edge_pp']:.1f}pp) — "
-                            f"draw or <{SIM_LIVE_MIN_EDGE_PP:.0f}pp, skipping live"
+                            f"    → Trade #{live_tid} live-eligible ({g}: "
+                            f"{best_live['outcome_key']} +{best_live['edge_pp']:.1f}pp) — "
+                            f"group best ({best['outcome_key']}) not eligible"
                         )
-                else:
-                    log.info(f"    → {g}: already logged, skipped")
+                elif best_live is None:
+                    log.info(
+                        f"    → {g}: no live-eligible pick "
+                        f"(best {best['outcome_key']} {best['edge_pp']:.1f}pp) — paper only"
+                    )
 
         if not dry_run:
             _log_run(conn, len(events), len(by_match), n_edges, dry_run)
