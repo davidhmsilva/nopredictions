@@ -66,6 +66,28 @@ DEFAULT_DAYS_AHEAD = 3
 SIM_N = 50_000
 SIM_SEED = 42
 
+# ── Live-eligible pockets (2026-06-01) ───────────────────────────────────────
+# Sim sub-strategy P&L audit: in the live-eligible universe (goals already off
+# via live_executor's goals-guard), the edge band is decisive — 3-5pp bled
+# (−23u, 4% win), the sweet spot is 5-12pp (+60.85u / +71% yield over 86 bets),
+# and >12pp loses. DRAWS lose too (ft draw −7.9u, ht_draw −1.8u). So with REAL
+# money the Sim scanner now only submits non-draw picks with edge ≥5pp; the
+# 12pp top is handled by live_executor's model-only cap. Everything else stays
+# PAPER (still logged) so we keep measuring. The profit is longshot-driven
+# (ht_away / handicaps at high odds) → high variance, positive EV.
+SIM_LIVE_MIN_EDGE_PP = float(os.environ.get("PM_SIM_LIVE_MIN_EDGE_PP", "5.0"))
+SIM_LIVE_EXCLUDE_DRAWS = os.environ.get("PM_SIM_LIVE_EXCLUDE_DRAWS", "1") == "1"
+
+
+def _sim_live_eligible(outcome_key: str, edge_pp: float) -> bool:
+    """True if this Sim pick may be submitted with real money. Goals (totals/
+    BTTS) are already blocked in live_executor; the 12pp top by its model cap.
+    Here we add the 5pp floor and the draw exclusion. Everything else is logged
+    paper-only."""
+    if SIM_LIVE_EXCLUDE_DRAWS and outcome_key in ("draw", "ht_draw"):
+        return False
+    return edge_pp >= SIM_LIVE_MIN_EDGE_PP
+
 # Re-configure with force=True so our format wins over dc_scanner's
 # basicConfig that fired on import.
 logging.basicConfig(
@@ -723,15 +745,22 @@ def run(
                         f"best of {sum(1 for c in candidates if c['group']==g)} in group)"
                     )
                     trades_logged.append(trade_id)
-                    live_executor.try_execute(
-                        conn, trade_id=trade_id,
-                        token_id=_pm_token_id(best["mkt"], "yes"),
-                        side="BUY", price=best["yes_p"],
-                        ask=best["mkt"].get("bestAsk"),
-                        fair_prob=best["sim_prob"],
-                        home=home, away=away, kickoff_date=kickoff_date,
-                        outcome_key=best["outcome_key"], sim_se=best["sim_se"],
-                    )
+                    if _sim_live_eligible(best["outcome_key"], best["edge_pp"]):
+                        live_executor.try_execute(
+                            conn, trade_id=trade_id,
+                            token_id=_pm_token_id(best["mkt"], "yes"),
+                            side="BUY", price=best["yes_p"],
+                            ask=best["mkt"].get("bestAsk"),
+                            fair_prob=best["sim_prob"],
+                            home=home, away=away, kickoff_date=kickoff_date,
+                            outcome_key=best["outcome_key"], sim_se=best["sim_se"],
+                        )
+                    else:
+                        log.info(
+                            f"    → paper-only pocket "
+                            f"({best['outcome_key']} edge {best['edge_pp']:.1f}pp) — "
+                            f"draw or <{SIM_LIVE_MIN_EDGE_PP:.0f}pp, skipping live"
+                        )
                 else:
                     log.info(f"    → {g}: already logged, skipped")
 
