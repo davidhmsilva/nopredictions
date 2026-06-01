@@ -238,7 +238,10 @@ export function StrategyDetail({
                 const liveShares = Number(t.pm_order_size ?? 0)
                 const livePrice = Number(t.pm_order_price ?? 0)
                 const liveCost = liveShares * livePrice
-                const isLiveTrade = !!t.pm_live && liveShares > 0 && livePrice > 0
+                // $ accounting only inside the Live Polymarket strategy (id=9).
+                // Paper strategies (DC, Sim, …) always stay in units, even if the
+                // trade was also mirrored on-chain.
+                const isLiveTrade = isLive && !!t.pm_live && liveShares > 0 && livePrice > 0
                 const pnl = isLiveTrade && isResolved
                   ? (isWon ? liveShares - liveCost : isVoid ? 0 : -liveCost)
                   : Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0)

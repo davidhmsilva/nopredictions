@@ -57,7 +57,7 @@ export function formatOutcome(outcome: string | null | undefined): string {
   return outcome.toUpperCase()
 }
 
-export function TradeCard({ trade }: { trade: PaperTrade }) {
+export function TradeCard({ trade, live = false }: { trade: PaperTrade; live?: boolean }) {
   const [open, setOpen] = useState(false)
   const isResolved = !!trade.resolved_at
   const isWon      = trade.result === 'won'
@@ -72,12 +72,12 @@ export function TradeCard({ trade }: { trade: PaperTrade }) {
 
   const edgePp = Number(trade.expected_edge) * 100
 
-  // For live (on-chain) trades, compute P&L in $ using the actual filled order.
-  // Otherwise fall back to unit-based math.
+  // $ accounting only in the Live Polymarket context (live=true). Paper-strategy
+  // feeds always render units so the experiment stays measurable in 1u terms.
   const liveShares = Number(trade.pm_order_size ?? 0)
   const livePrice = Number(trade.pm_order_price ?? 0)
   const liveCost = liveShares * livePrice
-  const isLiveTrade = !!trade.pm_live && liveShares > 0 && livePrice > 0
+  const isLiveTrade = live && !!trade.pm_live && liveShares > 0 && livePrice > 0
 
   const pnl = isLiveTrade && isResolved
     ? (isWon ? liveShares - liveCost : isVoid ? 0 : -liveCost)
