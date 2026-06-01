@@ -52,7 +52,7 @@ USE_REFINED_EDGE = os.environ.get("PM_USE_REFINED_EDGE", "1") == "1"
 # Cap on the RAW edge for model-only (sharp-unvalidated) bets, in pp. Edges
 # above this with no sharp line to confirm them are refused. Sharp-validated
 # (consensus) edges are exempt — the sharp already bounded them.
-MAX_MODEL_EDGE_PP = float(os.environ.get("PM_MAX_MODEL_EDGE_PP", "10.0"))
+MAX_MODEL_EDGE_PP = float(os.environ.get("PM_MAX_MODEL_EDGE_PP", "12.0"))
 # Only look up the sharp line for matches kicking off within this many hours
 # (bounds api-football calls; matches the scan window).
 SHARP_LOOKUP_HOURS = float(os.environ.get("PM_SHARP_LOOKUP_HOURS", "48"))

@@ -52,6 +52,28 @@ NO_BIAS_PRICE_MIN = 0.15
 NO_BIAS_PRICE_MAX = 0.45
 DEFAULT_DAYS_AHEAD = 3
 
+# ── Live-eligible pockets (2026-06-01) ───────────────────────────────────────
+# DC sub-strategy P&L audit: only DRAW (+16u, +52% yield) and HOME UNDERDOG
+# (+12u, +60% yield) are profitable. HOME mid is ~flat-negative and AWAY (esp.
+# away underdog: −15u, 12% win over 41 bets) is the sink — the model overrates
+# away underdogs. So with REAL money the DC scanner now only submits draw +
+# home-underdog; everything else is still logged as PAPER so we keep measuring.
+# A home pick counts as an underdog when its YES price is at/below this line
+# (the clean pocket in the data was ≤0.35; default 0.45 = priced < even-money).
+DC_LIVE_DRAW = os.environ.get("PM_DC_LIVE_DRAW", "1") == "1"
+DC_LIVE_HOME_UNDERDOG = os.environ.get("PM_DC_LIVE_HOME_UNDERDOG", "1") == "1"
+DC_HOME_UNDERDOG_MAX = float(os.environ.get("PM_DC_HOME_UNDERDOG_MAX", "0.45"))
+
+
+def _dc_live_eligible(outcome_key: str, yes_p: float) -> bool:
+    """True if this DC pick may be submitted with real money. Everything else is
+    paper-only (still logged, just not sent on-chain)."""
+    if outcome_key == "draw":
+        return DC_LIVE_DRAW
+    if outcome_key == "home":
+        return DC_LIVE_HOME_UNDERDOG and yes_p <= DC_HOME_UNDERDOG_MAX
+    return False  # away (and any other side) — paper only
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [dc_scanner] %(message)s",
@@ -695,15 +717,22 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     if trade_id:
                         log.info(f"    → Trade #{trade_id} logged (best edge of {len(match_candidates)} candidates)")
                         trades_logged.append(trade_id)
-                        live_executor.try_execute(
-                            conn, trade_id=trade_id,
-                            token_id=_pm_token_id(best["mkt"], "yes"),
-                            side="BUY", price=best["yes_p"],
-                            ask=best["mkt"].get("bestAsk"),
-                            fair_prob=best["dc_prob"],
-                            home=home, away=away, kickoff_date=kickoff_date,
-                            outcome_key=best["outcome_key"],
-                        )
+                        if _dc_live_eligible(best["outcome_key"], best["yes_p"]):
+                            live_executor.try_execute(
+                                conn, trade_id=trade_id,
+                                token_id=_pm_token_id(best["mkt"], "yes"),
+                                side="BUY", price=best["yes_p"],
+                                ask=best["mkt"].get("bestAsk"),
+                                fair_prob=best["dc_prob"],
+                                home=home, away=away, kickoff_date=kickoff_date,
+                                outcome_key=best["outcome_key"],
+                            )
+                        else:
+                            log.info(
+                                f"    → paper-only pocket "
+                                f"({best['outcome_key']} @ {best['yes_p']:.2f}) — "
+                                f"not draw/home-underdog, skipping live"
+                            )
                     else:
                         log.info("    → Already logged today, skipped")
 
