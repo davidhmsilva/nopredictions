@@ -35,6 +35,9 @@ import resolver as _resolver
 from injury_tracker import InjuryTracker
 from market_flow import MarketFlow
 import live_executor
+import calibrator as _calibrator_mod
+
+_calibrator = _calibrator_mod.get()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 from db import find_match_id
@@ -63,6 +66,15 @@ DEFAULT_DAYS_AHEAD = 3
 DC_LIVE_DRAW = os.environ.get("PM_DC_LIVE_DRAW", "1") == "1"
 DC_LIVE_HOME_UNDERDOG = os.environ.get("PM_DC_LIVE_HOME_UNDERDOG", "1") == "1"
 DC_HOME_UNDERDOG_MAX = float(os.environ.get("PM_DC_HOME_UNDERDOG_MAX", "0.45"))
+
+# Isotonic calibration layer (calibrate_model.py). DEFAULT OFF: it fits the
+# historical match distribution perfectly in-sample, but OUT-OF-SAMPLE on our
+# actual settled bets it made Brier WORSE (0.205 → 0.264) — the bet sample is a
+# selected subset (only where the model most disagrees with PM) that the global
+# historical fit doesn't transfer to. Kept, gated, for a future re-fit on
+# accumulated live results / walk-forward. Do not enable for live money until it
+# beats raw on a held-out bet sample.
+USE_CALIBRATION = os.environ.get("PM_USE_CALIBRATION", "0") == "1"
 
 
 def _dc_live_eligible(outcome_key: str, yes_p: float) -> bool:
@@ -615,6 +627,9 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                 pred = model.predict(home, away)
                 # Apply injury adjustments to prediction
                 pred = _apply_injury_adjustments(pred, home, away)
+                # Recalibrate the 1X2 probabilities (shrinks model over-confidence).
+                if USE_CALIBRATION:
+                    pred = _calibrator.calibrate_1x2(pred, home, away)
             except Exception:
                 continue
 
