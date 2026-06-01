@@ -370,6 +370,15 @@ DC_KEY_MAP = {
     "btts":      "btts",
 }
 
+# Goals markets (totals + BTTS) the model overprices with no sharp line to validate.
+# Per the 2026-05-29 P&L audit these bled −24u while 1X2/halftime/handicap are
+# CLV-positive. Disabled until goal scoring is recalibrated (xg_multiplier=1.5x
+# looks too hot). Override with DC_ENABLE_GOALS_MARKETS=1.
+DISABLED_OUTCOMES: set[str] = (
+    set() if os.environ.get("DC_ENABLE_GOALS_MARKETS") == "1"
+    else {"over_2.5", "under_2.5", "over_1.5", "under_1.5", "btts"}
+)
+
 
 def _classify_market(question: str, home: str, away: str) -> Optional[str]:
     q = question.lower()
@@ -618,6 +627,8 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                 outcome_key = _classify_market(question, home, away)
                 if not outcome_key:
                     continue
+                if outcome_key in DISABLED_OUTCOMES:
+                    continue
 
                 dc_key = DC_KEY_MAP.get(outcome_key)
                 dc_prob = pred.get(dc_key) if dc_key else None
@@ -688,6 +699,10 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                             conn, trade_id=trade_id,
                             token_id=_pm_token_id(best["mkt"], "yes"),
                             side="BUY", price=best["yes_p"],
+                            ask=best["mkt"].get("bestAsk"),
+                            fair_prob=best["dc_prob"],
+                            home=home, away=away, kickoff_date=kickoff_date,
+                            outcome_key=best["outcome_key"],
                         )
                     else:
                         log.info("    → Already logged today, skipped")
@@ -762,10 +777,17 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     if trade_id:
                         log.info(f"    → No Bias trade #{trade_id} logged")
                         no_bias_trades_logged.append(trade_id)
+                        # Executable ask for the NO token = 1 - bestBid(yes).
+                        _yes_bid = best["mkt"].get("bestBid")
+                        _no_ask = (1.0 - float(_yes_bid)) if _yes_bid is not None else None
                         live_executor.try_execute(
                             conn, trade_id=trade_id,
                             token_id=_pm_token_id(best["mkt"], "no"),
                             side="BUY", price=best["no_p"],
+                            ask=_no_ask,
+                            fair_prob=best["dc_no_prob"],
+                            home=home, away=away, kickoff_date=kickoff_date,
+                            outcome_key=best["outcome_key"],
                         )
                     else:
                         log.info("    → No Bias: already logged today, skipped")

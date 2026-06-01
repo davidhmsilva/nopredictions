@@ -105,6 +105,17 @@ for _line in ("0_5", "1_5", "2_5", "3_5", "4_5", "5_5"):
     MARKET_GROUP[f"over_{_line}"] = "totals"
     MARKET_GROUP[f"under_{_line}"] = "totals"
 
+# Market groups the model systematically misprices and that have no sharp line to
+# validate against (Pinnacle/api-football doesn't cover BTTS; only partly totals).
+# Per the 2026-05-29 P&L audit these bled −13.7u (BTTS) and −10.3u (totals) while
+# 1X2/halftime/handicap are CLV-positive. Disabled until goal scoring is recalibrated
+# (DC xg_multiplier=1.5x + sim totals/BTTS upticks look too hot). Override with
+# SIM_ENABLE_GOALS_MARKETS=1.
+DISABLED_GROUPS: set[str] = (
+    set() if os.environ.get("SIM_ENABLE_GOALS_MARKETS") == "1"
+    else {"btts", "totals"}
+)
+
 
 def _group_outcomes(group: str) -> list[str]:
     return [k for k, g in MARKET_GROUP.items() if g == group]
@@ -634,6 +645,8 @@ def run(
                     outcome_key = _classify_market(question, home, away)
                     if not outcome_key or outcome_key not in sim_p:
                         continue
+                    if MARKET_GROUP.get(outcome_key, "other") in DISABLED_GROUPS:
+                        continue
 
                     sim_prob = float(sim_p[outcome_key])
                     edge_pp = round((sim_prob - yes_p) * 100, 1)
@@ -714,6 +727,10 @@ def run(
                         conn, trade_id=trade_id,
                         token_id=_pm_token_id(best["mkt"], "yes"),
                         side="BUY", price=best["yes_p"],
+                        ask=best["mkt"].get("bestAsk"),
+                        fair_prob=best["sim_prob"],
+                        home=home, away=away, kickoff_date=kickoff_date,
+                        outcome_key=best["outcome_key"], sim_se=best["sim_se"],
                     )
                 else:
                     log.info(f"    → {g}: already logged, skipped")
