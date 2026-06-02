@@ -235,6 +235,10 @@ def main():
                         help="Time decay half-life in days (default: 90)")
     parser.add_argument("--xg-multiplier", type=float, default=1.5,
                         help="Weight multiplier for xG matches (default: 1.5)")
+    parser.add_argument("--l2-reg", type=float, default=1.0,
+                        help="Ridge penalty on team strengths; shrinks sparse "
+                             "national teams toward average. 1.0 reproduces the "
+                             "pre-break strength spread (std~0.31) (default: 1.0)")
     parser.add_argument("--min-date", default="2012-01-01",
                         help="Earliest training match date (default: 2012-01-01)")
     parser.add_argument("--eval-only", action="store_true",
@@ -253,6 +257,7 @@ def main():
         model = DixonColesModel(
             half_life_days=args.half_life,
             xg_multiplier=args.xg_multiplier,
+            l2_reg=args.l2_reg,
         )
 
         print(f"\nFitting Dixon-Coles model ({len(model.teams) if model.fitted else '?'} teams)...")
@@ -272,6 +277,22 @@ def main():
         print("\nTop 10 teams by strength:")
         for r in ratings:
             print(f"  {r['team']:<30}  atk={r['attack']:+.3f}  dfn={r['defense']:+.3f}  str={r['strength']:+.3f}")
+
+        strengths = model.attack - model.defense
+        str_std = float(strengths.std())
+        print(f"  Strength spread (std): {str_std:.3f}  (healthy ≈ 0.30)")
+
+        # Guards: never silently ship a non-converged or degenerate fit again.
+        # (The 2026-05-25 retrain shipped a collapsed fit, std 0.047, because the
+        #  numerical-gradient optimiser ran out of evals after ~5 iterations.)
+        if not getattr(model, "fit_success", True):
+            raise SystemExit(
+                f"\n✗ REFUSING TO SAVE: optimiser did not converge "
+                f"({getattr(model, 'fit_message', '?')}). Fix before shipping.")
+        if str_std < 0.15:
+            raise SystemExit(
+                f"\n✗ REFUSING TO SAVE: strength spread {str_std:.3f} < 0.15 — "
+                f"degenerate fit (model can't tell teams apart). Investigate first.")
 
         model.save(args.output)
         print(f"\nModel saved → {args.output}")

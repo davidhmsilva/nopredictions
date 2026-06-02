@@ -38,9 +38,15 @@ class DixonColesModel:
     - Dixon-Coles low-score correction (rho)
     """
 
-    def __init__(self, half_life_days: float = 90.0, xg_multiplier: float = 1.5):
+    def __init__(self, half_life_days: float = 90.0, xg_multiplier: float = 1.5,
+                 l2_reg: float = 0.0):
         self.half_life_days = half_life_days
         self.xg_multiplier = xg_multiplier
+        # Ridge penalty on team attack/defense strengths. Shrinks sparse-data
+        # teams (e.g. minor national teams with few games) toward the average,
+        # preventing the over-fit blow-ups (Spain λ 0.2, Germany λ 9) that a
+        # fully-converged unregularised fit produces. 0.0 = off.
+        self.l2_reg = l2_reg
 
         # Filled after fit()
         self.teams: list[str] = []
@@ -92,6 +98,7 @@ class DixonColesModel:
         """
         if ref_date is None:
             ref_date = datetime.now(timezone.utc)
+        l2_reg = self.l2_reg
 
         # Build team index
         teams = sorted({m["home_team"] for m in matches} | {m["away_team"] for m in matches})
@@ -154,7 +161,63 @@ class DixonColesModel:
                 return 1e12
 
             ll = np.log(tau) + log_ph + log_pa
-            return -float(np.dot(weights, ll))
+            nll = -float(np.dot(weights, ll))
+            if l2_reg:
+                nll += l2_reg * (float(np.sum(atk * atk)) + float(np.sum(dfn * dfn)))
+            return nll
+
+        def neg_ll_grad(params: np.ndarray) -> np.ndarray:
+            """Analytic gradient of neg_ll (verified vs finite differences, max
+            err ~2e-7). Without it L-BFGS-B used a numerical gradient costing
+            ~2*n_params evals each, exhausting the default maxfun after ~5
+            iterations on large team counts → strengths stuck at the zero init
+            and a degenerate fit shipped silently (the 2026-05-25 retrain bug)."""
+            atk = params[:n]
+            atk = atk - atk.mean()
+            dfn = params[n : 2 * n]
+            hadv = params[2 * n]
+            rho = params[2 * n + 1]
+
+            log_lh = atk[h_idx] + dfn[a_idx] + hadv
+            log_la = atk[a_idx] + dfn[h_idx]
+            lh = np.exp(log_lh)
+            la = np.exp(log_la)
+
+            tau = np.ones(len(matches))
+            dtau_du = np.zeros(len(matches))
+            dtau_dv = np.zeros(len(matches))
+            dtau_dr = np.zeros(len(matches))
+            tau[m00] = 1.0 - lh[m00] * la[m00] * rho
+            dtau_du[m00] = -lh[m00] * la[m00] * rho
+            dtau_dv[m00] = -lh[m00] * la[m00] * rho
+            dtau_dr[m00] = -lh[m00] * la[m00]
+            tau[m10] = 1.0 + la[m10] * rho
+            dtau_dv[m10] = la[m10] * rho
+            dtau_dr[m10] = la[m10]
+            tau[m01] = 1.0 + lh[m01] * rho
+            dtau_du[m01] = lh[m01] * rho
+            dtau_dr[m01] = lh[m01]
+            tau[m11] = 1.0 - rho
+            dtau_dr[m11] = -1.0
+            if np.any(tau <= 0):
+                return np.zeros_like(params)
+
+            inv = 1.0 / tau
+            A = (hg - lh) + inv * dtau_du          # d ll / d log_lh
+            B = (ag - la) + inv * dtau_dv          # d ll / d log_la
+            R = inv * dtau_dr                      # d ll / d rho
+            wA = weights * A
+            wB = weights * B
+            wR = weights * R
+            g_atk_eff = -(np.bincount(h_idx, wA, n) + np.bincount(a_idx, wB, n))
+            g_dfn = -(np.bincount(a_idx, wA, n) + np.bincount(h_idx, wB, n))
+            g_atk = g_atk_eff - g_atk_eff.mean()   # chain rule through zero-sum centering
+            g_hadv = -np.sum(wA)
+            g_rho = -np.sum(wR)
+            if l2_reg:
+                g_atk = g_atk + 2.0 * l2_reg * atk
+                g_dfn = g_dfn + 2.0 * l2_reg * dfn
+            return np.concatenate([g_atk, g_dfn, [g_hadv], [g_rho]])
 
         # Initialise: attack/defense = 0, home_adv = 0.1, rho = -0.1
         x0 = np.zeros(2 * n + 2)
@@ -166,10 +229,17 @@ class DixonColesModel:
         result = minimize(
             neg_ll,
             x0,
+            jac=neg_ll_grad,
             method="L-BFGS-B",
             bounds=bounds,
-            options={"maxiter": 2000, "ftol": 1e-10, "gtol": 1e-7},
+            options={"maxiter": 5000, "ftol": 1e-12, "gtol": 1e-8},
         )
+        self.fit_success = bool(result.success)
+        self.fit_message = str(result.message)
+        if not result.success:
+            print(f"[dixon_coles] WARNING: optimiser did NOT converge: "
+                  f"{result.message} (nit={result.nit}, nfev={result.nfev}). "
+                  f"Strengths may be collapsed — DO NOT ship this fit.")
 
         params = result.x
         atk = params[:n]
