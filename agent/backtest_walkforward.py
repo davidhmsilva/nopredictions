@@ -34,11 +34,12 @@ def load_odds_matches(min_date: str):
     """Matches with Pinnacle opening (PS) + closing (PSC) + result."""
     sql = """
       SELECT m.kickoff_utc, ht.canonical_name home, at.canonical_name away,
-             m.home_score hs, m.away_score as_,
+             m.home_score hs, m.away_score as_, l.code league,
              o1.home_odds oh, o1.draw_odds od, o1.away_odds oa,
              c1.home_odds ch, c1.draw_odds cd, c1.away_odds ca
       FROM matches m
       JOIN teams ht ON ht.id=m.home_team_id JOIN teams at ON at.id=m.away_team_id
+      JOIN seasons s ON s.id=m.season_id JOIN leagues l ON l.id=s.league_id
       JOIN match_odds o1 ON o1.match_id=m.id JOIN bookmakers b1 ON b1.id=o1.bookmaker_id AND b1.code='PS'
       JOIN match_odds c1 ON c1.match_id=m.id JOIN bookmakers b2 ON b2.id=c1.bookmaker_id AND b2.code='PSC'
       WHERE m.status='finished' AND m.home_score IS NOT NULL
@@ -54,7 +55,7 @@ def load_odds_matches(min_date: str):
         ko = r["kickoff_utc"]
         if ko.tzinfo is None: ko = ko.replace(tzinfo=timezone.utc)
         res = "home" if r["hs"] > r["as_"] else ("away" if r["hs"] < r["as_"] else "draw")
-        out.append({"ko": ko, "home": r["home"], "away": r["away"], "result": res,
+        out.append({"ko": ko, "home": r["home"], "away": r["away"], "result": res, "league": r["league"],
                     "open": (float(r["oh"]), float(r["od"]), float(r["oa"])),
                     "close": (float(r["ch"]), float(r["cd"]), float(r["ca"]))})
     return out
@@ -109,47 +110,64 @@ def main():
         if not getattr(model, "fit_success", True):
             print(f"  {p0:%Y-%m} WARN non-converged fit, skipping period", flush=True); p0 = p1; continue
         idx = {_norm(t): i for i, t in enumerate(model.teams)}
-        n_bet = 0
+        n_priced = 0
         for t in period_test:
             hi, ai = idx.get(_norm(t["home"])), idx.get(_norm(t["away"]))
             if hi is None or ai is None: continue
             pred = model.predict(model.teams[hi], model.teams[ai])
             P = (pred["home_win"], pred["draw"], pred["away_win"])
             q = vig_remove(*t["open"])
+            n_priced += 1
             for k, oc in enumerate(("home", "draw", "away")):
-                edge = P[k] - q[k]
-                if edge >= args.threshold:
-                    eo, co = t["open"][k], t["close"][k]
-                    bets.append({"edge": edge, "entry": eo, "close": co,
-                                 "won": t["result"] == oc, "p": P[k], "q": q[k]})
-                    n_bet += 1
-        print(f"  {p0:%Y-%m}: trained {len(train):5} | tested {len(period_test):5} | bets {n_bet}", flush=True)
+                bets.append({"edge": P[k] - q[k], "entry": t["open"][k], "close": t["close"][k],
+                             "won": t["result"] == oc, "league": t["league"]})
+        print(f"  {p0:%Y-%m}: trained {len(train):5} | tested {len(period_test):5} | priced {n_priced}", flush=True)
         p0 = p1
 
-    # ---- aggregate ----
+    # ---- aggregate (slice the recorded outcomes many ways) ----
     if not bets:
-        print("\nNo bets."); return
-    pnl = np.array([(b["entry"] - 1) if b["won"] else -1.0 for b in bets])
-    clv = np.array([b["entry"] / b["close"] - 1 for b in bets])
-    won = np.array([b["won"] for b in bets])
-    n = len(bets)
-    yci = boot_ci(pnl); cci = boot_ci(clv)
-    print("\n" + "=" * 74)
-    print(f"WALK-FORWARD BACKTEST — DC vs Pinnacle (open entry, close benchmark)")
-    print(f"  threshold {args.threshold*100:.0f}pp | retrain {args.retrain_months}mo | window {args.train_window_years}y")
-    print("=" * 74)
-    print(f"  bets: {n:,}   win rate: {won.mean()*100:.1f}%")
-    print(f"  YIELD: {pnl.mean()*100:+.2f}%   95% CI [{yci[0]*100:+.2f}%, {yci[1]*100:+.2f}%]")
-    print(f"  CLV:   {clv.mean()*100:+.2f}%   95% CI [{cci[0]*100:+.2f}%, {cci[1]*100:+.2f}%]   (+ = beat the close)")
-    print(f"  → {'CLV+ (sig)' if cci[0]>0 else ('CLV− (sig)' if cci[1]<0 else 'CLV ~ (CI spans 0)')}"
-          f" | {'YIELD+ (sig)' if yci[0]>0 else ('YIELD− (sig)' if yci[1]<0 else 'YIELD ~ (CI spans 0)')}")
-    print("\n  by edge bucket:")
-    edges = np.array([b["edge"] for b in bets])
-    for lo, hi in [(0.03, 0.05), (0.05, 0.08), (0.08, 0.12), (0.12, 1.0)]:
-        msk = (edges >= lo) & (edges < hi)
-        if msk.sum() == 0: continue
-        print(f"    edge {lo*100:.0f}-{hi*100:.0f}pp: n={msk.sum():5}  yield {pnl[msk].mean()*100:+6.1f}%  "
-              f"CLV {clv[msk].mean()*100:+5.2f}%  win {won[msk].mean()*100:.0f}%")
+        print("\nNo priceable matches."); return
+
+    def stats(sub):
+        pnl = np.array([(b["entry"] - 1) if b["won"] else -1.0 for b in sub])
+        clv = np.array([b["entry"] / b["close"] - 1 for b in sub])
+        won = np.array([b["won"] for b in sub], float)
+        return dict(n=len(sub), win=won.mean(), yld=pnl.mean(), clv=clv.mean(),
+                    yci=boot_ci(pnl), cci=boot_ci(clv))
+
+    def verdict(s):
+        c = "CLV+ (sig)" if s["cci"][0] > 0 else ("CLV− (sig)" if s["cci"][1] < 0 else "CLV~ (spans 0)")
+        return c
+
+    thr = args.threshold
+    print("\n" + "=" * 80)
+    print(f"WALK-FORWARD BACKTEST — DC vs Pinnacle | threshold {thr*100:.0f}pp | "
+          f"retrain {args.retrain_months}mo | window {args.train_window_years}y")
+    print("=" * 80)
+    for label, sub in [("NORMAL  — back outcomes DC says are underpriced (edge ≥ +thr)",
+                        [b for b in bets if b["edge"] >= thr]),
+                       ("FADE    — back outcomes DC says are overpriced  (edge ≤ −thr)",
+                        [b for b in bets if b["edge"] <= -thr])]:
+        if not sub:
+            print(f"\n{label}\n  no bets"); continue
+        s = stats(sub)
+        print(f"\n{label}")
+        print(f"  n={s['n']:,}  win {s['win']*100:.1f}%  "
+              f"YIELD {s['yld']*100:+.2f}% [{s['yci'][0]*100:+.1f},{s['yci'][1]*100:+.1f}]  "
+              f"CLV {s['clv']*100:+.2f}% [{s['cci'][0]*100:+.2f},{s['cci'][1]*100:+.2f}]  → {verdict(s)}")
+
+    # By league (normal strategy) — hunt for a +CLV niche where Pinnacle is less sharp
+    from collections import defaultdict
+    byl = defaultdict(list)
+    for b in bets:
+        if b["edge"] >= thr: byl[b["league"]].append(b)
+    rows = [(lg, stats(sub)) for lg, sub in byl.items() if len(sub) >= 300]
+    print(f"\nBY LEAGUE (normal strategy, leagues with ≥300 bets, sorted by CLV desc):")
+    print(f"  {'league':14}{'n':>6}{'yield':>9}{'CLV':>9}{'CLV 95% CI':>22}")
+    for lg, s in sorted(rows, key=lambda x: -x[1]["clv"]):
+        flag = "  <== +CLV (CI>0)" if s["cci"][0] > 0 else ""
+        print(f"  {(lg or '?'):14}{s['n']:>6}{s['yld']*100:>+8.1f}%{s['clv']*100:>+8.2f}%"
+              f"   [{s['cci'][0]*100:+.2f},{s['cci'][1]*100:+.2f}]{flag}")
 
 
 if __name__ == "__main__":
