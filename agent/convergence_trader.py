@@ -205,15 +205,66 @@ def _conn():
     return psycopg2.connect(DATABASE_URL)
 
 
-def _open_positions(conn) -> list[dict]:
+def _tracking_positions(conn) -> list[dict]:
+    """Every entry whose hold-to-end settlement is not yet recorded — we keep
+    observing its price path and peak EVEN AFTER the strategy's converged-exit
+    fired, so we can replay alternative exit rules offline."""
     cur = conn.cursor()
     cur.execute(
         """SELECT id, token_id, home, away, outcome_key, play_type, fixture_id,
-                  entry_price, entry_fair, entry_minute, size_shares
-           FROM convergence_shadow WHERE status = 'open'"""
+                  entry_price, entry_fair, entry_minute, size_shares, status, peak_bid
+           FROM convergence_shadow WHERE settle_result IS NULL"""
     )
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def _record_path(conn, pos_id, minute, fair, bid, ask):
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO convergence_path (position_id, minute, fair, bid, ask)
+           VALUES (%s,%s,%s,%s,%s)""",
+        (pos_id, minute, round(fair, 4) if fair is not None else None, bid, ask),
+    )
+    conn.commit()
+
+
+def _update_peak(conn, pos_id, bid, minute, prev_peak):
+    if bid is None:
+        return
+    if prev_peak is not None and float(bid) <= float(prev_peak):
+        return
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE convergence_shadow SET peak_bid=%s, peak_minute=%s WHERE id=%s",
+        (bid, minute, pos_id),
+    )
+    conn.commit()
+
+
+def _settle(conn, pos, result):
+    """Fill the hold-to-resolution counterfactual for an entry. If the strategy
+    never exited (still open), this also becomes its actual exit."""
+    won = (result == pos["outcome_key"])
+    settle_price = 1.0 if won else 0.0
+    entry, size = float(pos["entry_price"]), float(pos["size_shares"])
+    settle_pnl = round((settle_price - entry) * size, 4)
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE convergence_shadow SET
+              settle_result=%s, settle_price=%s, settle_pnl_usd=%s, settled_at=NOW(),
+              updated_at=NOW() WHERE id=%s""",
+        (result, settle_price, settle_pnl, pos["id"]),
+    )
+    conn.commit()
+    actual = None
+    if pos["status"] == "open":
+        actual = _close_position(
+            conn, pos["id"], settle_price,
+            "settled_win" if won else "settled_loss",
+            None, entry, size,
+        )
+    return won, settle_pnl, actual
 
 
 def _close_position(conn, pos_id, exit_price, reason, exit_minute, entry_price, size_shares):
@@ -276,13 +327,13 @@ def run_once(dry_run: bool = False) -> dict:
     log.info(f"Live in DC model: {len(live)} match(es)")
 
     conn = None if dry_run else _conn()
-    open_positions = _open_positions(conn) if conn is not None else []
+    tracking = _tracking_positions(conn) if conn is not None else []
 
     # Fetch + group PM events once; used by BOTH the exit pass (for bids) and the
     # entry pass. Skip the fetch only when there is nothing to do at all.
     markets_by_key: dict[tuple[str, str], list[dict]] = {}
     by_match: dict[tuple[str, str], list[dict]] = {}
-    if live or open_positions:
+    if live or tracking:
         events = _fetch_pm_events(max(1, (HOURS_WINDOW + 23) // 24))
         by_match, _, _ = _group_pm_events_for_inplay(events, norm_idx, model.teams, HOURS_WINDOW)
         markets_by_key = {
@@ -298,40 +349,50 @@ def run_once(dry_run: bool = False) -> dict:
             fair_cache[key] = _sim_fair(model, home, away, live[key]) if key in live else None
         return fair_cache[key]
 
-    n_exits = n_entries = 0
+    n_exits = n_settled = n_entries = 0
 
-    # ── EXIT pass ──
-    for pos in open_positions:
+    # ── EXIT + measurement pass ──
+    # For EVERY tracked entry (open or already-converged): record the price path
+    # and peak this cycle, run the converged-exit rule (open only), and settle
+    # exactly when the match ends. Settlement fills the hold-to-end counterfactual
+    # for every entry so exit rules can be compared offline.
+    for pos in tracking:
         key = (pos["home"], pos["away"])
         ls = live.get(key)
+
         if ls is None:
             # Match no longer live → settle exactly from final score.
             result = _fetch_final_result(pos["fixture_id"])
             if result is None:
                 continue  # not finished yet (HT gap / between cycles) — hold
-            won = (result == pos["outcome_key"])
-            exit_price = 1.0 if won else 0.0
-            pnl, pct = _close_position(
-                conn, pos["id"], exit_price,
-                "settled_win" if won else "settled_loss",
-                None, pos["entry_price"], pos["size_shares"],
-            )
-            n_exits += 1
-            log.info(f"  EXIT settle {'WIN' if won else 'LOSS'} | {key[0]} v {key[1]} "
-                     f"{pos['outcome_key']} | entry {float(pos['entry_price']):.3f}→{exit_price:.2f} "
-                     f"| PnL ${pnl:+.2f}")
+            won, settle_pnl, actual = _settle(conn, pos, result)
+            n_settled += 1
+            tag = "WIN" if won else "LOSS"
+            if actual is not None:  # strategy never converged — this is its exit too
+                n_exits += 1
+                log.info(f"  SETTLE+EXIT {tag} | {key[0]} v {key[1]} {pos['outcome_key']} "
+                         f"| entry {float(pos['entry_price']):.3f}→{1.0 if won else 0.0:.2f} "
+                         f"| hold-PnL ${settle_pnl:+.2f}")
+            else:  # already exited on convergence — just records hold-to-end
+                log.info(f"  SETTLE {tag} (already exited) | {key[0]} v {key[1]} "
+                         f"{pos['outcome_key']} | hold-PnL ${settle_pnl:+.2f}")
             continue
 
         sim_p = fair_for(*key)
-        if not sim_p:
-            continue
-        fair = float(sim_p.get(pos["outcome_key"], 0.0))
+        fair = float(sim_p.get(pos["outcome_key"], 0.0)) if sim_p else None
         mkt = _market_for_token(markets_by_key.get(key, []), pos["token_id"])
-        bid = mkt.get("bestBid") if mkt else None
+        bid = float(mkt["bestBid"]) if mkt and mkt.get("bestBid") is not None else None
+        ask = float(mkt["bestAsk"]) if mkt and mkt.get("bestAsk") is not None else None
+
+        # Record path + peak for every tracked position (even closed ones).
+        _record_path(conn, pos["id"], ls["minute"], fair, bid, ask)
+        _update_peak(conn, pos["id"], bid, ls["minute"], pos.get("peak_bid"))
+
+        if pos["status"] != "open" or fair is None:
+            continue  # measurement only (already exited, or no fair this cycle)
         if bid is None:
             _touch_position(conn, pos["id"], fair, None, ls["minute"])
             continue
-        bid = float(bid)
         _touch_position(conn, pos["id"], fair, bid, ls["minute"])
         # Convergence / edge-gone: market bid has caught up to (or passed) fair.
         if (fair - bid) <= EXIT_BUFFER_PP / 100.0:
@@ -348,7 +409,8 @@ def run_once(dry_run: bool = False) -> dict:
     if not live:
         if conn:
             conn.close()
-        return {"live": 0, "exits": n_exits, "entries": 0, "dry_run": dry_run}
+        return {"live": 0, "exits": n_exits, "settled": n_settled,
+                "entries": 0, "dry_run": dry_run}
 
     for key, match_events in by_match.items():
         ls = live.get(key)
@@ -402,8 +464,10 @@ def run_once(dry_run: bool = False) -> dict:
 
     if conn:
         conn.close()
-    log.info(f"Cycle done — {len(live)} live | {n_exits} exits | {n_entries} entry signals")
-    return {"live": len(live), "exits": n_exits, "entries": n_entries, "dry_run": dry_run}
+    log.info(f"Cycle done — {len(live)} live | {n_exits} exits | "
+             f"{n_settled} settled | {n_entries} entry signals")
+    return {"live": len(live), "exits": n_exits, "settled": n_settled,
+            "entries": n_entries, "dry_run": dry_run}
 
 
 def _market_for_token(markets: list[dict], token_id: str) -> Optional[dict]:
@@ -420,33 +484,64 @@ def report():
     cur = conn.cursor()
     cur.execute("SELECT count(*) FROM convergence_shadow WHERE status='open'")
     n_open = cur.fetchone()[0]
-    cur.execute(
-        """SELECT count(*), COALESCE(sum(realized_pnl_usd),0), COALESCE(avg(realized_pct),0),
-                  count(*) FILTER (WHERE realized_pnl_usd > 0)
-           FROM convergence_shadow WHERE status='closed'"""
-    )
-    n, pnl, avg_pct, wins = cur.fetchone()
+
     print(f"\n=== Convergence shadow ledger ===")
     print(f"Open positions:   {n_open}")
-    print(f"Closed:           {n}")
-    if n:
-        print(f"  Wins/Losses:    {wins}/{n - wins}  ({wins/n*100:.0f}% win)")
-        print(f"  Realized P&L:   ${float(pnl):+.2f}  (fill-weighted, $10 stake)")
-        print(f"  Avg per-unit:   {float(avg_pct)*100:+.1f}%")
-        yield_pct = float(pnl) / (n * SHADOW_STAKE_USD) * 100
-        print(f"  Yield:          {yield_pct:+.2f}%  of ${n*SHADOW_STAKE_USD:.0f} staked")
-        print(f"\n  ⚠ n={n} — need ≥30 closed flips before reading anything into this.")
+
+    # ── The exit-rule comparison (answers: sell on convergence vs hold to end) ──
+    # Computed only over entries that have BOTH a strategy exit AND a recorded
+    # settlement, so the three rules are scored on the same set of bets.
+    cur.execute(
+        """SELECT count(*),
+                  COALESCE(sum(realized_pnl_usd),0),                       -- converged exit
+                  COALESCE(sum(settle_pnl_usd),0),                         -- hold to end
+                  COALESCE(sum((peak_bid - entry_price) * size_shares),0), -- exit at peak (ceiling)
+                  count(*) FILTER (WHERE realized_pnl_usd > 0),
+                  count(*) FILTER (WHERE settle_pnl_usd > 0)
+           FROM convergence_shadow
+           WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL"""
+    )
+    n, conv_pnl, hold_pnl, peak_pnl, conv_wins, hold_wins = cur.fetchone()
+    if not n:
+        print("\n  No settled flips yet — comparison appears once matches resolve.")
+        conn.close()
+        return
+
+    staked = n * SHADOW_STAKE_USD
+    print(f"\n  Settled flips:  n={n}  (staked ${staked:.0f} @ $10)")
+    print(f"  {'Exit rule':<22}{'P&L':>10}{'Yield':>9}{'Win%':>7}")
+    print(f"  {'-'*46}")
+    print(f"  {'CONVERGED (current)':<22}{float(conv_pnl):>+9.2f}{float(conv_pnl)/staked*100:>+8.1f}%"
+          f"{conv_wins/n*100:>6.0f}%")
+    print(f"  {'HOLD to resolution':<22}{float(hold_pnl):>+9.2f}{float(hold_pnl)/staked*100:>+8.1f}%"
+          f"{hold_wins/n*100:>6.0f}%")
+    print(f"  {'PEAK bid (ceiling)':<22}{float(peak_pnl):>+9.2f}{float(peak_pnl)/staked*100:>+8.1f}%"
+          f"{'—':>6}")
+    print(f"\n  → If CONVERGED ≈ HOLD: selling early is free risk reduction, keep it.")
+    print(f"  → If HOLD >> CONVERGED: we're leaving money by selling — hold longer.")
+    print(f"  → PEAK is the unreachable ceiling (perfect timing) — gap to it = timing cost.")
+    print(f"\n  ⚠ n={n} — need ≥30 settled flips before trusting this.")
+
+    # Per-unit (liquidity-blind) check on the converged rule.
+    cur.execute(
+        "SELECT COALESCE(avg(realized_pct),0) FROM convergence_shadow WHERE exit_reason='converged'"
+    )
+    print(f"\n  Converged avg per-unit return: {float(cur.fetchone()[0])*100:+.1f}%")
+
     cur.execute(
         """SELECT home, away, outcome_key, entry_price, exit_price, exit_reason,
-                  realized_pnl_usd, realized_pct
-           FROM convergence_shadow WHERE status='closed' ORDER BY exit_at DESC LIMIT 12"""
+                  realized_pnl_usd, settle_pnl_usd, peak_bid
+           FROM convergence_shadow
+           WHERE settle_result IS NOT NULL ORDER BY settled_at DESC NULLS LAST LIMIT 12"""
     )
     rows = cur.fetchall()
     if rows:
-        print("\n  Recent closed:")
-        for h, a, ok, ep, xp, rs, pnl, pct in rows:
-            print(f"    {h[:14]:14} v {a[:14]:14} {ok:9} {float(ep):.3f}→{float(xp):.3f} "
-                  f"{rs:13} ${float(pnl):+.2f} ({float(pct)*100:+.0f}%)")
+        print("\n  Recent settled (entry→exit | converged$ | hold$ | peak):")
+        for h, a, ok, ep, xp, rs, cpnl, hpnl, pk in rows:
+            xps = f"{float(xp):.3f}" if xp is not None else "  —  "
+            pks = f"{float(pk):.3f}" if pk is not None else "  —  "
+            print(f"    {h[:12]:12} v {a[:12]:12} {ok:9} {float(ep):.3f}→{xps} {rs:13} "
+                  f"${float(cpnl):+.2f} | ${float(hpnl):+.2f} | {pks}")
     conn.close()
 
 
