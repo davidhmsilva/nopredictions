@@ -70,6 +70,8 @@ DEFAULT_EDGE_THRESHOLD_PP = 5.0   # higher than pre-match — prices move fast
 SIM_N = 30_000                     # fewer sims for tighter latency
 DEDUPE_WINDOW_MIN = 15             # allow re-entry after state changes
 DEFAULT_HOURS_WINDOW = 4           # PM events within ±4h of now
+_PAST_GRACE = timedelta(hours=3)   # keep matches whose nominal endDate just passed
+                                   # (still live: stoppage/HT delays) — live_state gates the rest
 
 # force=True overrides anything dc_scanner/sim_scanner's basicConfig already set.
 logging.basicConfig(
@@ -376,8 +378,14 @@ def _group_pm_events_for_inplay(
 ) -> tuple[dict[tuple[str, str], list[dict]], int, int]:
     """
     Same as sim_scanner._group_events_by_match, but with a tighter time window:
-    only events whose endDate (resolution time) is within `hours_window` from now
-    AND not already in the past. That gives us "currently playable" matches.
+    only events whose endDate (resolution time) is within `hours_window` from now.
+
+    NOTE: PM `endDate` is the *scheduled* resolution time (~kickoff + 2h). A match
+    that is still being played (stoppage time, HT delay) has often already passed
+    its nominal endDate while its market stays open — so we must NOT drop recently
+    past endDates, or we'd exclude exactly the live matches we want to observe.
+    A `_PAST_GRACE` window keeps those; the live_state intersection downstream
+    discards anything not actually in progress.
     """
     by_match: dict[tuple[str, str], list[dict]] = {}
     n_non_football = 0
@@ -385,6 +393,7 @@ def _group_pm_events_for_inplay(
 
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(hours=hours_window)
+    window_start = now - _PAST_GRACE
 
     for event in events:
         title = event.get("title", "")
@@ -398,7 +407,7 @@ def _group_pm_events_for_inplay(
         if end_date:
             try:
                 end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-                if end_dt < now or end_dt > window_end:
+                if end_dt < window_start or end_dt > window_end:
                     n_outside_window += 1
                     continue
             except (ValueError, TypeError):

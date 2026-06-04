@@ -40,6 +40,30 @@ GAMMA_API = 'https://gamma-api.polymarket.com'
 
 RESOLUTION_THRESHOLD = 0.99
 
+# Real sports CLV essentially never exceeds this. Anything larger is a data
+# artifact (bad outcome mapping / longshot extraction noise), not edge.
+MAX_PLAUSIBLE_CLV = 0.50
+
+
+def _safe_market_clv(entry_odds: float | None,
+                     closing_prob: float | None) -> float | None:
+    """
+    Compute real closing-line value, or None if the inputs are untrustworthy.
+
+    clv = entry_odds / closing_odds - 1 = entry_odds * closing_prob - 1
+
+    Rejects: missing inputs, impossible closing prob (<=0 or >=1), and
+    implausibly large |clv| (> MAX_PLAUSIBLE_CLV) which signals a mapping bug.
+    """
+    if not entry_odds or closing_prob is None:
+        return None
+    if not (0.0 < closing_prob < 1.0):
+        return None
+    clv = entry_odds * closing_prob - 1.0
+    if abs(clv) > MAX_PLAUSIBLE_CLV:
+        return None
+    return round(clv, 4)
+
 
 def _conn():
     return psycopg2.connect(DATABASE_URL)
@@ -103,7 +127,7 @@ def _get_closing_from_sharp_snapshot(closing_sharp_odds: dict | None,
     h2h = closing_sharp_odds.get('h2h', {})
 
     # 1X2
-    if 'home_win' == ol or ('home' in ol and 'ht_' not in ol):
+    if 'home_win' == ol or ('home' in ol and 'ht_' not in ol and 'wins_by' not in ol):
         return h2h.get('home')
     if 'away_win' == ol or ('away' in ol and 'ht_' not in ol and 'wins_by' not in ol):
         return h2h.get('away')
@@ -196,16 +220,53 @@ def _get_closing_odds_for_outcome(match_id: int, outcome_label: str) -> tuple[fl
 
 # ─── Polymarket resolution ────────────────────────────────────────────────────
 
+CLOB_API = 'https://clob.polymarket.com'
+
+
+def _check_clob_resolution(condition_id: str) -> str | None:
+    """
+    Resolve a market by on-chain conditionId via the CLOB API. Used for trades
+    whose external_id is a 0x conditionId (e.g. on-chain / Live Polymarket
+    positions synced from the wallet) rather than a numeric Gamma market id.
+    The CLOB exposes a definitive per-token ``winner`` flag.
+    Returns 'yes' if the first outcome (YES) won, 'no' if the second won, else None.
+    """
+    try:
+        d = requests.get(f'{CLOB_API}/markets/{condition_id}', timeout=10).json()
+    except Exception:
+        return None
+    tokens = d.get('tokens') or []
+    if len(tokens) < 2:
+        return None
+    if tokens[0].get('winner'):
+        return 'yes'
+    if tokens[1].get('winner'):
+        return 'no'
+    return None
+
+
 def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -> str | None:
     """
     Fetch a Polymarket market and check if it resolved.
     Returns 'yes' if YES resolved, 'no' if NO resolved, None if still open.
 
-    Requires the market to be officially ``closed`` by Polymarket AND
-    prices at extreme levels (>= 0.99).  We no longer resolve on price
-    alone — NBA/sports markets can have extreme prices before the game
-    finishes (thin liquidity, sentiment moves).
+    Markets identified by a 0x conditionId (on-chain / Live Polymarket positions)
+    are resolved via the CLOB API; numeric Gamma ids via the Gamma API below.
+
+    Resolves when the outcome is genuinely settled — either the market is
+    officially ``closed`` by Polymarket, OR the UMA oracle has a proposed/
+    resolved outcome — AND prices are at extreme levels (>= 0.99).
+
+    Why both signals: after a game ends, PM markets sit at ``closed=False`` for
+    hours during the UMA dispute window, even though ``umaResolutionStatus`` is
+    already 'proposed' and the price is 0.9995. Waiting for ``closed=True`` left
+    finished games unresolved for hours. ``umaResolutionStatus`` only becomes
+    proposed/resolved AFTER the game ends, so it cannot fire mid-match — which is
+    the failure mode the price-alone check originally guarded against.
     """
+    if external_id and external_id.startswith('0x'):
+        return _check_clob_resolution(external_id)
+
     try:
         r = requests.get(f'{GAMMA_API}/markets/{external_id}', timeout=10)
         if not r.ok:
@@ -215,7 +276,27 @@ def _check_pm_resolution(external_id: str, past_resolution_time: bool = False) -
         return None
 
     is_closed = data.get('closed', False)
-    if not is_closed:
+    uma_status = (data.get('umaResolutionStatus') or '').lower()
+    # 'proposed' and 'resolved' both mean the oracle has the result in hand.
+    settled = is_closed or uma_status in ('proposed', 'resolved')
+
+    # Fallback for markets that auto-settle to an extreme price without ever
+    # showing closed/uma (some halftime / derived markets): trust an extreme
+    # price only once the match is unambiguously over (endDate > 3h ago), so
+    # this can never fire mid-game.
+    if not settled:
+        end_dt = None
+        try:
+            ed = data.get('endDate')
+            if ed:
+                end_dt = datetime.fromisoformat(str(ed).replace('Z', '+00:00'))
+        except (ValueError, TypeError):
+            end_dt = None
+        now = datetime.now(timezone.utc)
+        if end_dt and (now - end_dt).total_seconds() > 3 * 3600:
+            settled = True  # game long over; the price check below still guards
+
+    if not settled:
         return None
 
     raw_prices = data.get('outcomePrices')
@@ -249,48 +330,57 @@ def _settle_trade(conn, trade_id: int, result: str, entry_odds: float | None,
     else:
         payout = 0.0
 
-    closing_prob, clv = None, None
-    clv_source = None
+    # Real market CLV only goes in `clv` + `closing_price`. The model-vs-entry
+    # diagnostic goes in `model_clv` and is NEVER conflated with real CLV.
+    closing_prob, clv, clv_source, model_clv = None, None, None, None
 
     # Priority 1: closing_sharp_odds JSONB from closing_collector (all market types)
     if closing_sharp_odds:
-        closing_prob = _get_closing_from_sharp_snapshot(closing_sharp_odds, outcome_label)
-        if entry_odds and closing_prob and closing_prob > 0:
-            closing_odds = 1.0 / closing_prob
-            clv = round((entry_odds / closing_odds) - 1, 4)
-            clv_source = 'sharp_closing'
+        sharp_prob = _get_closing_from_sharp_snapshot(closing_sharp_odds, outcome_label)
+        candidate = _safe_market_clv(entry_odds, sharp_prob)
+        if candidate is not None:
+            closing_prob, clv, clv_source = sharp_prob, candidate, 'sharp_closing'
+        elif sharp_prob is not None and 0.0 < sharp_prob < 1.0:
+            # plausible prob but |clv| too large -> flag for review, don't trust
+            clv_source = 'suspect'
 
     # Priority 2: Pinnacle closing from match_odds table (1X2 only, historical)
     if clv is None and match_id:
-        closing_odds_legacy, closing_prob_legacy = _get_closing_odds_for_outcome(match_id, outcome_label)
-        if closing_prob_legacy:
-            closing_prob = closing_prob_legacy
-        if entry_odds and closing_odds_legacy and closing_odds_legacy > 0:
-            clv = round((entry_odds / closing_odds_legacy) - 1, 4)
-            clv_source = 'pinnacle_fd'
+        _, closing_prob_legacy = _get_closing_odds_for_outcome(match_id, outcome_label)
+        candidate = _safe_market_clv(entry_odds, closing_prob_legacy)
+        if candidate is not None:
+            closing_prob, clv, clv_source = closing_prob_legacy, candidate, 'pinnacle_fd'
+        elif clv_source is None and closing_prob_legacy and 0.0 < closing_prob_legacy < 1.0:
+            clv_source = 'suspect'
 
-    # Priority 3: model_probability as fair-value proxy (model CLV)
-    if clv is None and model_probability and model_probability > 0 and entry_odds:
-        closing_prob = model_probability
-        model_odds = 1.0 / model_probability
-        clv = round((entry_odds / model_odds) - 1, 4)
-        clv_source = 'model'
+    # Diagnostic only: how did our entry compare to our own model line?
+    if model_probability and 0.0 < float(model_probability) < 1.0 and entry_odds:
+        model_clv = round(entry_odds * float(model_probability) - 1.0, 4)
+        if clv_source is None:
+            clv_source = 'model'  # no real closing line was available
 
     cur = conn.cursor()
     cur.execute("""
         UPDATE paper_trades SET
-            result       = %s,
-            payout_units = %s,
+            result        = %s,
+            payout_units  = %s,
             closing_price = %s,
-            clv          = %s,
-            resolved_at  = NOW()
+            clv           = %s,
+            clv_source    = %s,
+            model_clv     = %s,
+            resolved_at   = NOW()
         WHERE id = %s
-    """, (result, round(payout, 4), closing_prob, clv, trade_id))
+    """, (result, round(payout, 4), closing_prob, clv, clv_source, model_clv, trade_id))
     conn.commit()
 
     sign = {'won': 'WIN', 'lost': 'LOSS', 'void': 'VOID'}.get(result, result.upper())
     pl = payout - stake
-    clv_str = f'CLV={clv:+.3f} ({clv_source})' if clv is not None else 'CLV=n/a'
+    if clv is not None:
+        clv_str = f'CLV={clv:+.3f} ({clv_source})'
+    elif model_clv is not None:
+        clv_str = f'CLV=n/a (model_clv={model_clv:+.3f})'
+    else:
+        clv_str = f'CLV=n/a ({clv_source or "none"})'
     log.info(f'[resolver] #{trade_id} {sign} {label} | {outcome_label} | P&L={pl:+.2f}u | {clv_str}')
 
     return {

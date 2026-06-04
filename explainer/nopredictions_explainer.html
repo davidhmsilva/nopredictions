@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NOPREDICTIONS — How the Agent Works</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root{
+    --ink:#0e1525; --sub:#5b6b85; --line:#e3e8f0;
+    --brand:#1763ff; --brand2:#14d39a; --warn:#ff8a3d;
+    --bg:#ffffff; --panel:#f6f8fc; --dark:#0e1525;
+  }
+  html,body{ font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif; color:var(--ink); -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .page{
+    width:210mm; min-height:297mm; padding:22mm 20mm 18mm; position:relative;
+    page-break-after:always; background:var(--bg); overflow:hidden;
+  }
+  .page:last-child{ page-break-after:auto; }
+
+  /* ---------- typography ---------- */
+  h1{ font-size:40px; line-height:1.05; letter-spacing:-1.2px; font-weight:800; }
+  h2{ font-size:25px; letter-spacing:-.5px; font-weight:800; margin-bottom:6px; }
+  h3{ font-size:15px; font-weight:700; }
+  p{ font-size:13px; line-height:1.62; color:#33415c; }
+  .lead{ font-size:15px; line-height:1.6; color:#33415c; }
+  .sub{ color:var(--sub); }
+  .mono{ font-family:"SF Mono",ui-monospace,Menlo,monospace; }
+
+  .kicker{ font-size:11px; font-weight:700; letter-spacing:2.5px; text-transform:uppercase; color:var(--brand); }
+  .eyebrow{ display:flex; align-items:center; gap:9px; margin-bottom:14px; }
+  .eyebrow .dot{ width:9px;height:9px;border-radius:50%; background:var(--brand2); }
+  .num{ font-size:12px; font-weight:700; color:var(--sub); }
+
+  .footer{ position:absolute; left:20mm; right:20mm; bottom:11mm; display:flex; justify-content:space-between;
+           font-size:10px; color:#9aa6bd; border-top:1px solid var(--line); padding-top:7px; letter-spacing:.3px; }
+
+  /* ---------- cover ---------- */
+  .cover{ background:radial-gradient(120% 90% at 80% -10%, #16306b 0%, #0e1525 55%, #080c15 100%); color:#fff; display:flex; flex-direction:column; }
+  .cover .brandbar{ display:flex; align-items:center; gap:11px; }
+  .logo{ width:40px;height:40px;border-radius:11px; background:linear-gradient(135deg,var(--brand),var(--brand2)); display:flex;align-items:center;justify-content:center; font-weight:800; font-size:20px; }
+  .cover h1{ font-size:62px; margin-top:auto; }
+  .cover .tag{ font-size:18px; color:#9fc0ff; margin-top:14px; font-weight:600; }
+  .cover .desc{ color:#c2cde3; font-size:14px; line-height:1.65; margin-top:22px; max-width:120mm; }
+  .pillrow{ display:flex; gap:10px; margin-top:30px; flex-wrap:wrap; }
+  .pill{ border:1px solid rgba(255,255,255,.22); border-radius:999px; padding:8px 15px; font-size:12px; color:#dbe6ff; font-weight:600; }
+  .pill b{ color:#fff; }
+
+  /* ---------- generic layout ---------- */
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .card{ border:1px solid var(--line); border-radius:13px; padding:16px 17px; background:#fff; }
+  .card .ic{ width:34px;height:34px;border-radius:9px; display:flex;align-items:center;justify-content:center; font-size:17px; margin-bottom:10px; }
+  .card h3{ margin-bottom:5px; }
+  .card p{ font-size:12px; line-height:1.55; }
+  .b-blue{ background:#e7efff; color:var(--brand); }
+  .b-green{ background:#dcfaef; color:#0a9e74; }
+  .b-orange{ background:#fff0e4; color:#e0701f; }
+  .b-purple{ background:#efe9ff; color:#6b4fe0; }
+  .mt{ margin-top:16px; } .mt-s{ margin-top:9px; } .mb{ margin-bottom:16px; }
+
+  .callout{ border-left:4px solid var(--brand2); background:#f1fbf7; border-radius:0 12px 12px 0; padding:14px 18px; }
+  .callout p{ color:#1c4a3b; }
+
+  .tag-sm{ display:inline-block; font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+           padding:3px 9px; border-radius:6px; background:#eef2f9; color:var(--sub); }
+  ul.clean{ list-style:none; } ul.clean li{ font-size:12.5px; color:#33415c; padding:6px 0 6px 22px; position:relative; line-height:1.5; border-bottom:1px dashed var(--line); }
+  ul.clean li:last-child{ border-bottom:none; }
+  ul.clean li:before{ content:""; position:absolute; left:2px; top:11px; width:8px;height:8px;border-radius:50%; background:var(--brand2); }
+  .x li:before{ background:var(--warn); }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <div class="brandbar">
+    <div class="logo">N</div>
+    <div style="font-weight:800;letter-spacing:.5px;font-size:18px;">NOPREDICTIONS</div>
+  </div>
+
+  <h1>How the<br>Agent Works</h1>
+  <div class="tag">No predictions. Just edges.</div>
+  <p class="desc">
+    An AI trading agent that hunts for <b style="color:#fff;">mispricings</b> in football
+    prediction markets. It doesn't try to forecast who wins — it builds its own fair-value
+    estimate, compares it against the sharpest markets in the world, and acts only when the
+    two meaningfully disagree. Every position is logged publicly, before the event resolves.
+  </p>
+
+  <div class="pillrow">
+    <div class="pill"><b>Venue:</b> Polymarket</div>
+    <div class="pill"><b>Benchmark:</b> Betfair · Pinnacle</div>
+    <div class="pill"><b>Sport:</b> Football</div>
+    <div class="pill"><b>Mode:</b> Public &amp; transparent</div>
+  </div>
+
+  <div class="footer" style="border-color:rgba(255,255,255,.14); color:#7d8aa6;">
+    <span>nopredictions.com</span><span>A plain-English overview</span>
+  </div>
+</section>
+
+<!-- ============ PAGE 2 — THE IDEA ============ -->
+<section class="page">
+  <div class="eyebrow"><span class="dot"></span><span class="kicker">The Idea</span></div>
+  <h2>Two waves, at the same time</h2>
+  <p class="lead mb">The whole project sits at the intersection of two things happening right now.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="ic b-blue">①</div>
+      <h3>AI can do real analysis</h3>
+      <p>Research that used to take a desk of human analysts can now be done by a machine,
+         continuously, without fatigue or bias.</p>
+    </div>
+    <div class="card">
+      <div class="ic b-green">②</div>
+      <h3>Prediction markets are hot</h3>
+      <p>Polymarket and similar venues are having their cultural moment — huge attention and
+         volume, but comparatively thin systematic "sharp" money keeping prices honest.</p>
+    </div>
+  </div>
+
+  <div class="callout mt">
+    <p><b>The thesis:</b> where a lot of attention meets relatively little disciplined pricing,
+       mistakes appear. A patient, math-driven agent can find them. It never claims to know the
+       future — it only points out when a market's price looks <i>wrong</i> relative to a better estimate.</p>
+  </div>
+
+  <h2 style="margin-top:26px;">Why &ldquo;no predictions&rdquo;?</h2>
+  <p class="lead mb">A tipster says &ldquo;Team A will win.&rdquo; This agent says something narrower and more honest:</p>
+
+  <div class="panel" style="display:flex; align-items:center; gap:18px;">
+    <div style="flex:1; text-align:center;">
+      <div class="tag-sm">Tipster</div>
+      <p style="margin-top:8px; font-size:14px;"><b>&ldquo;Team A wins.&rdquo;</b><br><span class="sub">A guess about the world.</span></p>
+    </div>
+    <div style="font-size:26px; color:var(--brand);">→</div>
+    <div style="flex:1.5; text-align:center;">
+      <div class="tag-sm" style="background:#dcfaef;color:#0a9e74;">This agent</div>
+      <p style="margin-top:8px; font-size:14px;"><b>&ldquo;This price looks mispriced.&rdquo;</b><br><span class="sub">A claim about the <i>number</i>, not the outcome.</span></p>
+    </div>
+  </div>
+
+  <div class="footer"><span>NOPREDICTIONS — How the Agent Works</span><span>2</span></div>
+</section>
+
+<!-- ============ PAGE 3 — THE PIPELINE ============ -->
+<section class="page">
+  <div class="eyebrow"><span class="dot"></span><span class="kicker">The Engine</span></div>
+  <h2>From raw data to a fair price</h2>
+  <p class="lead mb">Three layers feed into every decision. The middle layer — the agent's own
+     estimate of fair value — is the heart of the system.</p>
+
+  <!-- SVG pipeline -->
+  <svg viewBox="0 0 760 250" width="100%" style="display:block; margin:6px 0 4px;">
+    <defs>
+      <marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#1763ff"/>
+      </marker>
+      <linearGradient id="g1" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#1763ff"/><stop offset="1" stop-color="#14d39a"/>
+      </linearGradient>
+    </defs>
+
+    <!-- col 1 -->
+    <rect x="8" y="40" width="190" height="170" rx="14" fill="#f6f8fc" stroke="#e3e8f0"/>
+    <text x="103" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#5b6b85">1 · INGEST</text>
+    <text x="28" y="78" font-size="12.5" font-weight="700" fill="#0e1525">Many data sources</text>
+    <text x="28" y="100" font-size="11" fill="#5b6b85">• 140k+ historical matches</text>
+    <text x="28" y="120" font-size="11" fill="#5b6b85">• Team strength &amp; form</text>
+    <text x="28" y="140" font-size="11" fill="#5b6b85">• Sharp-book odds feeds</text>
+    <text x="28" y="160" font-size="11" fill="#5b6b85">• Live scores &amp; events</text>
+    <text x="28" y="180" font-size="11" fill="#5b6b85">• Injuries / availability</text>
+
+    <!-- col 2 -->
+    <rect x="285" y="40" width="190" height="170" rx="14" fill="#eef4ff" stroke="#cdddff"/>
+    <text x="380" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#1763ff">2 · MODEL</text>
+    <text x="305" y="78" font-size="12.5" font-weight="700" fill="#0e1525">Our own fair line</text>
+    <text x="305" y="100" font-size="11" fill="#33415c">Statistical + simulation</text>
+    <text x="305" y="118" font-size="11" fill="#33415c">models turn the data into</text>
+    <text x="305" y="136" font-size="11" fill="#33415c">a probability for every</text>
+    <text x="305" y="154" font-size="11" fill="#33415c">outcome — built from</text>
+    <text x="305" y="172" font-size="11" fill="#33415c">scratch, not copied.</text>
+
+    <!-- col 3 -->
+    <rect x="562" y="40" width="190" height="170" rx="14" fill="#f1fbf7" stroke="#bdf0dc"/>
+    <text x="657" y="30" text-anchor="middle" font-size="13" font-weight="700" fill="#0a9e74">3 · COMPARE</text>
+    <text x="582" y="78" font-size="12.5" font-weight="700" fill="#0e1525">Two checks</text>
+    <text x="582" y="100" font-size="11" fill="#33415c"><tspan font-weight="700">Sharp books →</tspan></text>
+    <text x="582" y="117" font-size="11" fill="#33415c">are we sane?</text>
+    <text x="582" y="142" font-size="11" fill="#33415c"><tspan font-weight="700">Polymarket →</tspan></text>
+    <text x="582" y="159" font-size="11" fill="#33415c">is it mispriced?</text>
+
+    <!-- arrows -->
+    <line x1="200" y1="125" x2="282" y2="125" stroke="#1763ff" stroke-width="2.5" marker-end="url(#ah)"/>
+    <line x1="477" y1="125" x2="559" y2="125" stroke="#1763ff" stroke-width="2.5" marker-end="url(#ah)"/>
+  </svg>
+
+  <div class="grid3 mt">
+    <div class="card">
+      <h3 style="color:var(--brand);">Build, don't copy</h3>
+      <p>The agent forms its <i>own</i> opinion of fair value first. It isn't just mirroring a
+         bookmaker's price.</p>
+    </div>
+    <div class="card">
+      <h3 style="color:#0a9e74;">Sharps = truth oracle</h3>
+      <p>The world's most efficient markets are used as a reality check: if our line is far from
+         theirs, we distrust our line, not the market.</p>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--warn);">Polymarket = where we act</h3>
+      <p>Once we trust our number, the question becomes: does Polymarket's price disagree enough
+         to be worth a position?</p>
+    </div>
+  </div>
+
+  <p class="sub mt-s" style="font-size:11px; font-style:italic;">Note: the specific models, parameters,
+     filters and thresholds that turn data into a price are intentionally not shown here.</p>
+
+  <div class="footer"><span>NOPREDICTIONS — How the Agent Works</span><span>3</span></div>
+</section>
+
+<!-- ============ PAGE 4 — WHAT AN EDGE IS ============ -->
+<section class="page">
+  <div class="eyebrow"><span class="dot"></span><span class="kicker">The Signal</span></div>
+  <h2>What counts as an &ldquo;edge&rdquo;</h2>
+  <p class="lead mb">An edge is simply a gap: the agent thinks an outcome is more likely than the
+     market's price implies. Below, a worked example with illustrative numbers.</p>
+
+  <!-- bar comparison SVG -->
+  <svg viewBox="0 0 760 230" width="100%" style="display:block;">
+    <!-- baseline -->
+    <line x1="60" y1="20" x2="60" y2="180" stroke="#e3e8f0" stroke-width="1"/>
+    <line x1="60" y1="180" x2="720" y2="180" stroke="#e3e8f0" stroke-width="1"/>
+
+    <!-- market price bar -->
+    <rect x="120" y="70" width="300" height="44" rx="8" fill="#ff8a3d"/>
+    <text x="135" y="97" font-size="15" font-weight="700" fill="#fff">Market price implies ~45%</text>
+    <text x="120" y="60" font-size="11" font-weight="700" fill="#5b6b85">POLYMARKET</text>
+
+    <!-- model bar -->
+    <rect x="120" y="126" width="380" height="44" rx="8" fill="url(#g1)"/>
+    <text x="135" y="153" font-size="15" font-weight="700" fill="#fff">Our model says ~57%</text>
+    <text x="120" y="118" font-size="11" font-weight="700" fill="#1763ff">OUR FAIR LINE</text>
+
+    <!-- gap bracket -->
+    <line x1="420" y1="92" x2="500" y2="92" stroke="#0e1525" stroke-width="1.5" stroke-dasharray="3 3"/>
+    <text x="512" y="118" font-size="22" font-weight="800" fill="#0a9e74">≈ 12pp</text>
+    <text x="512" y="136" font-size="11" fill="#5b6b85">the edge</text>
+  </svg>
+
+  <div class="callout mt">
+    <p>If the agent believes the true chance is well above what the market charges, buying that
+       outcome is a <b>positive-expectation bet</b> — even if this particular match still loses.
+       Edges only pay off over many, many positions.</p>
+  </div>
+
+  <h2 style="margin-top:24px;">But a raw gap isn't enough</h2>
+  <p class="lead mb">Most apparent edges are mirages — model error, stale prices, or markets that
+     already know something we don't. Before acting, the agent puts every candidate through filters:</p>
+
+  <div class="grid2">
+    <ul class="clean">
+      <li>Does the sharp-market consensus agree the price is off?</li>
+      <li>Is the gap big enough to survive our own uncertainty?</li>
+    </ul>
+    <ul class="clean">
+      <li>Can the position actually be filled at a price that keeps the edge?</li>
+      <li>Are we already exposed to the same outcome elsewhere?</li>
+    </ul>
+  </div>
+  <p class="sub mt-s" style="font-size:11px; font-style:italic;">The exact gates and cut-offs are part of the
+     secret sauce and are deliberately omitted.</p>
+
+  <div class="footer"><span>NOPREDICTIONS — How the Agent Works</span><span>4</span></div>
+</section>
+
+<!-- ============ PAGE 5 — THE LOOP ============ -->
+<section class="page">
+  <div class="eyebrow"><span class="dot"></span><span class="kicker">The Loop</span></div>
+  <h2>What the agent does, all day</h2>
+  <p class="lead mb">It runs on a continuous cycle — pre-match and live, while games are in play.
+     No human picks the bets; the math decides.</p>
+
+  <!-- circular loop SVG -->
+  <svg viewBox="0 0 760 300" width="100%" style="display:block;">
+    <defs>
+      <marker id="ah2" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#14d39a"/>
+      </marker>
+    </defs>
+
+    <!-- 5 nodes around -->
+    <!-- node helper positions -->
+    <!-- 1 Observe -->
+    <g>
+      <circle cx="120" cy="80" r="46" fill="#eef4ff" stroke="#cdddff"/>
+      <text x="120" y="76" text-anchor="middle" font-size="20">👁️</text>
+      <text x="120" y="98" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1763ff">OBSERVE</text>
+    </g>
+    <!-- 2 Price -->
+    <g>
+      <circle cx="380" cy="58" r="46" fill="#eef4ff" stroke="#cdddff"/>
+      <text x="380" y="54" text-anchor="middle" font-size="20">🧮</text>
+      <text x="380" y="76" text-anchor="middle" font-size="11.5" font-weight="700" fill="#1763ff">PRICE</text>
+    </g>
+    <!-- 3 Compare -->
+    <g>
+      <circle cx="640" cy="80" r="46" fill="#f1fbf7" stroke="#bdf0dc"/>
+      <text x="640" y="76" text-anchor="middle" font-size="20">⚖️</text>
+      <text x="640" y="98" text-anchor="middle" font-size="11.5" font-weight="700" fill="#0a9e74">COMPARE</text>
+    </g>
+    <!-- 4 Act -->
+    <g>
+      <circle cx="520" cy="230" r="46" fill="#fff0e4" stroke="#ffd5b3"/>
+      <text x="520" y="226" text-anchor="middle" font-size="20">🎯</text>
+      <text x="520" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="#e0701f">ACT</text>
+    </g>
+    <!-- 5 Measure -->
+    <g>
+      <circle cx="240" cy="230" r="46" fill="#efe9ff" stroke="#dcd2ff"/>
+      <text x="240" y="226" text-anchor="middle" font-size="20">📊</text>
+      <text x="240" y="248" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6b4fe0">MEASURE</text>
+    </g>
+
+    <!-- arrows along loop -->
+    <path d="M163,67 Q250,40 335,55" fill="none" stroke="#14d39a" stroke-width="2.4" marker-end="url(#ah2)"/>
+    <path d="M425,60 Q520,42 597,68" fill="none" stroke="#14d39a" stroke-width="2.4" marker-end="url(#ah2)"/>
+    <path d="M642,127 Q610,195 565,205" fill="none" stroke="#14d39a" stroke-width="2.4" marker-end="url(#ah2)"/>
+    <path d="M474,243 Q360,272 288,247" fill="none" stroke="#14d39a" stroke-width="2.4" marker-end="url(#ah2)"/>
+    <path d="M205,200 Q135,150 118,128" fill="none" stroke="#14d39a" stroke-width="2.4" marker-end="url(#ah2)"/>
+  </svg>
+
+  <div class="grid3 mt">
+    <div class="card"><h3>👁️ Observe</h3><p>Continuously watch live market prices and match situations — not just a once-a-day snapshot.</p></div>
+    <div class="card"><h3>🧮 Price</h3><p>Re-estimate the fair probability for each outcome as new information arrives.</p></div>
+    <div class="card"><h3>⚖️ Compare</h3><p>Check our number against sharp books and against Polymarket's current price.</p></div>
+  </div>
+  <div class="grid2 mt-s">
+    <div class="card"><h3>🎯 Act</h3><p>If a filtered edge survives, take a small, fixed-size position — sometimes only on paper, sometimes live.</p></div>
+    <div class="card"><h3>📊 Measure</h3><p>Record the result and grade the decision against the closing line (see next page).</p></div>
+  </div>
+
+  <div class="footer"><span>NOPREDICTIONS — How the Agent Works</span><span>5</span></div>
+</section>
+
+<!-- ============ PAGE 6 — MEASURING SUCCESS + TRANSPARENCY ============ -->
+<section class="page">
+  <div class="eyebrow"><span class="dot"></span><span class="kicker">Scoring &amp; Transparency</span></div>
+  <h2>How we know if it's working</h2>
+  <p class="lead mb">Winning money on a few bets proves nothing — that can be luck. The agent is
+     judged on a stricter, professional standard.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="ic b-purple">📈</div>
+      <h3>Closing Line Value (CLV)</h3>
+      <p>The gold standard. Did we get a better price than the market's <i>final</i> price right
+         before kickoff? Consistently beating the closing line is the real signature of edge —
+         independent of whether any single bet won or lost.</p>
+    </div>
+    <div class="card">
+      <div class="ic b-green">🧪</div>
+      <h3>Honest sample sizes</h3>
+      <p>No conclusions from a handful of results. Performance is tracked over hundreds of
+         positions, with yield and statistical significance — not cherry-picked highlights.</p>
+    </div>
+  </div>
+
+  <div class="callout mt">
+    <p><b>Luck vs. edge:</b> positive returns with poor CLV is just luck and will fade. Modest
+       returns with consistently positive CLV is a genuine, repeatable edge. We always report both.</p>
+  </div>
+
+  <h2 style="margin-top:26px;">Everything in the open</h2>
+  <div class="panel mt-s">
+    <div class="grid3">
+      <div>
+        <div class="tag-sm" style="background:#e7efff;color:#1763ff;">Public log</div>
+        <p class="mt-s" style="font-size:12px;">Every position is posted before the event resolves — including the losers and the bad calls.</p>
+      </div>
+      <div>
+        <div class="tag-sm" style="background:#dcfaef;color:#0a9e74;">Live dashboard</div>
+        <p class="mt-s" style="font-size:12px;">A running P&amp;L and history are visible to anyone at nopredictions.com.</p>
+      </div>
+      <div>
+        <div class="tag-sm" style="background:#fff0e4;color:#e0701f;">The graveyard</div>
+        <p class="mt-s" style="font-size:12px;">Failed ideas are documented too. The point is the experiment, not a highlight reel.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel mt" style="background:var(--dark); border:none; color:#fff; text-align:center; padding:26px;">
+    <div style="font-size:19px; font-weight:800; letter-spacing:-.3px;">A live experiment, in public.</div>
+    <p style="color:#aeb9d2; max-width:130mm; margin:9px auto 0;">Can an AI agent, armed with years of market
+       thinking, find edges humans miss on the prediction market everyone is watching? Follow along and find out.</p>
+    <div style="margin-top:16px; font-weight:700; color:#7fb0ff;">nopredictions.com · No predictions. Just edges.</div>
+  </div>
+
+  <div class="footer"><span>NOPREDICTIONS — How the Agent Works</span><span>6</span></div>
+</section>
+
+</body>
+</html>

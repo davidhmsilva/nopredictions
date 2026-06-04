@@ -6,21 +6,27 @@ Uses api-football.com (FOOTBALL_API_KEY) to fetch Pinnacle pre-match odds
 for all bet types: Match Winner, Over/Under, Asian Handicap, First Half, BTTS.
 Stores vig-removed closing probabilities on each paper_trade row for CLV calculation.
 
-Run ~5-10 min before kickoff windows to capture closing lines.
-The resolver then uses closing_sharp_odds JSONB for CLV.
+Kickoff-indexed: each run looks up every open trade's real kickoff (api-football)
+and only captures within CAPTURE_LEAD_MIN (45) of KO. Designed to run every 30 min
+(cron */30) — a match too early is simply caught on a later tick (this is also the
+failure-retry path), and re-capturing pre-KO overwrites with a line closer to
+kickoff. The snapshot records minutes_before_kickoff so we keep the closest line;
+after KO the value is frozen. If KO passed with no capture, one last-chance grab is
+allowed within POST_KO_GRACE_MIN (30). The resolver then uses closing_sharp_odds for CLV.
 
 Usage:
     python closing_collector.py                # live — writes to DB
     python closing_collector.py --dry-run      # compute only, no DB writes
-    python closing_collector.py --backfill     # all open trades (not just upcoming)
+    python closing_collector.py --backfill     # fill gaps on all open trades, ignore KO gating
 
-API cost: 1 request per fixture (not per bet type).
-Typical run: 5-15 requests for a day's matches.
+API cost: 1 fixtures call per distinct match-date (cached) + 1 odds call per match
+in the capture window. Typically a handful of requests per 30-min tick.
 """
 
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import logging
 import os
@@ -49,8 +55,14 @@ API_BASE = 'https://v3.football.api-sports.io'
 # Pinnacle bookmaker ID on api-football
 PINNACLE_BOOKMAKER_ID = 4
 
-# How far ahead to look for kickoffs (minutes)
-LOOKAHEAD_MINUTES = 60
+# Start capturing the closing line this many minutes before kickoff. With a
+# 30-min cron cadence this yields a capture ~0-15 min before KO (the closing line).
+CAPTURE_LEAD_MIN = 45
+# If kickoff already passed but we never captured (failures), allow one last-chance
+# grab within this grace window — Pinnacle pre-match odds linger briefly post-KO.
+POST_KO_GRACE_MIN = 30
+# How far ahead to pull open trades from the DB each run (real kickoff gates capture).
+SELECT_WINDOW_HOURS = 18
 
 
 def _norm(s: str) -> str:
@@ -219,9 +231,32 @@ def _parse_over_under(values: list[dict], result: dict, prefix: str):
         result[f'{prefix}under_{line_key}'] = round(u_imp / total, 6)
 
 
+def _spread_line_key(x: float) -> str:
+    """Encode a signed handicap line as a key fragment.
+
+    1.5 -> '1_5', -1.5 -> 'm1_5', 0.0 -> '0_0', 0.75 -> '0_75'. The 'm' prefix
+    marks a *negative* (give-the-goals) line, matching the convention the
+    resolver already expects (resolver._get_closing_from_sharp_snapshot).
+    """
+    body = f'{abs(x)}'.replace('.', '_')
+    return ('m' if x < 0 else '') + body
+
+
 def _parse_handicap(values: list[dict], result: dict, prefix: str):
-    """Parse Asian Handicap into vig-removed probs per line."""
-    lines: dict[str, dict] = {}
+    """Parse Asian Handicap into vig-removed probs per line.
+
+    api-football labels BOTH sides of a single handicap market with the same
+    *home-perspective* signed line. e.g. for the home -1.5 / away +1.5 market it
+    emits 'Home -1.5' and 'Away -1.5'; for home +1.5 / away -1.5 it emits
+    'Home +1.5' and 'Away +1.5'. So the two entries that share a signed line
+    string are the two complementary sides of one market and vig-remove against
+    each other. The away side's *own* handicap is the negation of that line.
+
+    Keys are sign-aware: spread_home_m1_5 = P(home -1.5) = P(home wins by 2+);
+    spread_away_m1_5 = P(away -1.5) = P(away wins by 2+); the unprefixed
+    spread_home_1_5 = P(home +1.5) = P(home does not lose by 2+).
+    """
+    markets: dict[float, dict] = {}   # home-perspective signed line -> {side: odd}
     for v in values:
         val = v.get('value', '')
         try:
@@ -235,23 +270,13 @@ def _parse_handicap(values: list[dict], result: dict, prefix: str):
         if not m:
             continue
         side = m.group(1).lower()
-        line = m.group(2)
-        key = f'{side}_{line}'
-        if key not in lines:
-            lines[key] = {}
-        lines[key] = {'odds': o, 'side': side, 'line': line}
+        try:
+            line = float(m.group(2))
+        except (ValueError, TypeError):
+            continue
+        markets.setdefault(line, {})[side] = o
 
-    # Group by matching lines (home -X and away +X are the same market)
-    paired: dict[str, dict] = {}
-    for key, info in lines.items():
-        line_val = float(info['line'])
-        # Home -1.5 pairs with Away +1.5
-        pair_key = f'{abs(line_val)}'
-        if pair_key not in paired:
-            paired[pair_key] = {}
-        paired[pair_key][info['side']] = info['odds']
-
-    for pair_key, odds in paired.items():
+    for line, odds in markets.items():
         if 'home' not in odds or 'away' not in odds:
             continue
         h_imp = 1 / odds['home']
@@ -260,9 +285,9 @@ def _parse_handicap(values: list[dict], result: dict, prefix: str):
         if total <= 0:
             continue
 
-        line_key = pair_key.replace('.', '_').replace('-', 'm')
-        result[f'{prefix}spread_home_{line_key}'] = round(h_imp / total, 6)
-        result[f'{prefix}spread_away_{line_key}'] = round(a_imp / total, 6)
+        # Home side carries handicap `line`; away side carries handicap `-line`.
+        result[f'{prefix}spread_home_{_spread_line_key(line)}'] = round(h_imp / total, 6)
+        result[f'{prefix}spread_away_{_spread_line_key(-line)}'] = round(a_imp / total, 6)
 
 
 def _parse_team_total(values: list[dict], result: dict, side: str):
@@ -285,80 +310,174 @@ def _parse_team_total(values: list[dict], result: dict, side: str):
         result[f'{side}_total_{direction}_{line}'] = round(imp, 6)
 
 
-# ── Find fixture IDs for trades ──────────────────────────────────────────────
+# ── Match identity: clean teams + kickoff from metadata, then title ──────────
 
-def _extract_teams_from_trade(trade: dict) -> tuple[str, str] | None:
-    """Extract home/away team names from trade metadata."""
-    title = trade.get('market_title') or trade.get('event_title') or ''
-    reasoning = trade.get('reasoning') or ''
-
-    # Try "Team A vs Team B" or "Will Team A win?" patterns
-    for text in [title, reasoning]:
-        m = re.search(
-            r'(?:will\s+)?(.+?)\s+(?:vs?\.?|versus)\s+(.+?)(?:\s*[\-:\?\n]|$)',
-            text, re.I,
-        )
-        if m:
-            home = re.sub(r'\s+(?:FC|CF|SC|AC|AFC)$', '', m.group(1).strip(), flags=re.I)
-            away = re.sub(r'\s+(?:FC|CF|SC|AC|AFC)$', '', m.group(2).strip(), flags=re.I)
-            return home, away
-
-    return None
+def _strip_team(name: str) -> str:
+    return re.sub(r'\s+(?:FC|CF|SC|AC|AFC|SK|FK|CD|SV)$', '', name.strip(), flags=re.I).strip()
 
 
-def _find_fixture_id(home: str, away: str, date_str: str | None) -> int | None:
-    """
-    Search api-football for a fixture matching home vs away on a given date.
-    """
-    if not FOOTBALL_API_KEY:
+def _parse_dt(s) -> datetime | None:
+    """Parse PM gameStartTime ('2026-05-28 18:00:00+00') robustly on py3.9."""
+    if not s:
         return None
-
-    # Try to get date from resolution_time
-    search_date = None
-    if date_str:
-        try:
-            if isinstance(date_str, str):
-                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            else:
-                dt = date_str
-            search_date = dt.strftime('%Y-%m-%d')
-        except (ValueError, TypeError):
-            pass
-
-    if not search_date:
-        search_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-
+    if isinstance(s, datetime):
+        return s if s.tzinfo else s.replace(tzinfo=timezone.utc)
+    s2 = str(s).strip().replace('Z', '+00:00').replace(' ', 'T', 1)
+    s2 = re.sub(r'([+-]\d{2})$', r'\1:00', s2)  # +00 -> +00:00 for fromisoformat
     try:
-        resp = requests.get(
-            f'{API_BASE}/fixtures',
-            params={'date': search_date},
-            headers={'x-apisports-key': FOOTBALL_API_KEY},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            return None
-        fixtures = resp.json().get('response', [])
-    except Exception:
+        dt = datetime.fromisoformat(s2)
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
         return None
 
-    home_n = _norm(home)
-    away_n = _norm(away)
 
-    for f in fixtures:
-        f_home = f.get('teams', {}).get('home', {}).get('name', '')
-        f_away = f.get('teams', {}).get('away', {}).get('name', '')
-        f_home_n = _norm(f_home)
-        f_away_n = _norm(f_away)
+def _parse_title_teams(title: str) -> tuple[str | None, str | None]:
+    """(home, away|None) from a PM market title, incl. single-team titles."""
+    t = (title or '').strip()
+    # NB: do NOT treat '-' as a stop char — team names contain hyphens
+    # (Saint-Étienne, Paris Saint-Germain). Stop only at ':', '?', or keywords.
+    m = re.search(r'(?:will\s+)?(.+?)\s+vs?\.?\s+(.+?)(?:\s*[:\?]| end | both | leading |$)',
+                  t, re.I)
+    if m:
+        return _strip_team(m.group(1)), _strip_team(m.group(2))
+    for pat in (r'will\s+(.+?)\s+win\s+on\b',
+                r'^(.+?)\s+leading at halftime',
+                r'spread:\s*(.+?)\s*\('):
+        m = re.search(pat, t, re.I)
+        if m:
+            return _strip_team(m.group(1)), None
+    return None, None
 
-        # Match on first 6 chars of normalised names
-        if (home_n[:6] in f_home_n or f_home_n[:6] in home_n) and \
-           (away_n[:6] in f_away_n or f_away_n[:6] in away_n):
-            fid = f.get('fixture', {}).get('id')
-            if fid:
-                log.info(f'  Matched: {home} vs {away} → fixture {fid} ({f_home} vs {f_away})')
-                return fid
 
-    return None
+def _extract_match(trade: dict) -> dict:
+    """
+    Resolve a trade's match identity, preferring clean PM metadata over the title.
+    Returns {home, away|None, kickoff|None, date|None}.
+    """
+    md = trade.get('raw_metadata') or {}
+    if isinstance(md, str):
+        try:
+            md = json.loads(md)
+        except (ValueError, TypeError):
+            md = {}
+
+    home = md.get('_home_team')
+    away = md.get('_away_team')
+    kickoff = _parse_dt(md.get('gameStartTime'))
+
+    if not (home and away):
+        th, ta = _parse_title_teams(trade.get('market_title') or '')
+        home = home or th
+        away = away or ta
+
+    date = kickoff.date().isoformat() if kickoff else None
+    if not date:
+        m = re.search(r'on\s+(\d{4}-\d{2}-\d{2})', trade.get('market_title') or '')
+        date = m.group(1) if m else None
+
+    return {'home': home, 'away': away, 'kickoff': kickoff, 'date': date}
+
+
+def _build_match_groups(trades: list[dict]) -> list[dict]:
+    """
+    Cluster trades into real matches. Two-team trades define a pairing; single-team
+    siblings (halftime / spread / 'Will X win') then attach via a shared team name,
+    recovering the opponent + date + kickoff from the pairing.
+    """
+    infos = [{**_extract_match(t), 'trade': t} for t in trades]
+    infos = [i for i in infos if i['home']]
+    # Process two-team trades first so pairings exist before singles attach.
+    infos.sort(key=lambda i: 0 if i['away'] else 1)
+
+    clusters: list[dict] = []
+    for info in infos:
+        hn = _norm(info['home'])
+        an = _norm(info['away']) if info['away'] else None
+        target = None
+        for c in clusters:
+            if hn in c['teams'] or (an and an in c['teams']):
+                if not c['date'] or not info['date'] or c['date'] == info['date']:
+                    target = c
+                    break
+        if target is None:
+            target = {'teams': set(), 'home': None, 'away': None,
+                      'kickoff': None, 'date': None, 'trades': []}
+            clusters.append(target)
+        target['teams'].add(hn)
+        if an:
+            target['teams'].add(an)
+        if info['away'] and not target['away']:
+            target['home'], target['away'] = info['home'], info['away']
+        if not target['home']:
+            target['home'] = info['home']
+        target['kickoff'] = target['kickoff'] or info['kickoff']
+        target['date'] = target['date'] or info['date']
+        target['trades'].append(info['trade'])
+    return clusters
+
+
+def _fetch_fixtures_for_date(search_date: str,
+                             cache: dict[str, list]) -> list:
+    """All fixtures on a date in ONE api-football call, cached per run."""
+    if search_date in cache:
+        return cache[search_date]
+    fixtures: list = []
+    if FOOTBALL_API_KEY:
+        try:
+            resp = requests.get(
+                f'{API_BASE}/fixtures',
+                params={'date': search_date},
+                headers={'x-apisports-key': FOOTBALL_API_KEY},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                fixtures = resp.json().get('response', [])
+        except Exception as e:
+            log.warning(f'  fixtures {search_date}: fetch failed — {e}')
+    cache[search_date] = fixtures
+    return fixtures
+
+
+def _name_match(a: str, b: str) -> bool:
+    """Fuzzy team-name equality on normalised names."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if len(a) >= 5 and (a in b or b in a):
+        return True
+    if len(a) >= 6 and len(b) >= 6 and a[:6] == b[:6]:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.78
+
+
+def _find_fixture(home: str, away: str | None, date_str: str | None,
+                  cache: dict[str, list]) -> tuple[int | None, datetime | None]:
+    """
+    Find (fixture_id, kickoff_utc). Requires BOTH teams to match in the SAME
+    orientation (home->home, away->away) so we never map odds to the wrong side.
+    If `away` is unknown we cannot safely resolve a fixture -> return (None, None).
+    Searches the date and ±1 day to absorb timezone-edge kickoffs.
+    """
+    if not away:
+        return None, None
+
+    base = datetime.now(timezone.utc)
+    if date_str:
+        base = _parse_dt(date_str) or base
+
+    home_n, away_n = _norm(home), _norm(away)
+    for delta in (0, -1, 1):
+        day = (base + timedelta(days=delta)).strftime('%Y-%m-%d')
+        for f in _fetch_fixtures_for_date(day, cache):
+            f_home_n = _norm(f.get('teams', {}).get('home', {}).get('name', ''))
+            f_away_n = _norm(f.get('teams', {}).get('away', {}).get('name', ''))
+            if _name_match(home_n, f_home_n) and _name_match(away_n, f_away_n):
+                fid = f.get('fixture', {}).get('id')
+                ko = _parse_dt(f.get('fixture', {}).get('date'))
+                if fid:
+                    return fid, ko
+    return None, None
 
 
 # ── Outcome → closing probability mapper ────────────────────────────────────
@@ -422,12 +541,13 @@ def _outcome_to_closing_prob(outcome: str, closing: dict) -> float | None:
         return None
 
     # Handicap/spread
+    #   "home wins by N+" == home -(N-0.5) == the negative ('m') handicap line.
+    #   e.g. home_wins_by_2plus -> P(home -1.5) -> spread_home_m1_5.
     m = re.search(r'(home|away)_wins_by_(\d+)plus', ol)
     if m:
         side = m.group(1)
         margin = int(m.group(2))
-        spread_line = margin - 0.5
-        line_key = str(spread_line).replace('.', '_').replace('-', 'm')
+        line_key = _spread_line_key(-(margin - 0.5))
         return closing.get(f'spread_{side}_{line_key}')
 
     return None
@@ -435,136 +555,162 @@ def _outcome_to_closing_prob(outcome: str, closing: dict) -> float | None:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _existing_mbk(trade: dict) -> float | None:
+    """minutes_before_kickoff of the snapshot already stored on a trade, if any."""
+    snap = trade.get('closing_sharp_odds')
+    if not snap:
+        return None
+    if isinstance(snap, str):
+        try:
+            snap = json.loads(snap)
+        except (ValueError, TypeError):
+            return None
+    return snap.get('minutes_before_kickoff')
+
+
+def _should_capture(trade: dict, mins_to_ko: float, backfill: bool) -> bool:
+    """
+    Capture if it gets us a closing line closer to kickoff than what we have.
+    New capture's closeness = mins_to_ko (smaller-but-non-negative is better).
+    """
+    have = trade.get('closing_sharp_odds')
+    if backfill:
+        return not have  # backfill only fills genuine gaps
+    existing = _existing_mbk(trade)
+    if not have or existing is None:
+        return True  # nothing usable stored yet
+    # Only overwrite when the new snapshot is a *better* (closer, non-negative) line.
+    if mins_to_ko < 0:
+        return False  # never replace a real pre-KO line with a post-KO grab
+    return mins_to_ko < existing
+
+
 def run(dry_run: bool = False, backfill: bool = False) -> dict:
     if not FOOTBALL_API_KEY:
         log.error('FOOTBALL_API_KEY not set')
         return {'error': 'no_api_key', 'updated': 0}
 
+    now = datetime.now(timezone.utc)
     conn = _conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Find trades that need closing odds
+    # Pull open trades. We re-capture pre-kickoff (to chase the closing line), so
+    # we do NOT filter on closing_sharp_odds here — _should_capture decides.
     if backfill:
         cur.execute("""
             SELECT pt.id AS trade_id, pt.outcome, pt.entry_price, pt.entry_odds,
                    pt.reasoning, pm.title AS market_title, pm.resolution_time,
-                   pt.closing_sharp_odds
+                   pm.raw_metadata, pt.closing_sharp_odds
             FROM paper_trades pt
             LEFT JOIN pm_markets pm ON pm.id = pt.market_id
-            WHERE pt.closing_sharp_odds IS NULL
-              AND pt.result IS NULL
+            WHERE pt.result IS NULL AND pt.closing_sharp_odds IS NULL
             ORDER BY pt.placed_at
         """)
     else:
-        now = datetime.now(timezone.utc)
-        cutoff = now + timedelta(minutes=LOOKAHEAD_MINUTES)
         cur.execute("""
             SELECT pt.id AS trade_id, pt.outcome, pt.entry_price, pt.entry_odds,
                    pt.reasoning, pm.title AS market_title, pm.resolution_time,
-                   pt.closing_sharp_odds
+                   pm.raw_metadata, pt.closing_sharp_odds
             FROM paper_trades pt
             LEFT JOIN pm_markets pm ON pm.id = pt.market_id
-            WHERE pt.closing_sharp_odds IS NULL
-              AND pt.result IS NULL
+            WHERE pt.result IS NULL
               AND pm.resolution_time BETWEEN %s AND %s
             ORDER BY pm.resolution_time
-        """, (now - timedelta(hours=1), cutoff))
+        """, (now - timedelta(hours=3), now + timedelta(hours=SELECT_WINDOW_HOURS)))
 
     trades = [dict(r) for r in cur.fetchall()]
     if not trades:
-        log.info('No trades need closing odds')
+        log.info('No open trades in window')
         conn.close()
         return {'updated': 0}
 
-    log.info(f'Found {len(trades)} trade(s) needing closing odds')
+    # Cluster trades into real matches (metadata-first, sibling-recovered).
+    groups = _build_match_groups(trades)
+    log.info(f'{len(trades)} open trade(s) across {len(groups)} match(es)')
 
-    # Group trades by match to avoid duplicate fixture lookups
-    match_groups: dict[str, list[dict]] = {}
-    for trade in trades:
-        teams = _extract_teams_from_trade(trade)
-        if not teams:
-            log.debug(f'  #{trade["trade_id"]}: cannot extract teams — skipping')
-            continue
-        home, away = teams
-        key = f'{_norm(home)[:8]}_{_norm(away)[:8]}'
-        if key not in match_groups:
-            match_groups[key] = {'home': home, 'away': away, 'trades': [],
-                                  'resolution_time': trade.get('resolution_time')}
-        match_groups[key]['trades'].append(trade)
+    updated = matched = skipped_early = skipped_late = 0
+    date_cache: dict[str, list] = {}      # date → fixtures list (1 API call/date)
+    odds_cache: dict[int, dict | None] = {}  # fixture_id → closing odds
 
-    log.info(f'Grouped into {len(match_groups)} unique match(es)')
-
-    # Fetch closing odds per match (with fixture + odds caching)
-    updated = 0
-    matched = 0
-    fixture_cache: dict[int, dict | None] = {}  # fixture_id → closing odds
-    fixture_id_cache: dict[str, int | None] = {}  # date_home_away → fixture_id
-
-    for match_key, group in match_groups.items():
+    for group in groups:
         home, away = group['home'], group['away']
-        res_time = group.get('resolution_time')
-        date_str = str(res_time) if res_time else None
+        meta_ko = group.get('kickoff')  # exact PM kickoff when metadata present
 
-        # Cache fixture lookups by normalised key
-        fixture_key = f'{_norm(home)[:6]}_{_norm(away)[:6]}_{date_str or "today"}'
-        if fixture_key in fixture_id_cache:
-            fixture_id = fixture_id_cache[fixture_key]
-        else:
-            fixture_id = _find_fixture_id(home, away, date_str)
-            fixture_id_cache[fixture_key] = fixture_id
+        # Cheap early-gate using the metadata kickoff — avoids any API call for
+        # matches still far from kickoff (skipped in backfill).
+        if meta_ko and not backfill:
+            mins = (meta_ko - now).total_seconds() / 60.0
+            if mins > CAPTURE_LEAD_MIN:
+                skipped_early += 1
+                log.info(f'  {home} vs {away or "?"}: KO in {mins:.0f}min — too early')
+                continue
+            if mins < -POST_KO_GRACE_MIN:
+                skipped_late += 1
+                continue
 
-        if not fixture_id:
-            log.info(f'  {home} vs {away}: no fixture found on api-football')
+        fixture_id, fx_ko = _find_fixture(home, away, group.get('date'), date_cache)
+        kickoff = meta_ko or fx_ko
+        if not fixture_id or kickoff is None:
+            log.info(f'  {home} vs {away or "?"}: no fixture/kickoff found — retry next run')
             continue
 
-        # Cache odds per fixture (avoid re-fetching same fixture)
-        if fixture_id in fixture_cache:
-            closing = fixture_cache[fixture_id]
+        mins_to_ko = (kickoff - now).total_seconds() / 60.0
+
+        # ── kickoff-indexed gating (skipped in backfill) ──
+        if not backfill:
+            if mins_to_ko > CAPTURE_LEAD_MIN:
+                skipped_early += 1
+                log.info(f'  {home} vs {away}: KO in {mins_to_ko:.0f}min — too early')
+                continue
+            if mins_to_ko < -POST_KO_GRACE_MIN:
+                skipped_late += 1
+                continue
+
+        # Do any trades in this group still want a (better) capture?
+        wanters = [t for t in group['trades'] if _should_capture(t, mins_to_ko, backfill)]
+        if not wanters:
+            continue
+
+        if fixture_id in odds_cache:
+            closing = odds_cache[fixture_id]
         else:
             closing = _fetch_pinnacle_odds(fixture_id)
-            fixture_cache[fixture_id] = closing
-
+            odds_cache[fixture_id] = closing
         if not closing:
-            log.info(f'  {home} vs {away}: no Pinnacle odds available')
+            log.info(f'  {home} vs {away}: no Pinnacle odds yet — retry next run')
             continue
 
         closing['home'] = home
         closing['away'] = away
         closing['source'] = 'api-football-pinnacle'
+        closing['kickoff_utc'] = kickoff.isoformat()
+        closing['minutes_before_kickoff'] = round(mins_to_ko, 1)
+        matched += len(wanters)
 
-        matched += len(group['trades'])
-
-        for trade in group['trades']:
+        for trade in wanters:
             closing_prob = _outcome_to_closing_prob(trade['outcome'], closing)
-
             if dry_run:
                 entry_p = float(trade['entry_price']) if trade['entry_price'] else None
                 clv_str = ''
                 if entry_p and closing_prob and closing_prob > 0:
-                    entry_odds = 1.0 / entry_p
-                    closing_odds = 1.0 / closing_prob
-                    clv = (entry_odds / closing_odds) - 1
-                    clv_str = f' CLV={clv:+.4f}'
-                log.info(
-                    f'  #{trade["trade_id"]} {trade["outcome"][:40]:40s} '
-                    f'closing_prob={closing_prob or "n/a":>8}{clv_str}'
-                )
+                    clv_str = f' CLV={(1.0/entry_p)*closing_prob - 1:+.4f}'
+                log.info(f'  #{trade["trade_id"]} {trade["outcome"][:36]:36s} '
+                         f'KO-{mins_to_ko:.0f}min prob={closing_prob or "n/a":>8}{clv_str}')
             else:
                 cur2 = conn.cursor()
-                cur2.execute("""
-                    UPDATE paper_trades
-                    SET closing_sharp_odds = %s
-                    WHERE id = %s
-                """, (json.dumps(closing), trade['trade_id']))
+                cur2.execute(
+                    "UPDATE paper_trades SET closing_sharp_odds = %s WHERE id = %s",
+                    (json.dumps(closing), trade['trade_id']))
                 updated += 1
 
     if not dry_run:
         conn.commit()
-
     conn.close()
 
-    log.info(f'Done: {matched} matched, {updated} updated out of {len(trades)} trades')
-    return {'total': len(trades), 'matched': matched, 'updated': updated}
+    log.info(f'Done: matched {matched}, updated {updated} '
+             f'(skipped {skipped_early} too-early, {skipped_late} too-late)')
+    return {'total': len(trades), 'matched': matched, 'updated': updated,
+            'skipped_early': skipped_early, 'skipped_late': skipped_late}
 
 
 def main():

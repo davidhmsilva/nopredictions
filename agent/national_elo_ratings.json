@@ -1,0 +1,1355 @@
+{
+  "generated_at": "2026-06-04T18:46:34.328029+00:00",
+  "n_matches": 8322,
+  "n_teams": 255,
+  "params": {
+    "home_adv": 65.0,
+    "default_rating": 1500.0,
+    "competitions": {
+      "INT-WC": {
+        "k": 60,
+        "neutral": true,
+        "finals": true
+      },
+      "INT-WCQ": {
+        "k": 40,
+        "neutral": false,
+        "finals": false
+      },
+      "INT-EURO": {
+        "k": 50,
+        "neutral": true,
+        "finals": true
+      },
+      "INT-EUROQ": {
+        "k": 40,
+        "neutral": false,
+        "finals": false
+      },
+      "INT-UNL": {
+        "k": 40,
+        "neutral": false,
+        "finals": false
+      },
+      "INT-COPA": {
+        "k": 50,
+        "neutral": true,
+        "finals": true
+      },
+      "INT-CONCACAF": {
+        "k": 45,
+        "neutral": true,
+        "finals": true
+      },
+      "INT-AFCON": {
+        "k": 50,
+        "neutral": true,
+        "finals": true
+      },
+      "INT-AFCONQ": {
+        "k": 40,
+        "neutral": false,
+        "finals": false
+      },
+      "INT-AFC": {
+        "k": 50,
+        "neutral": true,
+        "finals": true
+      },
+      "INT-AFCQ": {
+        "k": 40,
+        "neutral": false,
+        "finals": false
+      },
+      "INT-FR": {
+        "k": 20,
+        "neutral": false,
+        "finals": false
+      }
+    }
+  },
+  "calibration": {
+    "beta_goals_per_elo": 0.006721883560077978,
+    "mu_total": 2.646210768053075,
+    "mu_total_finals": 2.699047619047619,
+    "n_samples": 7838,
+    "n_finals": 1050
+  },
+  "ratings": {
+    "Bahrain": {
+      "rating": 1489.2,
+      "games": 115,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Jordan": {
+      "rating": 1693.58,
+      "games": 134,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Iran": {
+      "rating": 1834.22,
+      "games": 120,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Iraq": {
+      "rating": 1742.45,
+      "games": 114,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "South Korea": {
+      "rating": 1809.78,
+      "games": 139,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Saudi Arabia": {
+      "rating": 1666.21,
+      "games": 127,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "South Africa": {
+      "rating": 1653.45,
+      "games": 110,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Zambia": {
+      "rating": 1532.69,
+      "games": 103,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "China PR": {
+      "rating": 1516.4,
+      "games": 98,
+      "last_played": "2026-01-26T20:00:00+00:00"
+    },
+    "Oman": {
+      "rating": 1594.72,
+      "games": 107,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Cameroon": {
+      "rating": 1698.16,
+      "games": 123,
+      "last_played": "2026-01-09T20:00:00+00:00"
+    },
+    "DR Congo": {
+      "rating": 1745.59,
+      "games": 121,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Australia": {
+      "rating": 1798.0,
+      "games": 109,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Kuwait": {
+      "rating": 1446.62,
+      "games": 77,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Senegal": {
+      "rating": 1871.1,
+      "games": 132,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Gabon": {
+      "rating": 1530.54,
+      "games": 97,
+      "last_played": "2025-12-31T20:00:00+00:00"
+    },
+    "Burkina Faso": {
+      "rating": 1637.66,
+      "games": 122,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Eswatini": {
+      "rating": 1307.43,
+      "games": 58,
+      "last_played": "2025-10-13T20:00:00+00:00"
+    },
+    "Cape Verde": {
+      "rating": 1642.61,
+      "games": 87,
+      "last_played": "2025-10-13T20:00:00+00:00"
+    },
+    "Congo": {
+      "rating": 1339.49,
+      "games": 68,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Uzbekistan": {
+      "rating": 1775.92,
+      "games": 110,
+      "last_played": "2026-01-26T20:00:00+00:00"
+    },
+    "North Korea": {
+      "rating": 1464.24,
+      "games": 54,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "Nigeria": {
+      "rating": 1838.95,
+      "games": 125,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Ivory Coast": {
+      "rating": 1789.05,
+      "games": 126,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Tunisia": {
+      "rating": 1718.79,
+      "games": 132,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Algeria": {
+      "rating": 1815.04,
+      "games": 128,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "United Arab Emirates": {
+      "rating": 1685.65,
+      "games": 115,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Qatar": {
+      "rating": 1633.93,
+      "games": 133,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Japan": {
+      "rating": 1888.72,
+      "games": 108,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Palestine": {
+      "rating": 1542.45,
+      "games": 80,
+      "last_played": "2025-11-15T20:00:00+00:00"
+    },
+    "Botswana": {
+      "rating": 1382.57,
+      "games": 67,
+      "last_played": "2025-12-30T20:00:00+00:00"
+    },
+    "Guinea": {
+      "rating": 1564.17,
+      "games": 100,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Mali": {
+      "rating": 1697.03,
+      "games": 105,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Sweden": {
+      "rating": 1644.47,
+      "games": 103,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Canada": {
+      "rating": 1751.19,
+      "games": 90,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Iceland": {
+      "rating": 1482.21,
+      "games": 104,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Equatorial Guinea": {
+      "rating": 1437.54,
+      "games": 90,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Yemen": {
+      "rating": 1411.65,
+      "games": 54,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Finland": {
+      "rating": 1426.76,
+      "games": 88,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Ghana": {
+      "rating": 1596.88,
+      "games": 108,
+      "last_played": "2026-03-30T20:00:00+00:00"
+    },
+    "Chile": {
+      "rating": 1604.62,
+      "games": 125,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "United States": {
+      "rating": 1709.99,
+      "games": 137,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Bangladesh": {
+      "rating": 1257.26,
+      "games": 75,
+      "last_played": "2026-03-26T20:00:00+00:00"
+    },
+    "Sri Lanka": {
+      "rating": 1248.43,
+      "games": 42,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Honduras": {
+      "rating": 1634.95,
+      "games": 106,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Venezuela": {
+      "rating": 1605.24,
+      "games": 111,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Pakistan": {
+      "rating": 1260.3,
+      "games": 22,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Afghanistan": {
+      "rating": 1305.62,
+      "games": 60,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Panama": {
+      "rating": 1731.97,
+      "games": 130,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Kazakhstan": {
+      "rating": 1340.52,
+      "games": 75,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Moldova": {
+      "rating": 1218.92,
+      "games": 89,
+      "last_played": "2026-03-30T20:00:00+00:00"
+    },
+    "Antigua and Barbuda": {
+      "rating": 1231.93,
+      "games": 45,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "United States Virgin Islands": {
+      "rating": 1111.37,
+      "games": 29,
+      "last_played": "2024-10-12T20:00:00+00:00"
+    },
+    "Bermuda": {
+      "rating": 1364.29,
+      "games": 49,
+      "last_played": "2026-03-25T20:00:00+00:00"
+    },
+    "Grenada": {
+      "rating": 1412.89,
+      "games": 58,
+      "last_played": "2026-01-18T20:00:00+00:00"
+    },
+    "Cambodia": {
+      "rating": 1244.3,
+      "games": 72,
+      "last_played": "2025-11-13T20:00:00+00:00"
+    },
+    "Macau": {
+      "rating": 1182.73,
+      "games": 24,
+      "last_played": "2025-03-19T20:00:00+00:00"
+    },
+    "Timor-Leste": {
+      "rating": 1131.81,
+      "games": 33,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Mongolia": {
+      "rating": 1293.98,
+      "games": 32,
+      "last_played": "2024-09-10T20:00:00+00:00"
+    },
+    "India": {
+      "rating": 1324.37,
+      "games": 69,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Nepal": {
+      "rating": 1224.79,
+      "games": 65,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Bhutan": {
+      "rating": 1168.03,
+      "games": 36,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Taiwan": {
+      "rating": 1185.4,
+      "games": 57,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Brunei": {
+      "rating": 1241.4,
+      "games": 26,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Dominica": {
+      "rating": 1287.45,
+      "games": 38,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "British Virgin Islands": {
+      "rating": 1156.28,
+      "games": 32,
+      "last_played": "2025-10-09T20:00:00+00:00"
+    },
+    "Barbados": {
+      "rating": 1292.45,
+      "games": 60,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "Nicaragua": {
+      "rating": 1543.56,
+      "games": 81,
+      "last_played": "2026-03-27T20:00:00+00:00"
+    },
+    "Anguilla": {
+      "rating": 1099.8,
+      "games": 35,
+      "last_played": "2025-06-07T20:00:00+00:00"
+    },
+    "Saint Kitts and Nevis": {
+      "rating": 1400.79,
+      "games": 57,
+      "last_played": "2025-10-05T20:00:00+00:00"
+    },
+    "Turks and Caicos Islands": {
+      "rating": 1153.44,
+      "games": 29,
+      "last_played": "2024-10-15T20:00:00+00:00"
+    },
+    "Lesotho": {
+      "rating": 1390.91,
+      "games": 66,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Denmark": {
+      "rating": 1779.22,
+      "games": 91,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Dominican Republic": {
+      "rating": 1591.91,
+      "games": 54,
+      "last_played": "2025-10-10T20:00:00+00:00"
+    },
+    "Cuba": {
+      "rating": 1443.21,
+      "games": 60,
+      "last_played": "2025-10-11T20:00:00+00:00"
+    },
+    "Georgia": {
+      "rating": 1560.64,
+      "games": 84,
+      "last_played": "2026-03-29T20:00:00+00:00"
+    },
+    "Malta": {
+      "rating": 1288.57,
+      "games": 81,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Germany": {
+      "rating": 1807.39,
+      "games": 103,
+      "last_played": "2026-03-30T20:00:00+00:00"
+    },
+    "Indonesia": {
+      "rating": 1536.57,
+      "games": 79,
+      "last_played": "2025-10-11T20:00:00+00:00"
+    },
+    "Mauritius": {
+      "rating": 1272.95,
+      "games": 44,
+      "last_played": "2025-10-13T20:00:00+00:00"
+    },
+    "Burundi": {
+      "rating": 1378.18,
+      "games": 66,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Uganda": {
+      "rating": 1515.57,
+      "games": 104,
+      "last_played": "2025-12-30T20:00:00+00:00"
+    },
+    "Scotland": {
+      "rating": 1686.57,
+      "games": 80,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Northern Ireland": {
+      "rating": 1519.86,
+      "games": 80,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Bahamas": {
+      "rating": 1177.87,
+      "games": 32,
+      "last_played": "2025-06-07T20:00:00+00:00"
+    },
+    "Colombia": {
+      "rating": 1848.24,
+      "games": 131,
+      "last_played": "2026-03-29T20:00:00+00:00"
+    },
+    "Egypt": {
+      "rating": 1817.86,
+      "games": 119,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "France": {
+      "rating": 1962.12,
+      "games": 109,
+      "last_played": "2026-03-29T20:00:00+00:00"
+    },
+    "Brazil": {
+      "rating": 1869.69,
+      "games": 131,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Angola": {
+      "rating": 1583.07,
+      "games": 85,
+      "last_played": "2025-12-29T20:00:00+00:00"
+    },
+    "Syria": {
+      "rating": 1580.3,
+      "games": 102,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Maldives": {
+      "rating": 1202.69,
+      "games": 55,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Tajikistan": {
+      "rating": 1549.82,
+      "games": 74,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Malaysia": {
+      "rating": 1552.61,
+      "games": 94,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Thailand": {
+      "rating": 1556.93,
+      "games": 85,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Singapore": {
+      "rating": 1387.05,
+      "games": 88,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Guatemala": {
+      "rating": 1614.55,
+      "games": 91,
+      "last_played": "2026-03-27T20:00:00+00:00"
+    },
+    "Haiti": {
+      "rating": 1681.42,
+      "games": 60,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Curaçao": {
+      "rating": 1677.9,
+      "games": 56,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Montserrat": {
+      "rating": 1317.58,
+      "games": 33,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "Gambia": {
+      "rating": 1531.12,
+      "games": 77,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Mauritania": {
+      "rating": 1453.47,
+      "games": 99,
+      "last_played": "2026-03-27T20:00:00+00:00"
+    },
+    "Trinidad and Tobago": {
+      "rating": 1555.09,
+      "games": 92,
+      "last_played": "2026-03-15T20:00:00+00:00"
+    },
+    "Argentina": {
+      "rating": 1974.0,
+      "games": 136,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "El Salvador": {
+      "rating": 1472.59,
+      "games": 98,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Hong Kong": {
+      "rating": 1347.16,
+      "games": 78,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Guam": {
+      "rating": 1193.55,
+      "games": 25,
+      "last_played": "2023-10-17T20:00:00+00:00"
+    },
+    "Togo": {
+      "rating": 1460.47,
+      "games": 82,
+      "last_played": "2025-10-13T20:00:00+00:00"
+    },
+    "Morocco": {
+      "rating": 1938.97,
+      "games": 134,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Uruguay": {
+      "rating": 1787.32,
+      "games": 125,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Mozambique": {
+      "rating": 1496.82,
+      "games": 80,
+      "last_played": "2026-01-05T20:00:00+00:00"
+    },
+    "Guyana": {
+      "rating": 1515.61,
+      "games": 46,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "Tanzania": {
+      "rating": 1471.37,
+      "games": 85,
+      "last_played": "2026-01-04T20:00:00+00:00"
+    },
+    "Malawi": {
+      "rating": 1451.32,
+      "games": 73,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Rwanda": {
+      "rating": 1429.81,
+      "games": 71,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Cayman Islands": {
+      "rating": 1255.82,
+      "games": 30,
+      "last_played": "2025-06-07T20:00:00+00:00"
+    },
+    "Belize": {
+      "rating": 1380.98,
+      "games": 47,
+      "last_played": "2025-06-07T20:00:00+00:00"
+    },
+    "Philippines": {
+      "rating": 1407.46,
+      "games": 67,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Belarus": {
+      "rating": 1417.08,
+      "games": 85,
+      "last_played": "2026-03-29T20:00:00+00:00"
+    },
+    "Myanmar": {
+      "rating": 1261.7,
+      "games": 75,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Jamaica": {
+      "rating": 1659.56,
+      "games": 99,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "North Macedonia": {
+      "rating": 1523.22,
+      "games": 81,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Slovenia": {
+      "rating": 1559.27,
+      "games": 78,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Ecuador": {
+      "rating": 1817.05,
+      "games": 122,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Austria": {
+      "rating": 1690.49,
+      "games": 84,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Bosnia and Herzegovina": {
+      "rating": 1562.27,
+      "games": 75,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Estonia": {
+      "rating": 1338.37,
+      "games": 93,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Italy": {
+      "rating": 1760.19,
+      "games": 90,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "England": {
+      "rating": 1889.2,
+      "games": 100,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "New Zealand": {
+      "rating": 1677.44,
+      "games": 49,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Liechtenstein": {
+      "rating": 982.26,
+      "games": 73,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "San Marino": {
+      "rating": 982.45,
+      "games": 70,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Luxembourg": {
+      "rating": 1303.51,
+      "games": 83,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Turkey": {
+      "rating": 1760.23,
+      "games": 92,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Niger": {
+      "rating": 1513.11,
+      "games": 81,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Netherlands": {
+      "rating": 1849.14,
+      "games": 94,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Spain": {
+      "rating": 1961.06,
+      "games": 95,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Costa Rica": {
+      "rating": 1660.38,
+      "games": 119,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Peru": {
+      "rating": 1568.31,
+      "games": 134,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Portugal": {
+      "rating": 1867.91,
+      "games": 99,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Russia": {
+      "rating": 1722.12,
+      "games": 81,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Slovakia": {
+      "rating": 1546.18,
+      "games": 83,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Czech Republic": {
+      "rating": 1650.19,
+      "games": 90,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Switzerland": {
+      "rating": 1763.81,
+      "games": 92,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Ukraine": {
+      "rating": 1617.11,
+      "games": 80,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Latvia": {
+      "rating": 1301.67,
+      "games": 75,
+      "last_played": "2025-11-16T20:00:00+00:00"
+    },
+    "Mexico": {
+      "rating": 1741.2,
+      "games": 151,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Abkhazia": {
+      "rating": 1501.31,
+      "games": 4,
+      "last_played": "2017-08-31T20:00:00+00:00"
+    },
+    "Luhansk PR": {
+      "rating": 1487.97,
+      "games": 6,
+      "last_played": "2019-12-08T20:00:00+00:00"
+    },
+    "Donetsk PR": {
+      "rating": 1507.96,
+      "games": 6,
+      "last_played": "2017-08-31T20:00:00+00:00"
+    },
+    "Vietnam": {
+      "rating": 1454.77,
+      "games": 76,
+      "last_played": "2026-03-26T20:00:00+00:00"
+    },
+    "Lebanon": {
+      "rating": 1507.65,
+      "games": 85,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Laos": {
+      "rating": 1177.59,
+      "games": 45,
+      "last_played": "2025-11-19T20:00:00+00:00"
+    },
+    "Corsica": {
+      "rating": 1506.71,
+      "games": 3,
+      "last_played": "2017-05-26T20:00:00+00:00"
+    },
+    "Panjab": {
+      "rating": 1535.59,
+      "games": 7,
+      "last_played": "2019-12-29T20:00:00+00:00"
+    },
+    "Alderney": {
+      "rating": 1480.64,
+      "games": 1,
+      "last_played": "2015-05-31T20:00:00+00:00"
+    },
+    "Hungary": {
+      "rating": 1587.19,
+      "games": 81,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Lithuania": {
+      "rating": 1219.72,
+      "games": 77,
+      "last_played": "2026-03-29T20:00:00+00:00"
+    },
+    "Bolivia": {
+      "rating": 1579.39,
+      "games": 113,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Andorra": {
+      "rating": 1137.49,
+      "games": 75,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Chad": {
+      "rating": 1262.95,
+      "games": 41,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Paraguay": {
+      "rating": 1706.54,
+      "games": 110,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Kenya": {
+      "rating": 1454.2,
+      "games": 78,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Croatia": {
+      "rating": 1866.92,
+      "games": 100,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Gibraltar": {
+      "rating": 1081.58,
+      "games": 73,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Ethiopia": {
+      "rating": 1362.22,
+      "games": 73,
+      "last_played": "2025-10-12T20:00:00+00:00"
+    },
+    "Belgium": {
+      "rating": 1757.43,
+      "games": 95,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Republic of Ireland": {
+      "rating": 1615.04,
+      "games": 85,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "South Sudan": {
+      "rating": 1299.57,
+      "games": 60,
+      "last_played": "2025-10-13T20:00:00+00:00"
+    },
+    "Serbia": {
+      "rating": 1675.09,
+      "games": 93,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Azerbaijan": {
+      "rating": 1271.31,
+      "games": 80,
+      "last_played": "2025-11-16T20:00:00+00:00"
+    },
+    "Suriname": {
+      "rating": 1580.6,
+      "games": 44,
+      "last_played": "2026-03-26T20:00:00+00:00"
+    },
+    "Montenegro": {
+      "rating": 1377.74,
+      "games": 82,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Norway": {
+      "rating": 1809.15,
+      "games": 82,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Bulgaria": {
+      "rating": 1388.17,
+      "games": 74,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Saint Lucia": {
+      "rating": 1381.25,
+      "games": 33,
+      "last_played": "2025-06-10T20:00:00+00:00"
+    },
+    "Aruba": {
+      "rating": 1303.75,
+      "games": 34,
+      "last_played": "2025-06-07T20:00:00+00:00"
+    },
+    "Saint Vincent and the Grenadines": {
+      "rating": 1469.04,
+      "games": 59,
+      "last_played": "2025-10-08T20:00:00+00:00"
+    },
+    "Kyrgyzstan": {
+      "rating": 1502.27,
+      "games": 77,
+      "last_played": "2026-03-28T20:00:00+00:00"
+    },
+    "Turkmenistan": {
+      "rating": 1448.06,
+      "games": 51,
+      "last_played": "2025-11-18T20:00:00+00:00"
+    },
+    "Libya": {
+      "rating": 1532.91,
+      "games": 79,
+      "last_played": "2025-11-15T20:00:00+00:00"
+    },
+    "Puerto Rico": {
+      "rating": 1499.18,
+      "games": 43,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Djibouti": {
+      "rating": 1152.04,
+      "games": 38,
+      "last_played": "2025-10-12T20:00:00+00:00"
+    },
+    "Albania": {
+      "rating": 1528.17,
+      "games": 83,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Seychelles": {
+      "rating": 1112.41,
+      "games": 37,
+      "last_played": "2025-10-14T20:00:00+00:00"
+    },
+    "Central African Republic": {
+      "rating": 1325.57,
+      "games": 60,
+      "last_played": "2025-10-12T20:00:00+00:00"
+    },
+    "Comoros": {
+      "rating": 1539.07,
+      "games": 76,
+      "last_played": "2025-12-29T20:00:00+00:00"
+    },
+    "São Tomé and Príncipe": {
+      "rating": 1205.76,
+      "games": 41,
+      "last_played": "2025-10-13T20:00:00+00:00"
+    },
+    "Zimbabwe": {
+      "rating": 1428.3,
+      "games": 72,
+      "last_played": "2025-12-29T20:00:00+00:00"
+    },
+    "Guinea-Bissau": {
+      "rating": 1373.68,
+      "games": 77,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Madagascar": {
+      "rating": 1504.7,
+      "games": 72,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Benin": {
+      "rating": 1496.8,
+      "games": 85,
+      "last_played": "2026-01-05T20:00:00+00:00"
+    },
+    "Namibia": {
+      "rating": 1399.98,
+      "games": 68,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Sudan": {
+      "rating": 1446.78,
+      "games": 77,
+      "last_played": "2026-01-03T20:00:00+00:00"
+    },
+    "Sierra Leone": {
+      "rating": 1460.56,
+      "games": 58,
+      "last_played": "2025-10-12T20:00:00+00:00"
+    },
+    "Liberia": {
+      "rating": 1433.06,
+      "games": 67,
+      "last_played": "2025-11-15T20:00:00+00:00"
+    },
+    "Poland": {
+      "rating": 1671.56,
+      "games": 88,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Greece": {
+      "rating": 1644.79,
+      "games": 83,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Fiji": {
+      "rating": 1433.02,
+      "games": 33,
+      "last_played": "2025-03-21T20:00:00+00:00"
+    },
+    "Tonga": {
+      "rating": 1418.74,
+      "games": 6,
+      "last_played": "2024-09-09T20:00:00+00:00"
+    },
+    "American Samoa": {
+      "rating": 1497.17,
+      "games": 5,
+      "last_played": "2024-09-06T20:00:00+00:00"
+    },
+    "Samoa": {
+      "rating": 1460.86,
+      "games": 8,
+      "last_played": "2024-11-18T20:00:00+00:00"
+    },
+    "Cook Islands": {
+      "rating": 1412.04,
+      "games": 7,
+      "last_played": "2024-09-06T20:00:00+00:00"
+    },
+    "Armenia": {
+      "rating": 1307.97,
+      "games": 79,
+      "last_played": "2026-03-29T20:00:00+00:00"
+    },
+    "Somalia": {
+      "rating": 1232.65,
+      "games": 22,
+      "last_played": "2025-11-17T20:00:00+00:00"
+    },
+    "Eritrea": {
+      "rating": 1391.8,
+      "games": 4,
+      "last_played": "2019-09-10T20:00:00+00:00"
+    },
+    "Kosovo": {
+      "rating": 1640.88,
+      "games": 78,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Vanuatu": {
+      "rating": 1451.78,
+      "games": 15,
+      "last_played": "2024-11-18T20:00:00+00:00"
+    },
+    "Wales": {
+      "rating": 1598.65,
+      "games": 81,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Romania": {
+      "rating": 1512.58,
+      "games": 81,
+      "last_played": "2026-03-31T20:00:00+00:00"
+    },
+    "Chagos Islands": {
+      "rating": 1423.99,
+      "games": 5,
+      "last_played": "2019-12-29T20:00:00+00:00"
+    },
+    "Martinique": {
+      "rating": 1491.41,
+      "games": 25,
+      "last_played": "2024-10-15T20:00:00+00:00"
+    },
+    "Guadeloupe": {
+      "rating": 1591.18,
+      "games": 29,
+      "last_played": "2024-11-19T20:00:00+00:00"
+    },
+    "Catalonia": {
+      "rating": 1499.63,
+      "games": 3,
+      "last_played": "2019-03-25T20:00:00+00:00"
+    },
+    "Basque Country": {
+      "rating": 1567.59,
+      "games": 8,
+      "last_played": "2025-11-15T20:00:00+00:00"
+    },
+    "French Guiana": {
+      "rating": 1429.95,
+      "games": 28,
+      "last_played": "2024-11-19T20:00:00+00:00"
+    },
+    "Sint Maarten": {
+      "rating": 1413.11,
+      "games": 27,
+      "last_played": "2024-11-18T20:00:00+00:00"
+    },
+    "Israel": {
+      "rating": 1550.05,
+      "games": 66,
+      "last_played": "2026-03-26T20:00:00+00:00"
+    },
+    "Solomon Islands": {
+      "rating": 1490.64,
+      "games": 29,
+      "last_played": "2024-11-17T20:00:00+00:00"
+    },
+    "Papua New Guinea": {
+      "rating": 1375.5,
+      "games": 16,
+      "last_played": "2024-11-17T20:00:00+00:00"
+    },
+    "Cyprus": {
+      "rating": 1279.98,
+      "games": 78,
+      "last_played": "2026-03-30T20:00:00+00:00"
+    },
+    "Faroe Islands": {
+      "rating": 1413.32,
+      "games": 71,
+      "last_played": "2026-03-28T20:00:00+00:00"
+    },
+    "Jersey": {
+      "rating": 1501.11,
+      "games": 2,
+      "last_played": "2017-04-23T20:00:00+00:00"
+    },
+    "Romani people": {
+      "rating": 1482.23,
+      "games": 1,
+      "last_played": "2016-05-16T20:00:00+00:00"
+    },
+    "Padania": {
+      "rating": 1517.77,
+      "games": 1,
+      "last_played": "2016-05-16T20:00:00+00:00"
+    },
+    "Galicia": {
+      "rating": 1484.56,
+      "games": 2,
+      "last_played": "2024-05-21T20:00:00+00:00"
+    },
+    "New Caledonia": {
+      "rating": 1496.7,
+      "games": 26,
+      "last_played": "2026-03-26T20:00:00+00:00"
+    },
+    "Tahiti": {
+      "rating": 1507.41,
+      "games": 18,
+      "last_played": "2025-03-21T20:00:00+00:00"
+    },
+    "Ryūkyū": {
+      "rating": 1470.38,
+      "games": 1,
+      "last_played": "2016-11-26T20:00:00+00:00"
+    },
+    "United Koreans in Japan": {
+      "rating": 1529.62,
+      "games": 1,
+      "last_played": "2016-11-26T20:00:00+00:00"
+    },
+    "Raetia": {
+      "rating": 1472.59,
+      "games": 7,
+      "last_played": "2023-08-06T20:00:00+00:00"
+    },
+    "Tamil Eelam": {
+      "rating": 1523.7,
+      "games": 1,
+      "last_played": "2017-03-12T20:00:00+00:00"
+    },
+    "Vatican City": {
+      "rating": 1495.7,
+      "games": 2,
+      "last_played": "2019-03-23T20:00:00+00:00"
+    },
+    "Monaco": {
+      "rating": 1501.85,
+      "games": 1,
+      "last_played": "2017-04-29T20:00:00+00:00"
+    },
+    "Yorkshire": {
+      "rating": 1550.51,
+      "games": 6,
+      "last_played": "2019-05-04T20:00:00+00:00"
+    },
+    "Ellan Vannin": {
+      "rating": 1510.84,
+      "games": 2,
+      "last_played": "2018-04-29T20:00:00+00:00"
+    },
+    "Barawa": {
+      "rating": 1457.15,
+      "games": 4,
+      "last_played": "2019-05-25T20:00:00+00:00"
+    },
+    "Saint Barthélemy": {
+      "rating": 1501.59,
+      "games": 8,
+      "last_played": "2023-03-10T20:00:00+00:00"
+    },
+    "Saint Martin": {
+      "rating": 1425.81,
+      "games": 26,
+      "last_played": "2025-10-05T20:00:00+00:00"
+    },
+    "Surrey": {
+      "rating": 1517.32,
+      "games": 1,
+      "last_played": "2018-05-06T20:00:00+00:00"
+    },
+    "Parishes of Jersey": {
+      "rating": 1509.24,
+      "games": 1,
+      "last_played": "2018-10-21T20:00:00+00:00"
+    },
+    "Somaliland": {
+      "rating": 1486.61,
+      "games": 1,
+      "last_played": "2019-05-04T20:00:00+00:00"
+    },
+    "Kernow": {
+      "rating": 1514.77,
+      "games": 1,
+      "last_played": "2019-05-25T20:00:00+00:00"
+    },
+    "Cascadia": {
+      "rating": 1512.24,
+      "games": 1,
+      "last_played": "2019-05-25T20:00:00+00:00"
+    },
+    "Ynys Môn": {
+      "rating": 1516.3,
+      "games": 1,
+      "last_played": "2019-06-12T20:00:00+00:00"
+    },
+    "Saint Helena": {
+      "rating": 1483.7,
+      "games": 1,
+      "last_played": "2019-06-12T20:00:00+00:00"
+    },
+    "Franconia": {
+      "rating": 1511.25,
+      "games": 1,
+      "last_played": "2019-06-25T20:00:00+00:00"
+    },
+    "South Ossetia": {
+      "rating": 1502.76,
+      "games": 2,
+      "last_played": "2019-12-08T20:00:00+00:00"
+    },
+    "Bonaire": {
+      "rating": 1327.13,
+      "games": 22,
+      "last_played": "2025-03-25T20:00:00+00:00"
+    },
+    "West Papua": {
+      "rating": 1472.36,
+      "games": 2,
+      "last_played": "2022-11-13T20:00:00+00:00"
+    },
+    "East Turkestan": {
+      "rating": 1525.18,
+      "games": 1,
+      "last_played": "2019-10-19T20:00:00+00:00"
+    },
+    "Elba Island": {
+      "rating": 1514.53,
+      "games": 1,
+      "last_played": "2022-07-16T20:00:00+00:00"
+    },
+    "Tibet": {
+      "rating": 1500.52,
+      "games": 1,
+      "last_played": "2022-08-07T20:00:00+00:00"
+    },
+    "Ticino": {
+      "rating": 1482.32,
+      "games": 1,
+      "last_played": "2023-08-06T20:00:00+00:00"
+    },
+    "Greenland": {
+      "rating": 1470.88,
+      "games": 1,
+      "last_played": "2024-06-01T20:00:00+00:00"
+    }
+  }
+}
