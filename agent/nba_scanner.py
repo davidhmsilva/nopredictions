@@ -108,9 +108,23 @@ NBA_TEAM_ALIASES = {
     "pelicans": "New Orleans Pelicans",
 }
 
-# Build reverse lookup: canonical → canonical (identity) + aliases → canonical
+# Standard NBA abbreviations (as used in Polymarket slugs / teams[].abbreviation)
+NBA_TEAM_ABBR = {
+    "atl": "Atlanta Hawks", "bos": "Boston Celtics", "bkn": "Brooklyn Nets",
+    "cha": "Charlotte Hornets", "chi": "Chicago Bulls", "cle": "Cleveland Cavaliers",
+    "dal": "Dallas Mavericks", "den": "Denver Nuggets", "det": "Detroit Pistons",
+    "gsw": "Golden State Warriors", "hou": "Houston Rockets", "ind": "Indiana Pacers",
+    "lac": "LA Clippers", "lal": "Los Angeles Lakers", "mem": "Memphis Grizzlies",
+    "mia": "Miami Heat", "mil": "Milwaukee Bucks", "min": "Minnesota Timberwolves",
+    "nop": "New Orleans Pelicans", "nyk": "New York Knicks", "okc": "Oklahoma City Thunder",
+    "orl": "Orlando Magic", "phi": "Philadelphia 76ers", "phx": "Phoenix Suns",
+    "por": "Portland Trail Blazers", "sac": "Sacramento Kings", "sas": "San Antonio Spurs",
+    "tor": "Toronto Raptors", "uta": "Utah Jazz", "was": "Washington Wizards",
+}
+
+# Build reverse lookup: canonical → canonical (identity) + aliases + abbreviations
 _TEAM_LOOKUP: dict[str, str] = {}
-for alias, canonical in NBA_TEAM_ALIASES.items():
+for alias, canonical in {**NBA_TEAM_ALIASES, **NBA_TEAM_ABBR}.items():
     _TEAM_LOOKUP[alias] = canonical
     _TEAM_LOOKUP[canonical.lower()] = canonical
 
@@ -423,7 +437,12 @@ def _fetch_pm_events(days_ahead: int) -> list[dict]:
 
 
 def _extract_teams(title: str) -> Optional[tuple[str, str]]:
-    """Extract home and away team from PM event title like 'Spurs vs. Thunder'."""
+    """Extract the two team names in title order from 'A vs. B'.
+
+    NOTE: returns (first, second) as written — this is NOT (home, away).
+    Polymarket titles are 'Away vs. Home', so the second team is the home
+    side. Use _home_away_from_event() to get the correct home/away.
+    """
     # Remove date suffixes, series info
     clean = re.sub(r"\s*\(.*?\)\s*$", "", title)
     clean = re.sub(r"\s*-\s*Game\s+\d+.*$", "", clean, flags=re.I)
@@ -432,6 +451,43 @@ def _extract_teams(title: str) -> Optional[tuple[str, str]]:
     if not m:
         return None
     return m.group(1).strip(), m.group(2).strip()
+
+
+def _home_away_from_event(event: dict) -> Optional[tuple[str, str]]:
+    """Return (home_raw, away_raw) using Polymarket's OWN home/away designation.
+
+    The home team is whoever actually hosts the game — it gets the Elo home
+    advantage. Getting this wrong inverts the model (a +100 Elo swing). Priority:
+      1) event['teams'][].ordering == 'home'/'away'   (authoritative PM metadata)
+      2) slug 'nba-{away}-{home}-YYYY-MM-DD'           (abbreviations)
+      3) title 'Away vs. Home' → second team is home   (last-resort fallback)
+    """
+    # 1) Explicit teams array with an 'ordering' flag.
+    teams = event.get("teams")
+    if isinstance(teams, list) and len(teams) == 2:
+        def _name(t):
+            return t.get("name") or t.get("alias") or t.get("abbreviation")
+        home_t = next((t for t in teams
+                       if str(t.get("ordering", "")).lower() == "home"), None)
+        away_t = next((t for t in teams
+                       if str(t.get("ordering", "")).lower() == "away"), None)
+        if home_t and away_t and _name(home_t) and _name(away_t):
+            return _name(home_t), _name(away_t)
+
+    # 2) Slug encodes away-then-home: nba-{away}-{home}-YYYY-MM-DD
+    m = re.match(r"^nba-([a-z]{2,4})-([a-z]{2,4})-\d{4}-\d{2}-\d{2}",
+                 event.get("slug", "") or "")
+    if m:
+        away_ab, home_ab = m.group(1), m.group(2)
+        return home_ab, away_ab
+
+    # 3) Title fallback — PM convention is 'Away vs. Home', so second = home.
+    parsed = _extract_teams(event.get("title", ""))
+    if parsed:
+        first, second = parsed
+        return second, first
+
+    return None
 
 
 # ── Playoff context adjustments ──────────────────────────────────────────────
@@ -558,12 +614,12 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                 continue
             n_nba += 1
 
-            teams = _extract_teams(title)
-            if not teams:
+            ha = _home_away_from_event(event)
+            if not ha:
                 log.debug(f"  Could not parse teams from: {title}")
                 continue
 
-            home_raw, away_raw = teams
+            home_raw, away_raw = ha
             home = _resolve_team(home_raw)
             away = _resolve_team(away_raw)
 
@@ -738,36 +794,47 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                     "reasoning": reasoning, "mtype": mkt_type_label,
                 })
 
-            # Write only the best edge per event
+            # Log the best edge per market-TYPE group (moneyline / spread / total
+            # + 1H variants). Paper-only, so we keep every bet type that shows an
+            # edge to build a richer dataset — but PM lists ~25 alternate spread and
+            # ~25 alternate total lines per game, so we collapse each type to its
+            # single best edge rather than flooding the table with correlated lines.
             if candidates:
-                best = max(candidates, key=lambda c: c["edge"])
-                n_edges += 1
+                best_by_type: dict[str, dict] = {}
+                for c in candidates:
+                    g = c["mtype"]
+                    if g not in best_by_type or c["edge"] > best_by_type[g]["edge"]:
+                        best_by_type[g] = c
 
-                log.info(
-                    f"  EDGE +{best['edge']:.1f}pp | {home} vs {away} | "
-                    f"{best['mtype']} → {best['outcome']} ({best['side']}) | "
-                    f"PM={best['entry']*100:.1f}% Model={best['fair']*100:.1f}% | "
-                    f"Elo {home_elo:.0f} vs {away_elo:.0f}"
-                )
+                for best in sorted(best_by_type.values(),
+                                   key=lambda c: c["edge"], reverse=True):
+                    n_edges += 1
 
-                if not dry_run:
-                    ext_id = str(best["mkt"].get("id") or
-                                best["mkt"].get("conditionId") or "")
-                    question = best["mkt"].get("question", "")
-                    market_db_id = _upsert_pm_market(
-                        conn, ext_id, question, end_date,
-                        market_type=best["mtype"])
-                    if market_db_id:
-                        trade_id = _write_trade(
-                            conn, strategy_id, market_db_id,
-                            best["outcome"], best["entry"], best["fair"],
-                            best["edge"], best["reasoning"],
-                        )
-                        if trade_id:
-                            log.info(f"    → Trade #{trade_id} logged")
-                            trades_logged.append(trade_id)
-                        else:
-                            log.info(f"    → Already traded, skipping")
+                    log.info(
+                        f"  EDGE +{best['edge']:.1f}pp | {home} vs {away} | "
+                        f"{best['mtype']} → {best['outcome']} ({best['side']}) | "
+                        f"PM={best['entry']*100:.1f}% Model={best['fair']*100:.1f}% | "
+                        f"Elo {home_elo:.0f} vs {away_elo:.0f}"
+                    )
+
+                    if not dry_run:
+                        ext_id = str(best["mkt"].get("id") or
+                                    best["mkt"].get("conditionId") or "")
+                        question = best["mkt"].get("question", "")
+                        market_db_id = _upsert_pm_market(
+                            conn, ext_id, question, end_date,
+                            market_type=best["mtype"])
+                        if market_db_id:
+                            trade_id = _write_trade(
+                                conn, strategy_id, market_db_id,
+                                best["outcome"], best["entry"], best["fair"],
+                                best["edge"], best["reasoning"],
+                            )
+                            if trade_id:
+                                log.info(f"    → Trade #{trade_id} logged")
+                                trades_logged.append(trade_id)
+                            else:
+                                log.info(f"    → Already traded, skipping")
 
         if not dry_run and conn:
             _log_run(conn, n_nba, n_matched, n_edges, dry_run)
