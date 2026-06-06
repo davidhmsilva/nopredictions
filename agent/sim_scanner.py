@@ -61,29 +61,29 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 PARAMS_PATH = os.path.join(os.path.dirname(__file__), "dc_model_params.json")
 STRATEGY_NAME = "Sim Model Pre-Match"
 STAKE_UNITS = 1.0
-DEFAULT_EDGE_THRESHOLD_PP = 3.0
+DEFAULT_EDGE_THRESHOLD_PP = 5.0
 DEFAULT_DAYS_AHEAD = 3
 SIM_N = 50_000
 SIM_SEED = 42
 
-# ── Live-eligible pockets (2026-06-01) ───────────────────────────────────────
-# Sim sub-strategy P&L audit: in the live-eligible universe (goals already off
-# via live_executor's goals-guard), the edge band is decisive — 3-5pp bled
-# (−23u, 4% win), the sweet spot is 5-12pp (+60.85u / +71% yield over 86 bets),
-# and >12pp loses. DRAWS lose too (ft draw −7.9u, ht_draw −1.8u). So with REAL
-# money the Sim scanner now only submits non-draw picks with edge ≥5pp; the
-# 12pp top is handled by live_executor's model-only cap. Everything else stays
-# PAPER (still logged) so we keep measuring. The profit is longshot-driven
-# (ht_away / handicaps at high odds) → high variance, positive EV.
+# ── Live-eligible pockets (updated 2026-06-06) ───────────────────────────────
+# P&L audit 2026-06-05, n=384 settled sim trades:
+#   Profitable pockets: draw +36% (incl. ht_draw), ht_away_win +28%,
+#                       home_wins_by_2plus +12%
+#   Losing pockets:     btts −27.7%, totals −49.1%, ht_home_win −23%
+#                       (these are blocked via DISABLED_GROUPS above)
+# Edge band: 5-15pp is the sweet spot; <5pp noise, >15pp overconfident.
+# Earlier (2026-06-01) analysis said draws lose — that was based on a smaller
+# sample with a different edge filter; the June-05 audit supersedes it.
 SIM_LIVE_MIN_EDGE_PP = float(os.environ.get("PM_SIM_LIVE_MIN_EDGE_PP", "5.0"))
-SIM_LIVE_EXCLUDE_DRAWS = os.environ.get("PM_SIM_LIVE_EXCLUDE_DRAWS", "1") == "1"
+SIM_LIVE_EXCLUDE_DRAWS = os.environ.get("PM_SIM_LIVE_EXCLUDE_DRAWS", "0") == "1"
 
 
 def _sim_live_eligible(outcome_key: str, edge_pp: float) -> bool:
     """True if this Sim pick may be submitted with real money. Goals (totals/
-    BTTS) are already blocked in live_executor; the 12pp top by its model cap.
-    Here we add the 5pp floor and the draw exclusion. Everything else is logged
-    paper-only."""
+    BTTS) are blocked via DISABLED_GROUPS; the 15pp top by MAX_EDGE_THRESHOLD_PP.
+    Here we add the 5pp floor. Draws ARE eligible (draw +36%, ht_draw included
+    in halftime group)."""
     if SIM_LIVE_EXCLUDE_DRAWS and outcome_key in ("draw", "ht_draw"):
         return False
     return edge_pp >= SIM_LIVE_MIN_EDGE_PP
@@ -118,7 +118,7 @@ SIM_MARKETS = {
 
 MARKET_GROUP: dict[str, str] = {
     "home_win": "1x2", "draw": "1x2", "away_win": "1x2",
-    "ht_home_win": "halftime", "ht_draw": "halftime", "ht_away_win": "halftime",
+    "ht_home_win": "ht_home_win", "ht_draw": "halftime", "ht_away_win": "halftime",
     "btts": "btts", "no_btts": "btts",
     "home_wins_by_2plus": "handicap", "home_wins_by_3plus": "handicap",
     "away_wins_by_2plus": "handicap", "away_wins_by_3plus": "handicap",
@@ -127,16 +127,21 @@ for _line in ("0_5", "1_5", "2_5", "3_5", "4_5", "5_5"):
     MARKET_GROUP[f"over_{_line}"] = "totals"
     MARKET_GROUP[f"under_{_line}"] = "totals"
 
-# Market groups the model systematically misprices and that have no sharp line to
-# validate against (Pinnacle/api-football doesn't cover BTTS; only partly totals).
-# Per the 2026-05-29 P&L audit these bled −13.7u (BTTS) and −10.3u (totals) while
-# 1X2/halftime/handicap are CLV-positive. Disabled until goal scoring is recalibrated
-# (DC xg_multiplier=1.5x + sim totals/BTTS upticks look too hot). Override with
-# SIM_ENABLE_GOALS_MARKETS=1.
-DISABLED_GROUPS: set[str] = (
-    set() if os.environ.get("SIM_ENABLE_GOALS_MARKETS") == "1"
-    else {"btts", "totals"}
-)
+# Market groups disabled based on P&L audit (2026-06-05, n=384):
+#   btts    −27.7%  (n=59)  — sim sobreestima golos
+#   totals  −49.1%  (n=29)  — idem
+#   ht_home_win −23.0% (n=55) — sistematicamente mal calibrado
+# Profitable: ht_away_win (+28%), draw (+36%), home_wins_by_2plus (+12%)
+# Override individual groups via SIM_ENABLE_GOALS_MARKETS=1 or SIM_ENABLE_HT_HOME=1.
+DISABLED_GROUPS: set[str] = set()
+if os.environ.get("SIM_ENABLE_GOALS_MARKETS") != "1":
+    DISABLED_GROUPS |= {"btts", "totals"}
+if os.environ.get("SIM_ENABLE_HT_HOME") != "1":
+    DISABLED_GROUPS.add("ht_home_win")
+
+# Edge cap: above 15pp the model is likely overconfident (wrong team match, women's game,
+# etc.). P&L audit: 20pp+ yield = −76% (n=29). Below 5pp is noise (−46%, n=71).
+MAX_EDGE_THRESHOLD_PP = float(os.environ.get("SIM_MAX_EDGE_PP", "15.0"))
 
 
 def _group_outcomes(group: str) -> list[str]:
@@ -673,6 +678,8 @@ def run(
                     sim_prob = float(sim_p[outcome_key])
                     edge_pp = round((sim_prob - yes_p) * 100, 1)
                     if edge_pp < threshold_pp:
+                        continue
+                    if edge_pp > MAX_EDGE_THRESHOLD_PP:
                         continue
 
                     sim_se = float(((sim_prob * (1 - sim_prob)) / SIM_N) ** 0.5)

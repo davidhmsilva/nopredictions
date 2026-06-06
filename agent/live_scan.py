@@ -5,6 +5,7 @@ live_scan.py — run all live-eligible strategies in one shot.
 Strategies:
   1. DC Model Pre-Match  — draw + home-underdog (yes_p <= 0.45)
   2. Poisson In-Play     — draw + btts, edge outside 8-12pp dead zone (Filter F)
+  3. Sim Model Pre-Match — draw/ht_away_win/home_wins_by_2plus, edge 5-15pp
 
 Usage:
   python live_scan.py            # scan + place real orders if PM_LIVE_MODE=1
@@ -71,6 +72,21 @@ def run_poisson(dry_run: bool) -> list:
         return []
 
 
+def run_sim(dry_run: bool) -> dict:
+    """Run Sim Model Pre-Match (draw/ht_away_win/home_wins_by_2plus, edge 5-15pp)."""
+    _banner("Sim Model Pre-Match  [draw +36%, ht_away_win +28%, home_wins_by_2plus +12%, edge 5-15pp]")
+    try:
+        import sim_scanner
+        result = sim_scanner.run(dry_run=dry_run)
+        edges = result.get("sim_edges_found", 0)
+        trades = result.get("sim_trades_logged", 0)
+        log.info(f"  Sim: {edges} edges → {trades} trades logged")
+        return result
+    except Exception as e:
+        log.error(f"  Sim scanner error: {e}")
+        return {}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Run all live-eligible strategies")
     ap.add_argument("--dry-run", action="store_true", help="scan only, no real orders")
@@ -88,6 +104,7 @@ def main() -> None:
 
     dc_result = run_dc_scanner(dry_run=dry_run)
     poisson_trades = run_poisson(dry_run=dry_run)
+    sim_result = run_sim(dry_run=dry_run)
 
     elapsed = time.time() - t0
 
@@ -95,8 +112,11 @@ def main() -> None:
     dc_edges = dc_result.get("dc_edges_found", 0)
     dc_trades = dc_result.get("dc_trades_logged", 0)
     dc_nb = dc_result.get("no_bias_trades_logged", 0)
+    sim_edges = sim_result.get("sim_edges_found", 0)
+    sim_trades = sim_result.get("sim_trades_logged", 0)
     log.info(f"  DC Pre-Match:    {dc_edges} edges  →  {dc_trades} DC + {dc_nb} No-Bias trades")
     log.info(f"  Poisson In-Play: {len(poisson_trades)} edge(s) found")
+    log.info(f"  Sim Pre-Match:   {sim_edges} edges  →  {sim_trades} trades logged")
     if not LIVE_MODE or dry_run:
         log.info("")
         log.info("  ⚠  No real orders sent (set PM_LIVE_MODE=1 to go live)")
