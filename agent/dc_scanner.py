@@ -754,23 +754,34 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                 if db_match_id:
                     log.info(f"    → Linked to match_id={db_match_id}")
 
-                # Always log the global best as the match's paper trade.
-                best_tid = _log_and_maybe_execute(
-                    best, execute=(best_live is not None and best_live is best)
-                )
-                if best_tid:
-                    log.info(f"    → Trade #{best_tid} logged (best edge of {len(match_candidates)} candidates)")
-                # If the best eligible pick differs from the global best, log + fund it too.
-                if best_live is not None and best_live is not best:
+                # Filters override the raw-best rule:
+                # If a live-eligible pick exists, it is the primary paper trade
+                # (logged first so _already_traded doesn't block it). The raw
+                # best is only logged when no eligible candidate has edge.
+                if best_live is not None:
                     live_tid = _log_and_maybe_execute(best_live, execute=True)
                     if live_tid:
                         log.info(
-                            f"    → Trade #{live_tid} logged + live-eligible "
+                            f"    → Trade #{live_tid} logged + live-submitted "
                             f"({best_live['outcome_key']} @ {best_live['yes_p']:.2f}, "
-                            f"+{best_live['edge_pp']:.1f}pp) — global best "
-                            f"({best['outcome_key']}) not eligible"
+                            f"+{best_live['edge_pp']:.1f}pp)"
                         )
-                elif best_live is None:
+                        if best is not best_live:
+                            log.info(
+                                f"    → Raw best ({best['outcome_key']} @ {best['yes_p']:.2f}, "
+                                f"+{best['edge_pp']:.1f}pp) skipped — filters take priority"
+                            )
+                    else:
+                        log.info(f"    → Skipped (already traded this match)")
+                else:
+                    # No live-eligible edge — log raw best as paper-only for research.
+                    best_tid = _log_and_maybe_execute(best, execute=False)
+                    if best_tid:
+                        log.info(
+                            f"    → Trade #{best_tid} logged (paper-only, "
+                            f"no live-eligible pocket) "
+                            f"[{best['outcome_key']} @ {best['yes_p']:.2f}]"
+                        )
                     log.info(
                         f"    → no live-eligible pocket this match "
                         f"(best {best['outcome_key']} @ {best['yes_p']:.2f}) — paper only"

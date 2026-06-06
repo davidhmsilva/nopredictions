@@ -1056,6 +1056,14 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
             if edge_pp < INPLAY_EDGE_THRESHOLD_PP:
                 continue
 
+            # Filters take priority: only log (paper or live) outcomes in the
+            # live whitelist. Non-whitelisted outcomes (home/away/over_2_5…)
+            # are not recorded — they would occupy the 30-min dedup slot and
+            # block a draw/btts from the same match from being logged.
+            if outcome_key not in LIVE_POISSON_OUTCOMES:
+                log.info(f'     → Skipped (not in live whitelist: {outcome_key})')
+                continue
+
             # Build reasoning
             adjustments_applied = []
             if home_reds or away_reds:
