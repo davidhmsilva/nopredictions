@@ -71,6 +71,12 @@ DISABLED_STRATEGY_IDS = {
 # land here. Identified by the trade's `outcome` substring. Override with
 # PM_ENABLE_GOALS_MARKETS=1.
 _GOALS_MARKETS_ENABLED = os.environ.get("PM_ENABLE_GOALS_MARKETS") == "1"
+# Strategies exempt from the goals-market guard because they have their own
+# validated filters (e.g. Poisson in-play Filter F: BTTS n=31, +35.4% yield).
+_GOALS_EXEMPT_STRATEGY_IDS = {
+    int(x) for x in os.environ.get("PM_GOALS_EXEMPT_STRATEGY_IDS", "3").split(",")
+    if x.strip().isdigit()
+}
 
 
 def _is_goals_outcome(outcome: str) -> bool:
@@ -231,11 +237,25 @@ def try_execute(
         return r
 
     # One lookup for the trade's outcome + strategy (used by the goals + strategy
-    # guards below).
-    cur = conn.cursor()
-    cur.execute("SELECT outcome, strategy_id FROM paper_trades WHERE id = %s", (trade_id,))
-    row = cur.fetchone()
-    cur.close()
+    # guards below). Use a fresh connection — the caller's conn may have timed out
+    # after long API calls during the scan loop.
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT outcome, strategy_id FROM paper_trades WHERE id = %s", (trade_id,))
+        row = cur.fetchone()
+        cur.close()
+    except Exception:
+        try:
+            from .tools.db import get_conn as _get_conn
+            _fresh = _get_conn()
+            cur = _fresh.cursor()
+            cur.execute("SELECT outcome, strategy_id FROM paper_trades WHERE id = %s", (trade_id,))
+            row = cur.fetchone()
+            cur.close()
+            conn = _fresh  # use fresh conn for remaining DB writes
+        except Exception as _e:
+            log.error(f"[live_executor] DB reconnect failed: {_e}")
+            row = None
     trade_outcome = row[0] if row else (outcome_key or "")
     trade_strategy_id = row[1] if row else None
 
@@ -248,8 +268,10 @@ def try_execute(
         return r
 
     # Goals-market guard: never send real money to totals/BTTS (model overprices,
-    # no sharp validation).
-    if not _GOALS_MARKETS_ENABLED and _is_goals_outcome(trade_outcome):
+    # no sharp validation). Exempt strategies that have their own validated filters.
+    if (not _GOALS_MARKETS_ENABLED
+            and _is_goals_outcome(trade_outcome)
+            and trade_strategy_id not in _GOALS_EXEMPT_STRATEGY_IDS):
         r.pm_order_status = "skipped"
         r.pm_order_error = "goals market disabled (totals/BTTS)"
         log.info(f"[live_executor] trade #{trade_id} skipped — {r.pm_order_error}")
