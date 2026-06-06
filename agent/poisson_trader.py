@@ -47,6 +47,13 @@ INPLAY_EDGE_THRESHOLD_PP = 5.0
 MAX_GOALS = 8
 WHALE_VOLUME_USDC = 10000  # threshold for significant whale activity
 
+# ─── Live filter (Filter F from backtest, n=58, yield=+74.5%) ────────────────
+# Only these outcome keys qualify for real-money execution.
+LIVE_POISSON_OUTCOMES: frozenset[str] = frozenset({'draw', 'btts'})
+# Skip the 8-12pp dead zone: -28.9% yield on n=35 in backtest.
+# Keep <8pp (+18.1%) and >=12pp (+48.1%).
+LIVE_POISSON_DEAD_ZONE = (8.0, 12.0)  # (inclusive, exclusive) in pp
+
 # ─── DC model loader ────────────────────────────────────────────────────────
 
 _dc_model = None
@@ -603,6 +610,33 @@ def _get_live_scores_from_pm(pm_markets: list[dict]) -> dict[str, dict]:
 
 # ─── DB: strategy helper ─────────────────────────────────────────────────────
 
+def _pm_yes_token(mkt: dict) -> str | None:
+    """Extract YES token_id from a PM market dict (Gamma API format)."""
+    raw = mkt.get('clobTokenIds') or mkt.get('clob_token_ids')
+    if not raw:
+        return None
+    try:
+        ids = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(ids, list) or not ids:
+        return None
+    return str(ids[0])
+
+
+def _is_live_eligible(outcome_key: str, edge_pp: float) -> bool:
+    """
+    Filter F: Draw+BTTS only, skip the 8-12pp dead zone.
+    Backtest: n=58, yield=+74.5% vs +21.6% baseline.
+    """
+    if outcome_key not in LIVE_POISSON_OUTCOMES:
+        return False
+    lo, hi = LIVE_POISSON_DEAD_ZONE
+    if lo <= edge_pp < hi:
+        return False
+    return True
+
+
 def _get_or_create_poisson_strategy(conn) -> int:
     cur = conn.cursor()
     cur.execute("SELECT id FROM strategies WHERE name = 'PM-vs-Poisson In-Play' LIMIT 1")
@@ -1104,6 +1138,32 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
                 if trade_id:
                     log.info(f'     → Paper trade #{trade_id} logged ✅')
                     trade_info['trade_id'] = trade_id
+
+                    # Live execution — Filter F gate
+                    if os.getenv('PM_LIVE_MODE') == '1' and _is_live_eligible(outcome_key, edge_pp):
+                        try:
+                            from . import live_executor as _le
+                            yes_tok = _pm_yes_token(mkt)
+                            if yes_tok:
+                                log.info(f'     → Live eligible (Draw/BTTS, edge {edge_pp:.1f}pp) — submitting…')
+                                lr = _le.try_execute(
+                                    conn, trade_id=trade_id,
+                                    token_id=yes_tok, side='BUY', price=yes_price,
+                                    ask=mkt.get('bestAsk'),
+                                    fair_prob=fair_prob,
+                                    home=home, away=away,
+                                    outcome_key=outcome_key,
+                                )
+                                log.info(f'     → Live: status={lr.pm_order_status} order={lr.pm_order_id}')
+                            else:
+                                log.warning(f'     → Live skipped: no clobTokenIds in market')
+                        except Exception as _le_err:
+                            log.warning(f'     → Live exec failed (non-fatal): {_le_err}')
+                    elif os.getenv('PM_LIVE_MODE') == '1':
+                        lo, hi = LIVE_POISSON_DEAD_ZONE
+                        reason = ('not Draw/BTTS' if outcome_key not in LIVE_POISSON_OUTCOMES
+                                  else f'dead zone ({lo}-{hi}pp)')
+                        log.info(f'     → Live skipped: {reason}')
                 else:
                     log.info(f'     → Skipped (duplicate within 30 min)')
 
