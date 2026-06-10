@@ -9,8 +9,8 @@ export function extractMatchName(trade: PaperTrade): string {
     // NBA Elo reasoning: "NBA Elo [type]: Team A (1234) vs Team B (5678)..."
     const nba = trade.reasoning.match(/NBA Elo.*?:\s*(.+?)\s*\(\d+.*?\)\s+vs\s+(.+?)\s*\(\d+.*?\)/i)
     if (nba) return `${nba[1].trim()} vs ${nba[2].trim()}`
-    // DC Model or MC Sim reasoning: "DC Model: Team A vs Team B —" / "MC Sim: Team A vs Team B —"
-    const model = trade.reasoning.match(/(?:DC Model|MC Sim):\s*(.+?)\s*[—\-]/i)
+    // DC Model / MC Sim / WC agent reasoning: "X: Team A vs Team B —"
+    const model = trade.reasoning.match(/(?:DC Model|MC Sim|WC):\s*(.+?)\s*[—\-]/i)
     if (model) return model[1].trim()
     const m2 = trade.reasoning.match(/Match:\s*(.+?)\s*\[/i)
     if (m2) return m2[1].trim()
