@@ -69,11 +69,38 @@ PARAMS_PATH = os.path.join(os.path.dirname(__file__), "dc_model_params.json")
 ENTRY_THRESHOLD_PP = float(os.environ.get("CONV_ENTRY_PP", "8.0"))   # fair - ask
 EXIT_BUFFER_PP = float(os.environ.get("CONV_EXIT_PP", "3.0"))        # fair - bid to close
 MIN_ENTRY_MINUTE = int(os.environ.get("CONV_MIN_MIN", "60"))
+POST_GOAL_MIN_MINUTE = int(os.environ.get("CONV_GOAL_MIN", "30"))    # lower threshold when post-goal
 MAX_ENTRY_MINUTE = int(os.environ.get("CONV_MAX_MIN", "88"))         # too late: no liquidity to flip
 SHADOW_STAKE_USD = float(os.environ.get("CONV_STAKE_USD", "10.0"))
+CONV_LIVE_MODE = os.environ.get("CONV_LIVE_MODE", "0") == "1"
+CONV_LIVE_STAKE_USD = float(os.environ.get("CONV_LIVE_STAKE_USD", "1.0"))
+PM_MIN_SHARES = 5                                                     # Polymarket minimum order size
+CONV_ENTRY_RETRIES = int(os.environ.get("CONV_ENTRY_RETRIES", "2"))  # max extra attempts after first miss
+CONV_RETRY_WAIT = int(os.environ.get("CONV_RETRY_WAIT", "10"))       # seconds between retry attempts
+TARGET_EXIT_PCT = float(os.environ.get("CONV_TARGET_PCT", "0.20"))   # exit rule 4: +20% default
 PRICE_BAND = (0.05, 0.95)                                            # sane entry-ask band
 SIM_N = 30_000
 HOURS_WINDOW = 4
+GOAL_POLL_INTERVAL = int(os.environ.get("CONV_GOAL_POLL", "60"))     # seconds between score polls
+FULL_CYCLE_INTERVAL = int(os.environ.get("CONV_FULL_INTERVAL", "300"))  # seconds between full cycles
+
+# ── Time bomb zones (PM probability = yes price) ──────────────────────────────
+# Based on the Betfair odds classification from "Football Trading: Time Bombs".
+# In these bands, prices compress faster as time passes — better entry/exit timing.
+_TB_ZONES = [
+    ("fast_1", 0.45, 0.56),   # Betfair odds ≈ 1.79–2.22
+    ("fast_2", 0.33, 0.40),   # Betfair odds ≈ 2.50–3.03
+]
+# Upper boundary of each fast zone — price crosses this when exiting into the slow zone above.
+_TB_EXIT_UPPER = {"fast_1": 0.56, "fast_2": 0.40}
+
+
+def _time_bomb_zone(price: float) -> Optional[str]:
+    """Return the fast-zone name if price sits in one, else None."""
+    for name, lo, hi in _TB_ZONES:
+        if lo <= price <= hi:
+            return name
+    return None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,9 +134,15 @@ def _fetch_live(norm_idx, team_names) -> dict[tuple[str, str], dict]:
 
     out: dict[tuple[str, str], dict] = {}
     for fix in data.get("response", []):
+        # Skip women's fixtures — DC model has no women's data
+        league_name = fix.get("league", {}).get("name", "")
+        if "women" in league_name.lower():
+            continue
         teams = fix.get("teams", {})
         home = teams.get("home", {}).get("name", "")
         away = teams.get("away", {}).get("name", "")
+        if home.endswith(" W") or away.endswith(" W"):
+            continue
         goals = fix.get("goals", {})
         status = fix.get("fixture", {}).get("status", {})
         hg, ag, elapsed = goals.get("home"), goals.get("away"), status.get("elapsed")
@@ -212,7 +245,10 @@ def _tracking_positions(conn) -> list[dict]:
     cur = conn.cursor()
     cur.execute(
         """SELECT id, token_id, home, away, outcome_key, play_type, fixture_id,
-                  entry_price, entry_fair, entry_minute, size_shares, status, peak_bid
+                  entry_price, entry_fair, entry_minute, size_shares, status, peak_bid,
+                  in_time_bomb, time_bomb_zone,
+                  exit_at_fair_price, exit_at_target_price, exit_tb_out_price,
+                  pm_live, pm_live_size, pm_live_stake_usd, pm_live_pnl_usd
            FROM convergence_shadow WHERE settle_result IS NULL"""
     )
     cols = [d[0] for d in cur.description]
@@ -220,11 +256,12 @@ def _tracking_positions(conn) -> list[dict]:
 
 
 def _record_path(conn, pos_id, minute, fair, bid, ask):
+    in_fast = bool(_time_bomb_zone(float(bid))) if bid is not None else None
     cur = conn.cursor()
     cur.execute(
-        """INSERT INTO convergence_path (position_id, minute, fair, bid, ask)
-           VALUES (%s,%s,%s,%s,%s)""",
-        (pos_id, minute, round(fair, 4) if fair is not None else None, bid, ask),
+        """INSERT INTO convergence_path (position_id, minute, fair, bid, ask, in_fast_zone)
+           VALUES (%s,%s,%s,%s,%s,%s)""",
+        (pos_id, minute, round(fair, 4) if fair is not None else None, bid, ask, in_fast),
     )
     conn.commit()
 
@@ -257,6 +294,14 @@ def _settle(conn, pos, result):
         (result, settle_price, settle_pnl, pos["id"]),
     )
     conn.commit()
+    # Real-money leg: shares still held at resolution redeem at $1 (win) / $0 (loss).
+    # Only when no live SELL ever filled (pm_live_pnl_usd still NULL) — a filled
+    # SELL already realized the live P&L and the shares are gone.
+    if pos.get("pm_live") and pos.get("pm_live_pnl_usd") is None and pos.get("pm_live_size"):
+        live_pnl = settle_price * float(pos["pm_live_size"]) - float(pos["pm_live_stake_usd"] or 0)
+        _update_live_exit(conn, pos["id"], None, settle_price, live_pnl)
+        log.info(f"    [LIVE] settled {'WIN' if won else 'LOSS'} | "
+                 f"{float(pos['pm_live_size']):.2f}sh redeem @ {settle_price:.0f} | live_pnl=${live_pnl:+.2f}")
     actual = None
     if pos["status"] == "open":
         actual = _close_position(
@@ -293,24 +338,253 @@ def _touch_position(conn, pos_id, fair, bid, minute):
     conn.commit()
 
 
+def _check_exit_triggers(conn, pos: dict, bid: float, minute: int) -> None:
+    """Record the first time each exit rule's threshold is crossed.
+    Called every cycle for every tracked position (open or already closed)
+    so we can replay alternative exit rules in the backtest.
+    Does NOT actually close the position — convergence rule stays in charge."""
+    if bid is None:
+        return
+
+    entry = float(pos["entry_price"])
+    entry_fair = float(pos["entry_fair"])
+    cur = conn.cursor()
+    changed = False
+
+    # Exit rule 3: at model fair — first time bid >= entry_fair
+    if pos.get("exit_at_fair_price") is None and bid >= entry_fair:
+        cur.execute(
+            "UPDATE convergence_shadow SET exit_at_fair_price=%s, exit_at_fair_minute=%s WHERE id=%s",
+            (bid, minute, pos["id"]),
+        )
+        changed = True
+
+    # Exit rule 4: at target % gain — first time bid >= entry * (1 + TARGET_EXIT_PCT)
+    target_price = entry * (1.0 + TARGET_EXIT_PCT)
+    if pos.get("exit_at_target_price") is None and bid >= target_price:
+        cur.execute(
+            """UPDATE convergence_shadow SET exit_at_target_price=%s,
+               exit_at_target_pct=%s, exit_at_target_minute=%s WHERE id=%s""",
+            (bid, TARGET_EXIT_PCT, minute, pos["id"]),
+        )
+        changed = True
+
+    # Exit rule 5: time bomb exit — bid crosses the upper boundary of the entry fast zone
+    tb_zone = pos.get("time_bomb_zone")
+    if tb_zone and pos.get("exit_tb_out_price") is None:
+        upper = _TB_EXIT_UPPER.get(tb_zone)
+        if upper is not None and bid > upper:
+            cur.execute(
+                "UPDATE convergence_shadow SET exit_tb_out_price=%s, exit_tb_out_minute=%s WHERE id=%s",
+                (bid, minute, pos["id"]),
+            )
+            changed = True
+
+    if changed:
+        conn.commit()
+
+
+def _run_pm(args: list, timeout: int = 30) -> dict:
+    """Subprocess call to polymarket_client.py inside .venv-pm."""
+    import subprocess, json as _json
+    venv_py = os.path.join(os.path.dirname(__file__), "../.venv-pm/bin/python")
+    client_py = os.path.join(os.path.dirname(__file__), "polymarket_client.py")
+    result = subprocess.run(
+        [venv_py, client_py] + [str(a) for a in args],
+        capture_output=True, text=True, timeout=timeout,
+        cwd=os.path.dirname(__file__),
+    )
+    try:
+        return _json.loads(result.stdout)
+    except Exception:
+        return {"ok": False, "error": result.stdout.strip() or result.stderr.strip()}
+
+
+def _conv_place(token_id: str, side: str, price: float, size: float) -> dict:
+    """Submit a BUY or SELL to Polymarket for a convergence position."""
+    resp = _run_pm(["place_json", token_id, side.upper(), str(round(price, 4)), str(round(size, 2))])
+    ok = resp.get("ok", False)
+    inner = resp.get("resp") or {}
+    order_id = inner.get("orderID") or inner.get("order_id") or inner.get("id")
+    error = resp.get("error") or resp.get("message") if not ok else None
+    notional = round(price * size, 2)
+    if ok:
+        log.info(f"    [LIVE] {side.upper()} {size:.2f}sh @ {price:.3f} ≈ ${notional:.2f} | order={order_id}")
+    else:
+        log.warning(f"    [LIVE] {side.upper()} FAILED: {error or resp}")
+    return {"ok": ok, "order_id": order_id, "notional": notional, "error": error}
+
+
+def _fetch_token_ask(token_id: str) -> Optional[float]:
+    """Lightweight CLOB call to get the current best ask for a single token."""
+    try:
+        resp = requests.get(
+            "https://clob.polymarket.com/price",
+            params={"token_id": token_id, "side": "BUY"},
+            timeout=6,
+        )
+        if resp.ok:
+            price = resp.json().get("price")
+            return float(price) if price is not None else None
+    except Exception:
+        pass
+    return None
+
+
+def _attempt_live_buy(conn, shadow_id: int, token_id: str, fair: float, ask: float) -> bool:
+    """Place a live BUY, wait 8s, confirm fill. Returns True if filled.
+    On success updates convergence_shadow with pm_live=TRUE and real matched size/cost.
+    On failure cancels the order and returns False.
+    """
+    buy_limit = round(min(fair - EXIT_BUFFER_PP / 100.0, 0.97), 4)
+    buy_limit = max(buy_limit, round(ask, 4))
+    live_size = max(PM_MIN_SHARES, round(CONV_LIVE_STAKE_USD / ask, 2))
+    actual_notional = round(live_size * ask, 2)
+
+    buy = _conv_place(token_id, "BUY", buy_limit, live_size)
+    if not buy["ok"] or not buy.get("order_id"):
+        if buy["ok"]:
+            log.warning(f"    → live BUY accepted but no order_id — treating as paper")
+        return False
+
+    time.sleep(8)
+    status = _run_pm(["get_order_json", buy["order_id"]])
+    order_info = status.get("order") or {}
+    size_matched = float(order_info.get("size_matched") or 0)
+
+    if size_matched > 0:
+        matched_notional = round(size_matched * float(order_info.get("price", ask)), 2)
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE convergence_shadow SET
+                   pm_live=TRUE, pm_order_id_entry=%s,
+                   pm_live_size=%s, pm_live_stake_usd=%s
+               WHERE id=%s""",
+            (buy["order_id"], size_matched, matched_notional, shadow_id),
+        )
+        conn.commit()
+        log.info(f"    → FILLED {size_matched:.2f}sh @ ${matched_notional:.2f} (limit={buy_limit:.3f})")
+        return True
+
+    _run_pm(["cancel_json", buy["order_id"]])
+    log.warning(f"    → not filled after 8s — cancelled (order={buy['order_id']})")
+    return False
+
+
+def _retry_live_buy(conn, shadow_id: int, token_id: str,
+                    match_key: tuple, outcome_key: str, entry_minute: int) -> None:
+    """Retry a live BUY up to CONV_ENTRY_RETRIES times after the first attempt missed.
+    Each attempt re-fetches the current ask from the CLOB and re-runs the sim from
+    the current live state to confirm the edge is still there before placing.
+    """
+    for attempt in range(1, CONV_ENTRY_RETRIES + 1):
+        time.sleep(CONV_RETRY_WAIT)
+
+        # Re-fetch current ask directly from CLOB (lightweight, no full PM event scan).
+        fresh_ask = _fetch_token_ask(token_id)
+        if fresh_ask is None:
+            log.warning(f"    → retry {attempt}: could not fetch current ask — aborting")
+            return
+        if not (PRICE_BAND[0] <= fresh_ask <= PRICE_BAND[1]):
+            log.info(f"    → retry {attempt}: ask {fresh_ask:.3f} outside price band — aborting")
+            return
+
+        # Re-run sim from current live state to get a fresh fair value.
+        fresh_sim = fair_for(*match_key)
+        if not fresh_sim:
+            log.warning(f"    → retry {attempt}: match no longer live in DC model — aborting")
+            return
+        fresh_fair = float(fresh_sim.get(outcome_key, 0.0))
+        fresh_edge = round((fresh_fair - fresh_ask) * 100, 1)
+
+        if fresh_edge < ENTRY_THRESHOLD_PP:
+            log.info(
+                f"    → retry {attempt}: edge gone (ask={fresh_ask:.3f} fair={fresh_fair:.3f} "
+                f"edge={fresh_edge:.1f}pp < {ENTRY_THRESHOLD_PP}pp) — aborting"
+            )
+            return
+
+        log.info(
+            f"    → retry {attempt}/{CONV_ENTRY_RETRIES}: ask={fresh_ask:.3f} "
+            f"fair={fresh_fair:.3f} edge=+{fresh_edge:.1f}pp — placing order"
+        )
+        filled = _attempt_live_buy(conn, shadow_id, token_id, fresh_fair, fresh_ask)
+        if filled:
+            return  # success
+
+    log.warning(f"    → all {CONV_ENTRY_RETRIES} retries exhausted for shadow #{shadow_id} — stays paper-only")
+
+
+def _update_live_exit(conn, pos_id: int, order_id, exit_price: float, live_pnl: float):
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE convergence_shadow SET
+               pm_exit_order_id=%s, pm_exit_price_actual=%s, pm_live_pnl_usd=%s, updated_at=NOW()
+           WHERE id=%s""",
+        (order_id, round(exit_price, 4), round(live_pnl, 4), pos_id),
+    )
+    conn.commit()
+
+
+def _attempt_live_sell(conn, pos: dict, bid: float) -> bool:
+    """Place a live SELL at the current bid, wait 8s, confirm fill on the CLOB.
+    Records real P&L only on a confirmed fill (size_matched > 0) — never from
+    shadow prices. Returns True if filled; unfilled orders are cancelled so the
+    position stays whole and can be retried next cycle or settle at resolution.
+    """
+    live_size = float(pos["pm_live_size"])
+    sell = _conv_place(pos["token_id"], "SELL", bid, live_size)
+    if not sell["ok"] or not sell.get("order_id"):
+        log.warning(f"    [LIVE] SELL failed — will retry next cycle or settle at resolution")
+        return False
+    time.sleep(8)
+    status = _run_pm(["get_order_json", sell["order_id"]])
+    order_info = status.get("order") or {}
+    size_matched = float(order_info.get("size_matched") or 0)
+    if size_matched > 0:
+        sell_price = float(order_info.get("price", bid))
+        stake = float(pos.get("pm_live_stake_usd") or 0)
+        avg_cost = stake / live_size if live_size else float(pos["entry_price"])
+        live_pnl = (sell_price - avg_cost) * size_matched
+        _update_live_exit(conn, pos["id"], sell["order_id"], sell_price, live_pnl)
+        log.info(f"    [LIVE] SELL filled {size_matched:.2f}sh @ {sell_price:.3f} | live_pnl=${live_pnl:+.2f}")
+        return True
+    _run_pm(["cancel_json", sell["order_id"]])
+    log.warning(f"    [LIVE] SELL not filled after 8s — cancelled. Retry next cycle / settle at resolution.")
+    return False
+
+
 def _open_shadow(conn, *, token_id, condition_id, question, home, away, outcome_key,
-                 play_type, fixture_id, ask, fair, edge_pp, minute, score):
+                 play_type, fixture_id, ask, fair, edge_pp, minute, score,
+                 post_goal=False, pre_goal_score=None, goal_detected_minute=None):
     size = round(SHADOW_STAKE_USD / ask, 4) if ask else 0.0
+    tb_zone = _time_bomb_zone(ask)
+    in_tb = tb_zone is not None
     cur = conn.cursor()
     try:
         cur.execute(
             """INSERT INTO convergence_shadow
                  (token_id, condition_id, question, home, away, outcome_key, play_type,
                   fixture_id, entry_price, entry_fair, entry_edge_pp, entry_minute,
-                  entry_score, stake_usd, size_shares, last_fair, last_bid, last_checked_at)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                  entry_score, stake_usd, size_shares, last_fair, last_bid, last_checked_at,
+                  in_time_bomb, time_bomb_zone,
+                  post_goal, pre_goal_score, goal_detected_minute)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,%s,%s,%s)
                RETURNING id""",
             (token_id, condition_id, question, home, away, outcome_key, play_type,
              fixture_id, ask, round(fair, 4), edge_pp, minute, score,
-             SHADOW_STAKE_USD, size, round(fair, 4), None),
+             SHADOW_STAKE_USD, size, round(fair, 4), None, in_tb, tb_zone,
+             post_goal, pre_goal_score, goal_detected_minute),
         )
         rid = cur.fetchone()[0]
         conn.commit()
+        tb_tag = f" [TIME BOMB {tb_zone}]" if in_tb else ""
+        goal_tag = " [POST-GOAL]" if post_goal else ""
+        log.info(f"    → shadow position #{rid} opened{tb_tag}{goal_tag}")
+
+        if CONV_LIVE_MODE:
+            _attempt_live_buy(conn, rid, token_id, fair, ask)
+
         return rid
     except psycopg2.errors.UniqueViolation:
         conn.rollback()  # already have an open position on this token
@@ -319,7 +593,19 @@ def _open_shadow(conn, *, token_id, condition_id, question, home, away, outcome_
 
 # ── Cycle ───────────────────────────────────────────────────────────────────────
 
-def run_once(dry_run: bool = False) -> dict:
+def run_once(dry_run: bool = False,
+             post_goal_keys: Optional[set] = None,
+             prev_scores: Optional[dict] = None) -> dict:
+    """One scan cycle.
+    post_goal_keys: set of (home, away) tuples where a goal was just detected —
+                    these get a lower MIN_ENTRY_MINUTE and are flagged post_goal=True.
+    prev_scores: dict (home, away) → (hg, ag) from previous cycle, used to record
+                 the pre-goal score on new entries.
+    """
+    if post_goal_keys is None:
+        post_goal_keys = set()
+    if prev_scores is None:
+        prev_scores = {}
     model = DixonColesModel.load(PARAMS_PATH)
     norm_idx = {_norm(t): i for i, t in enumerate(model.teams)}
 
@@ -387,9 +673,22 @@ def run_once(dry_run: bool = False) -> dict:
         # Record path + peak for every tracked position (even closed ones).
         _record_path(conn, pos["id"], ls["minute"], fair, bid, ask)
         _update_peak(conn, pos["id"], bid, ls["minute"], pos.get("peak_bid"))
+        # Track which exit rules would have fired this cycle (backtest data).
+        _check_exit_triggers(conn, pos, bid, ls["minute"])
 
-        if pos["status"] != "open" or fair is None:
-            continue  # measurement only (already exited, or no fair this cycle)
+        if pos["status"] != "open":
+            # Shadow already exited, but the real shares may still be on the books
+            # (SELL missed at convergence). Keep trying to sell at the current bid
+            # while the match is live; if it never fills, _settle records the
+            # redemption P&L at resolution.
+            if (pos.get("pm_live") and pos.get("pm_live_size")
+                    and pos.get("pm_live_pnl_usd") is None and bid is not None and bid > 0.02):
+                log.info(f"  [LIVE] retry SELL | {key[0]} v {key[1]} {pos['outcome_key']} "
+                         f"@{ls['minute']}' bid {bid:.3f}")
+                _attempt_live_sell(conn, pos, bid)
+            continue  # measurement only
+        if fair is None:
+            continue  # no fair this cycle
         if bid is None:
             _touch_position(conn, pos["id"], fair, None, ls["minute"])
             continue
@@ -404,6 +703,8 @@ def run_once(dry_run: bool = False) -> dict:
             log.info(f"  EXIT converged | {key[0]} v {key[1]} {pos['outcome_key']} "
                      f"@{ls['minute']}' | entry {float(pos['entry_price']):.3f}→bid {bid:.3f} "
                      f"| fair {fair:.3f} | PnL ${pnl:+.2f} ({pct*100:+.1f}%)")
+            if pos.get("pm_live") and pos.get("pm_live_size"):
+                _attempt_live_sell(conn, pos, bid)
 
     # ── ENTRY pass ──
     if not live:
@@ -417,7 +718,9 @@ def run_once(dry_run: bool = False) -> dict:
         if not ls:
             continue
         minute = ls["minute"]
-        if minute < MIN_ENTRY_MINUTE or minute > MAX_ENTRY_MINUTE:
+        is_post_goal = key in post_goal_keys
+        min_minute = POST_GOAL_MIN_MINUTE if is_post_goal else MIN_ENTRY_MINUTE
+        if minute < min_minute or minute > MAX_ENTRY_MINUTE:
             continue
         outcome_key, play_type = _eligible_outcome(ls["home_score"], ls["away_score"])
         sim_p = fair_for(*key)
@@ -445,11 +748,16 @@ def run_once(dry_run: bool = False) -> dict:
                 if not token_id:
                     continue
                 score = f"{ls['home_score']}-{ls['away_score']}"
+                tb_zone = _time_bomb_zone(ask)
+                tb_tag = f" [{tb_zone.upper()}]" if tb_zone else ""
+                pg_tag = " [POST-GOAL]" if is_post_goal else ""
                 log.info(f"  ENTRY signal +{edge_pp}pp | {home} {score} {away} @{minute}' | "
-                         f"{outcome_key} | ask {ask:.3f} fair {fair:.3f}")
+                         f"{outcome_key} | ask {ask:.3f} (@{1/ask:.2f}) fair {fair:.3f} (@{1/fair:.2f}){tb_tag}{pg_tag}")
                 n_entries += 1
                 if dry_run:
                     continue
+                pre_goal = prev_scores.get(key)
+                pre_goal_score = f"{pre_goal[0]}-{pre_goal[1]}" if pre_goal and is_post_goal else None
                 rid = _open_shadow(
                     conn, token_id=token_id,
                     condition_id=str(mkt.get("conditionId") or mkt.get("id") or ""),
@@ -457,9 +765,19 @@ def run_once(dry_run: bool = False) -> dict:
                     outcome_key=outcome_key, play_type=play_type,
                     fixture_id=ls["fixture_id"], ask=ask, fair=fair, edge_pp=edge_pp,
                     minute=minute, score=score,
+                    post_goal=is_post_goal, pre_goal_score=pre_goal_score,
+                    goal_detected_minute=minute if is_post_goal else None,
                 )
                 if rid:
                     log.info(f"    → shadow position #{rid} opened")
+                    if CONV_LIVE_MODE:
+                        # Check if first attempt filled; if not, retry with fresh price.
+                        cur_check = conn.cursor()
+                        cur_check.execute("SELECT pm_live FROM convergence_shadow WHERE id=%s", (rid,))
+                        already_live = cur_check.fetchone()[0]
+                        cur_check.close()
+                        if not already_live:
+                            _retry_live_buy(conn, rid, token_id, key, outcome_key, minute)
                 break  # one market per match per cycle
 
     if conn:
@@ -468,6 +786,59 @@ def run_once(dry_run: bool = False) -> dict:
              f"{n_settled} settled | {n_entries} entry signals")
     return {"live": len(live), "exits": n_exits, "settled": n_settled,
             "entries": n_entries, "dry_run": dry_run}
+
+
+def run_forever(dry_run: bool = False) -> None:
+    """Run indefinitely:
+    - Poll api-football every GOAL_POLL_INTERVAL seconds (default 60s) for live scores.
+    - On score change (goal detected): immediately run a full scan cycle.
+    - Also run a full cycle every FULL_CYCLE_INTERVAL seconds (default 300s) regardless.
+    Uses ~660 api-football requests/day during an 11-hour match window.
+    """
+    model = DixonColesModel.load(PARAMS_PATH)
+    norm_idx = {_norm(t): i for i, t in enumerate(model.teams)}
+
+    prev_scores: dict[tuple[str, str], tuple[int, int]] = {}
+    last_full_cycle = 0.0
+    cycle_n = 0
+
+    log.info(f"Forever mode — goal poll every {GOAL_POLL_INTERVAL}s, "
+             f"full cycle every {FULL_CYCLE_INTERVAL}s")
+
+    while True:
+        now = time.time()
+
+        # Always fetch live state (1 api-football call per poll)
+        live = _fetch_live(norm_idx, model.teams)
+
+        # Detect goals: score changed since last poll
+        goal_keys: set[tuple[str, str]] = set()
+        for key, ls in live.items():
+            score = (ls["home_score"], ls["away_score"])
+            prev = prev_scores.get(key)
+            if prev is not None and score != prev:
+                home, away = key
+                log.info(f"  ⚽ GOAL: {home} v {away} "
+                         f"{prev[0]}-{prev[1]} → {score[0]}-{score[1]} @{ls['minute']}'")
+                goal_keys.add(key)
+            prev_scores[key] = score
+
+        # Run full cycle on goal OR on schedule
+        if goal_keys or (now - last_full_cycle >= FULL_CYCLE_INTERVAL):
+            cycle_n += 1
+            if goal_keys:
+                names = ", ".join(f"{k[0]} v {k[1]}" for k in goal_keys)
+                log.info(f"── cycle {cycle_n} [GOAL: {names}] ──")
+            else:
+                log.info(f"── cycle {cycle_n} [scheduled] ──")
+            try:
+                run_once(dry_run=dry_run, post_goal_keys=goal_keys,
+                         prev_scores=prev_scores)
+            except Exception as exc:
+                log.error(f"cycle error: {exc}", exc_info=True)
+            last_full_cycle = now
+
+        time.sleep(GOAL_POLL_INTERVAL)
 
 
 def _market_for_token(markets: list[dict], token_id: str) -> Optional[dict]:
@@ -488,60 +859,97 @@ def report():
     print(f"\n=== Convergence shadow ledger ===")
     print(f"Open positions:   {n_open}")
 
-    # ── The exit-rule comparison (answers: sell on convergence vs hold to end) ──
-    # Computed only over entries that have BOTH a strategy exit AND a recorded
-    # settlement, so the three rules are scored on the same set of bets.
+    # ── Exit-rule comparison ──────────────────────────────────────────────────
+    # Scored over entries that have BOTH a converge-exit AND a settlement, so
+    # all five rules are evaluated on the same set of bets.
     cur.execute(
         """SELECT count(*),
-                  COALESCE(sum(realized_pnl_usd),0),                       -- converged exit
-                  COALESCE(sum(settle_pnl_usd),0),                         -- hold to end
-                  COALESCE(sum((peak_bid - entry_price) * size_shares),0), -- exit at peak (ceiling)
+                  COALESCE(sum(realized_pnl_usd), 0),
+                  COALESCE(sum(settle_pnl_usd), 0),
+                  COALESCE(sum((peak_bid - entry_price) * size_shares), 0),
+                  COALESCE(sum((exit_at_fair_price - entry_price) * size_shares)
+                              FILTER (WHERE exit_at_fair_price IS NOT NULL), 0),
+                  COALESCE(sum((exit_at_target_price - entry_price) * size_shares)
+                              FILTER (WHERE exit_at_target_price IS NOT NULL), 0),
+                  COALESCE(sum((exit_tb_out_price - entry_price) * size_shares)
+                              FILTER (WHERE exit_tb_out_price IS NOT NULL AND in_time_bomb), 0),
                   count(*) FILTER (WHERE realized_pnl_usd > 0),
-                  count(*) FILTER (WHERE settle_pnl_usd > 0)
+                  count(*) FILTER (WHERE settle_pnl_usd > 0),
+                  count(*) FILTER (WHERE exit_at_fair_price IS NOT NULL),
+                  count(*) FILTER (WHERE exit_at_target_price IS NOT NULL),
+                  count(*) FILTER (WHERE exit_tb_out_price IS NOT NULL AND in_time_bomb),
+                  count(*) FILTER (WHERE in_time_bomb)
            FROM convergence_shadow
            WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL"""
     )
-    n, conv_pnl, hold_pnl, peak_pnl, conv_wins, hold_wins = cur.fetchone()
+    row = cur.fetchone()
+    (n, conv_pnl, hold_pnl, peak_pnl,
+     fair_pnl, target_pnl, tb_pnl,
+     conv_wins, hold_wins,
+     n_fair, n_target, n_tb, n_in_tb) = row
+
     if not n:
         print("\n  No settled flips yet — comparison appears once matches resolve.")
         conn.close()
         return
 
     staked = n * SHADOW_STAKE_USD
-    print(f"\n  Settled flips:  n={n}  (staked ${staked:.0f} @ $10)")
-    print(f"  {'Exit rule':<22}{'P&L':>10}{'Yield':>9}{'Win%':>7}")
-    print(f"  {'-'*46}")
-    print(f"  {'CONVERGED (current)':<22}{float(conv_pnl):>+9.2f}{float(conv_pnl)/staked*100:>+8.1f}%"
-          f"{conv_wins/n*100:>6.0f}%")
-    print(f"  {'HOLD to resolution':<22}{float(hold_pnl):>+9.2f}{float(hold_pnl)/staked*100:>+8.1f}%"
-          f"{hold_wins/n*100:>6.0f}%")
-    print(f"  {'PEAK bid (ceiling)':<22}{float(peak_pnl):>+9.2f}{float(peak_pnl)/staked*100:>+8.1f}%"
-          f"{'—':>6}")
-    print(f"\n  → If CONVERGED ≈ HOLD: selling early is free risk reduction, keep it.")
-    print(f"  → If HOLD >> CONVERGED: we're leaving money by selling — hold longer.")
-    print(f"  → PEAK is the unreachable ceiling (perfect timing) — gap to it = timing cost.")
-    print(f"\n  ⚠ n={n} — need ≥30 settled flips before trusting this.")
+    target_pct_label = f"+{int(TARGET_EXIT_PCT*100)}%"
+    print(f"\n  Settled flips: n={n}  staked ${staked:.0f}  "
+          f"(of which {n_in_tb} entered in a time-bomb zone)")
+    print(f"\n  {'Exit rule':<28}{'P&L':>10}{'Yield':>9}{'Fired':>7}  Notes")
+    print(f"  {'-'*60}")
 
-    # Per-unit (liquidity-blind) check on the converged rule.
+    def _row(label, pnl, wins=None, fired=None, note=""):
+        pnl_s = f"{float(pnl):>+9.2f}"
+        yield_s = f"{float(pnl)/staked*100:>+8.1f}%"
+        win_s = f"{wins/n*100:>5.0f}%" if wins is not None else "    —"
+        fired_s = f"{fired:>5}" if fired is not None else "    —"
+        print(f"  {label:<28}{pnl_s}{yield_s}{fired_s}  {note}")
+
+    _row("1. CONVERGED (current)",  conv_pnl,   conv_wins, n,      "bid ≈ fair")
+    _row("2. HOLD to resolution",   hold_pnl,   hold_wins, n,      "FT result")
+    _row("3. PEAK bid (ceiling)",   peak_pnl,   None,      n,      "best bid seen (oracle)")
+    _row(f"4. AT MODEL FAIR",        fair_pnl,   None,      n_fair, f"first bid ≥ entry_fair  ({n_fair}/{n} fired)")
+    _row(f"5. AT TARGET {target_pct_label}",     target_pnl, None,  n_target, f"first bid ≥ entry×{1+TARGET_EXIT_PCT:.2f}  ({n_target}/{n} fired)")
+    _row(f"6. TIME BOMB EXIT",       tb_pnl,     None,      n_tb,   f"exits fast zone  ({n_tb}/{n_in_tb} fired from TB entries)")
+
+    print(f"\n  → CONVERGED ≈ HOLD: selling early is free risk reduction.")
+    print(f"  → HOLD >> CONVERGED: we're leaving money — hold longer.")
+    print(f"  → AT FAIR / TARGET tell you where on the path the best exit sits.")
+    print(f"  → TIME BOMB EXIT: valid only for TB-zone entries; compares riding the wave.")
+    print(f"  → PEAK is the unreachable oracle ceiling.")
+    print(f"\n  ⚠ n={n} — need ≥30 settled flips for conclusions.")
+
     cur.execute(
         "SELECT COALESCE(avg(realized_pct),0) FROM convergence_shadow WHERE exit_reason='converged'"
     )
     print(f"\n  Converged avg per-unit return: {float(cur.fetchone()[0])*100:+.1f}%")
 
+    # Recent settled detail
     cur.execute(
-        """SELECT home, away, outcome_key, entry_price, exit_price, exit_reason,
-                  realized_pnl_usd, settle_pnl_usd, peak_bid
+        """SELECT home, away, outcome_key, in_time_bomb, time_bomb_zone,
+                  entry_price, exit_price, exit_reason,
+                  realized_pnl_usd, settle_pnl_usd,
+                  exit_at_fair_price, exit_at_target_price, exit_tb_out_price, peak_bid
            FROM convergence_shadow
-           WHERE settle_result IS NOT NULL ORDER BY settled_at DESC NULLS LAST LIMIT 12"""
+           WHERE settle_result IS NOT NULL ORDER BY settled_at DESC NULLS LAST LIMIT 15"""
     )
     rows = cur.fetchall()
     if rows:
-        print("\n  Recent settled (entry→exit | converged$ | hold$ | peak):")
-        for h, a, ok, ep, xp, rs, cpnl, hpnl, pk in rows:
-            xps = f"{float(xp):.3f}" if xp is not None else "  —  "
-            pks = f"{float(pk):.3f}" if pk is not None else "  —  "
-            print(f"    {h[:12]:12} v {a[:12]:12} {ok:9} {float(ep):.3f}→{xps} {rs:13} "
-                  f"${float(cpnl):+.2f} | ${float(hpnl):+.2f} | {pks}")
+        print("\n  Recent settled  (conv$ | hold$ | @fair | @target | @tb | peak):")
+        for (h, a, ok, itb, tbz, ep, xp, rs,
+             cpnl, hpnl, efp, etp, etbp, pk) in rows:
+            tb_s = f"[{tbz}]" if itb else "      "
+            xp_s  = f"{float(xp):.3f}"  if xp   else "  — "
+            efp_s = f"{float(efp):.3f}" if efp   else "  — "
+            etp_s = f"{float(etp):.3f}" if etp   else "  — "
+            etbp_s= f"{float(etbp):.3f}"if etbp  else "  — "
+            pk_s  = f"{float(pk):.3f}"  if pk    else "  — "
+            print(f"  {h[:10]:10} v {a[:10]:10} {ok:9} {tb_s} "
+                  f"{float(ep):.3f}→{xp_s} {rs[:9]:9} "
+                  f"${float(cpnl):+.2f}|${float(hpnl):+.2f}|"
+                  f"{efp_s}|{etp_s}|{etbp_s}|{pk_s}")
     conn.close()
 
 
@@ -550,7 +958,8 @@ def report():
 def main():
     p = argparse.ArgumentParser(description="In-play convergence trader (shadow)")
     p.add_argument("--once", action="store_true", help="One cycle then exit")
-    p.add_argument("--cycles", type=int, default=1, help="Number of cycles")
+    p.add_argument("--forever", action="store_true", help="Run forever with goal detection")
+    p.add_argument("--cycles", type=int, default=1, help="Number of cycles (ignored with --forever)")
     p.add_argument("--interval", type=int, default=300, help="Seconds between cycles")
     p.add_argument("--dry-run", action="store_true", help="No DB writes")
     p.add_argument("--report", action="store_true", help="Print shadow P&L and exit")
@@ -558,6 +967,10 @@ def main():
 
     if args.report:
         report()
+        return
+
+    if args.forever:
+        run_forever(dry_run=args.dry_run)
         return
 
     cycles = 1 if args.once else args.cycles

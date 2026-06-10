@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # NOPREDICTIONS — In-play CONVERGENCE daemon (SHADOW phase)
-# Polls live matches every 5 minutes for ~2.5 hours, logging shadow entries +
-# exits to the convergence_shadow ledger. No real money. Intended to be called
-# by cron during match windows, alongside (or instead of) inplay_daemon.sh.
-#
-# NOTE: api-football free tier is 100 req/day. This polls 1x/cycle (~30/session).
-# Running this AND inplay_daemon.sh in the same window may exceed the budget.
+# Runs forever with goal detection:
+#   - Polls api-football every 60s for live scores (~660 req/day during 11h match window)
+#   - On goal: immediately runs a full scan cycle
+#   - Full scan every 300s regardless
+# With api-football PRO (7500 req/day) this runs comfortably all day.
 
 set -euo pipefail
 
@@ -25,8 +24,8 @@ cd "$WORKDIR"
 echo $$ > "$LOCKFILE"
 trap 'rm -f "$LOCKFILE"' EXIT
 
-# 5-min polling: 30 cycles = 150 min (2.5 hours)
+echo "$(date -u '+%Y-%m-%d %H:%M UTC') — convergence daemon starting (forever mode)" >> "$LOGFILE"
+
 "$PYTHON" agent/convergence_trader.py \
-    --cycles 30 \
-    --interval 300 \
+    --forever \
     >> "$LOGFILE" 2>&1
