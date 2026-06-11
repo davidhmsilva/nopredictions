@@ -1004,7 +1004,8 @@ def report():
                   realized_pnl_usd, settle_pnl_usd,
                   exit_at_fair_price, exit_at_target_price, exit_tb_out_price, peak_bid
            FROM convergence_shadow
-           WHERE settle_result IS NOT NULL ORDER BY settled_at DESC NULLS LAST LIMIT 15"""
+           WHERE settle_result IS NOT NULL AND settle_pnl_usd IS NOT NULL
+           ORDER BY settled_at DESC NULLS LAST LIMIT 15"""
     )
     rows = cur.fetchall()
     if rows:
