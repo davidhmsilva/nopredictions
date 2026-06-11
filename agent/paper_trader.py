@@ -62,7 +62,7 @@ STAKE_UNITS             = 1.0
 DAYS_AHEAD              = 0     # 0 = today only; use --days 1 to include tomorrow too
 
 # Active fair-value source for the current scan (set at runtime)
-_FAIR_VALUE_SOURCE: str = 'unknown'   # 'odds_api' | 'db_pinnacle' | 'model'
+_FAIR_VALUE_SOURCE: str = 'unknown'   # 'af_pinnacle' | 'odds_api' | 'db_pinnacle' | 'model'
 
 # Sharp books and their weights for consensus
 SHARP_BOOKS = {'pinnacle': 0.65, 'betfair_ex_eu': 0.35}
@@ -277,6 +277,7 @@ def _is_1x2_market(question: str) -> bool:
         r'exact',            # exact score
         r'halftime',         # half-time
         r'half.?time',
+        r'\b(1st|2nd|first|second)\s+half\b',  # period sub-markets ("Second half draw?")
         r'over\s*[\d.]',    # Over 2.5
         r'under\s*[\d.]',   # Under 2.5
         r'spread',           # handicap spread
@@ -290,6 +291,8 @@ def _is_1x2_market(question: str) -> bool:
         r'corners',
         r'cards',
         r'total goals',
+        r'to score',         # "Neither team to score", "X to score first"
+        r'neither',
     ]
     for pat in reject_patterns:
         if re.search(pat, q):
@@ -311,6 +314,7 @@ def _is_totals_market(question: str) -> bool:
         r'cards',
         r'halftime',
         r'half.?time',
+        r'\b(1st|2nd|first|second)\s+half\b',  # period totals ("1st Half O/U 1.5")
         r'spread',
         r'exact',
         r'goalscorer',
@@ -381,6 +385,16 @@ def fetch_pm_markets_today() -> list[dict]:
 
     markets_out: list[dict] = []
     seen: set[tuple] = set()   # (event_id, question) dedup
+
+    # Drop women's events — DC/Poisson models are men-only (see dc_scanner._is_women_event).
+    try:
+        from dc_scanner import _is_women_event as _is_women
+        n_raw = len(events)
+        events = [e for e in events if not _is_women(e)]
+        if n_raw - len(events) > 0:
+            log.info(f'[paper_trader] Filtered out {n_raw - len(events)} women\'s events')
+    except Exception:
+        pass
 
     for event in events:
         event_title = event.get('title', '')
@@ -661,6 +675,141 @@ def _vig_remove(event: dict) -> dict | None:
     return result
 
 
+# ─── Step 2b: api-football Pinnacle feed (primary sharp source) ───────────────
+#
+# PM names follow FIFA conventions; api-football uses its own. Only divergences
+# that the fuzzy matcher can't absorb need an entry here.
+_AF_NATIONAL_ALIASES = {
+    'korea republic':       'South Korea',
+    'korea dpr':            'North Korea',
+    'czechia':              'Czech Republic',
+    'united states':        'USA',
+    'ir iran':              'Iran',
+    "côte d'ivoire":        'Ivory Coast',
+    'cote divoire':         'Ivory Coast',
+    'türkiye':              'Turkey',
+    'turkiye':              'Turkey',
+    'china pr':             'China',
+    'uae':                  'United Arab Emirates',
+    'cabo verde':           'Cape Verde Islands',
+}
+
+
+def _af_team(name: str) -> str:
+    return _AF_NATIONAL_ALIASES.get(name.strip().lower(), name)
+
+
+def _af_event_from_closing(raw: dict, home: str, away: str,
+                           kickoff, swapped: bool = False) -> dict | None:
+    """Convert closing_collector's de-vigged Pinnacle blob to the lookup event shape."""
+    h2h = raw.get('h2h') or {}
+    hp, dp, ap = h2h.get('home'), h2h.get('draw'), h2h.get('away')
+    if hp is None or ap is None:
+        return None
+    if swapped:
+        hp, ap = ap, hp
+    event = {
+        'home': home, 'away': away,
+        'home_prob': hp, 'draw_prob': dp, 'away_prob': ap,
+        'commence_time': kickoff,
+        'sport': 'api-football',
+        'sources': {'pinnacle': {**h2h, 'swapped': swapped}},
+    }
+    totals: dict[str, dict] = {}
+    for k, over_p in raw.items():
+        m = re.match(r'^over_(\d+)_(\d+)$', k)
+        if not m:
+            continue
+        under_p = raw.get(f'under_{m.group(1)}_{m.group(2)}')
+        if under_p is None:
+            continue
+        line = float(f'{m.group(1)}.{m.group(2)}')
+        totals[str(line)] = {'line': line, 'over_prob': over_p, 'under_prob': under_p}
+    if totals:
+        event['totals'] = totals
+    return event
+
+
+def fetch_sharp_odds_apifootball(pm_markets: list[dict]) -> dict[str, dict]:
+    """
+    Build the sharp lookup from api-football Pinnacle odds (bookmaker id 4).
+
+    PM-board-driven: each unique PM match resolves to an api-football fixture
+    (one /fixtures call per date, cached) plus one /odds call per fixture.
+    Output events share fetch_sharp_odds_today's shape, so fuzzy matching and
+    _sharp_prob_for_outcome work unchanged. Pinnacle-only consensus — the
+    api-football "Betfair" (id 3) is the Sportsbook (~4.8% vig), not the
+    Exchange, so it would add noise rather than sharpness.
+    """
+    try:
+        import closing_collector as cc
+    except ImportError:
+        try:
+            from . import closing_collector as cc  # type: ignore[no-redef]
+        except ImportError:
+            return {}
+    if not getattr(cc, 'FOOTBALL_API_KEY', ''):
+        log.info('[paper_trader] FOOTBALL_API_KEY not set — skipping api-football feed')
+        return {}
+
+    # Unique PM matches with a usable home/away pair
+    matches: dict[tuple[str, str], str | None] = {}
+    for m in pm_markets:
+        home, away = m.get('_home_team'), m.get('_away_team')
+        if not (home and away):
+            two = _extract_two_teams(m.get('question') or m.get('title') or '')
+            if two:
+                home, away = two
+        if not (home and away):
+            continue
+        if (home, away) not in matches:
+            rt = m.get('_resolution_time')
+            matches[(home, away)] = (
+                rt.strftime('%Y-%m-%d') if isinstance(rt, datetime) else rt
+            )
+    if not matches:
+        return {}
+
+    log.info(f'[paper_trader] api-football sharp feed: resolving {len(matches)} PM matches...')
+    fixtures_cache: dict[str, list] = {}
+    odds_cache: dict[int, dict | None] = {}
+    lookup: dict[str, dict] = {}
+    hits = 0
+
+    for (home, away), date_str in matches.items():
+        af_home, af_away = _af_team(home), _af_team(away)
+        swapped = False
+        fixture_id, kickoff = cc._find_fixture(af_home, af_away, date_str, fixtures_cache)
+        if not fixture_id:
+            # PM event titles are home-first for football, but absorb the odd
+            # reversed listing; probs are swapped back to PM orientation.
+            fixture_id, kickoff = cc._find_fixture(af_away, af_home, date_str, fixtures_cache)
+            swapped = fixture_id is not None
+        if not fixture_id:
+            log.debug(f'  [af-feed] no fixture: {home} vs {away}')
+            continue
+
+        if fixture_id in odds_cache:
+            raw = odds_cache[fixture_id]
+        else:
+            raw = cc._fetch_pinnacle_odds(fixture_id)
+            odds_cache[fixture_id] = raw
+        if not raw:
+            continue
+
+        event = _af_event_from_closing(raw, home, away, kickoff, swapped=swapped)
+        if event is None:
+            continue
+        hits += 1
+        for k in _match_keys(home, away):
+            lookup[k] = event
+
+    log.info(f'[paper_trader] api-football sharp feed: Pinnacle odds for {hits}/{len(matches)} matches')
+    if lookup:
+        _cache_sharp_odds(lookup)
+    return lookup
+
+
 def _norm(s: str) -> str:
     """Normalise team name for matching: lowercase, strip punctuation, collapse spaces."""
     s = s.lower()
@@ -726,11 +875,20 @@ def _classify_outcome(title: str, home: str, away: str) -> tuple[str, str] | Non
     an = _norm(away)
     hn6, an6 = hn[:6], an[:6]
 
-    if 'draw' in t and 'no draw' not in t and 'spread' not in t:
+    # Period / prop sub-markets — the sharp lookup only prices full-time 1X2 + totals
+    if re.search(r'\b(1st|2nd|first|second)\s+half\b|half.?time|to score|neither'
+                 r'|spread|handicap|corner|card|penalt|exact', t):
+        return None
+
+    if 'draw' in t and 'no draw' not in t:
         return ('draw', 'Draw')
 
     ou_match = re.search(r'(?:o/u|over|under)\s*([\d.]+)', t)
     if ou_match:
+        # Team totals ("X vs Y: Canada O/U 1.5") are not full-match totals
+        seg = _norm(t[:ou_match.start()].split(':')[-1])
+        if seg and ((hn6 and hn6 in seg) or (an6 and an6 in seg)):
+            return None
         line = ou_match.group(1)
         direction = 'under' if 'under' in t else 'over'
         return (f'{direction}_{line}', f'{direction.title()} {line} goals')
@@ -993,12 +1151,19 @@ def run(dry_run: bool = False) -> list[dict]:
     for market in pm_markets:
         tag_hints.extend(market.get('_event_tags', []))
 
-    #    Try The Odds API first; fall back to DB Pinnacle odds; then model pricer
+    #    api-football Pinnacle first (7500 req/day); The Odds API as fallback
+    #    (~200 req/month left); then DB Pinnacle; then model pricer
     global _FAIR_VALUE_SOURCE  # noqa: PLW0603
-    sharp_lookup = fetch_sharp_odds_today(team_hints=team_hints, tag_hints=tag_hints)
+    _FAIR_VALUE_SOURCE = 'unknown'
+    sharp_lookup = fetch_sharp_odds_apifootball(pm_markets)
     if sharp_lookup:
-        _FAIR_VALUE_SOURCE = 'odds_api'
+        _FAIR_VALUE_SOURCE = 'af_pinnacle'
     else:
+        log.info('[paper_trader] api-football feed empty — trying The Odds API...')
+        sharp_lookup = fetch_sharp_odds_today(team_hints=team_hints, tag_hints=tag_hints)
+        if sharp_lookup:
+            _FAIR_VALUE_SOURCE = 'odds_api'
+    if not sharp_lookup:
         log.info('[paper_trader] Odds API unavailable — trying DB fallback...')
         conn_temp = _conn()
         sharp_lookup = _db_sharp_odds_today(conn_temp)
@@ -1048,6 +1213,7 @@ def run(dry_run: bool = False) -> list[dict]:
             else EDGE_THRESHOLD_PP
         )
         source_label = {
+            'af_pinnacle': 'Pinnacle (api-football)',
             'odds_api':   'Pinnacle+Betfair (Odds API)',
             'db_pinnacle': 'Pinnacle (DB closing)',
             'model':      'Poisson form model',
