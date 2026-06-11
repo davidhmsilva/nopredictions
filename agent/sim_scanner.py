@@ -424,11 +424,17 @@ _RE_WIN_BY = re.compile(r"win\s+by\s+(\d+)\s*(?:\+|or\s+more)?", re.I)
 
 
 def _team_match(question_norm: str, home_norm_words: set, away_norm_words: set) -> Optional[str]:
-    """Return 'home' / 'away' / None based on token overlap with question."""
+    """Return 'home' / 'away' / None based on token overlap with question.
+    BOTH teams matching is ambiguous (e.g. WC sibling titles prefixed
+    "Mexico vs. South Africa: ...") — never pick a side from those."""
     q_words = set(question_norm.split())
-    if home_norm_words & q_words:
+    h = bool(home_norm_words & q_words)
+    a = bool(away_norm_words & q_words)
+    if h and a:
+        return None
+    if h:
         return "home"
-    if away_norm_words & q_words:
+    if a:
         return "away"
     return None
 
@@ -483,6 +489,13 @@ def _classify_market(
     # ── Over/Under N.5 ───────────────────────────────────────────────
     m = _RE_OVER_UNDER.search(q)
     if m:
+        # Qualified totals are NOT the full-match total: team totals
+        # ("…: Mexico O/U 1.5") and half totals ("…: 2nd Half O/U 0.5").
+        # The qualifier sits between the title prefix ("Home vs. Away:")
+        # and the O/U token.
+        pre = q[: m.start()].split(":")[-1]
+        if "half" in pre or _team_match(_norm(pre), h_words, a_words):
+            return None
         raw_side = m.group(1).lower()
         # YES of "O/U N.M" = over. Treat both o/u and ou as over.
         side = "over" if raw_side in ("o/u", "ou") else raw_side
@@ -490,8 +503,9 @@ def _classify_market(
         if "." not in line:
             line = line + ".5"
         key = f"{side}_{line.replace('.', '_')}"
-        if key in SIM_MARKETS:
-            return key
+        # An O/U question is a totals market even when the line isn't priced —
+        # never let it fall through to the team-name match below.
+        return key if key in SIM_MARKETS else None
 
     # ── Win-by-N phrasing (alt handicap) ─────────────────────────────
     wb = _RE_WIN_BY.search(q)
@@ -505,8 +519,18 @@ def _classify_market(
             return f"{side}_wins_by_2plus"
         if side and n_goals == 3:
             return f"{side}_wins_by_3plus"
+        return None  # win-by market with unpriced line / ambiguous team
 
     # ── Match winner (team-name match — last so structural patterns win) ──
+    # Tournament-level questions name one team too ("Will Mexico win Group A
+    # in the 2026 FIFA World Cup?") — never treat those as the match ML.
+    if any(w in q for w in ("group", "world cup", "advance", "qualify",
+                            "champion", "trophy", "tournament")):
+        return None
+    # A moneyline question must actually say "win"/"beat" — bare team mentions
+    # ("Portugal to score first?") are some other market.
+    if not re.search(r"\b(win|beat)\b", q):
+        return None
     side = _team_match(_norm(q), h_words, a_words)
     if side == "home":
         return "home_win"

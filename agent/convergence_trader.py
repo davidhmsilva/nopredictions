@@ -41,6 +41,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -431,13 +432,80 @@ def _fetch_token_ask(token_id: str) -> Optional[float]:
     return None
 
 
+# Phrases that mean a market is NOT a plain 1X2 — sibling markets on the same
+# event (totals, spreads, BTTS, score-first, half markets, tournament props).
+# Word-boundary regex so team names like Hannover / Cardiff don't false-match.
+_NOT_1X2_RE = re.compile(
+    r"\b(o/u|over|under|spread|both teams|btts|score first|to score|half|"
+    r"halftime|clean sheet|exact|corner|cards?|group|world cup|advance|"
+    r"qualify|champion|tournament)\b"
+)
+
+
+def _verify_live_market(token_id: str, condition_id: str, outcome_key: str,
+                        home: str, away: str) -> tuple[bool, str]:
+    """Last line of defense before real money leaves the wallet.
+
+    Fetch the market from the CLOB by condition_id and confirm that
+    (a) the resolved question really is the 1X2 market the play intends
+        (leader moneyline or draw — not a sibling O/U / BTTS / score-first
+        market that the classifier might have mislabeled), and
+    (b) token_id is that market's YES token.
+    Any doubt → (False, reason): the live order is blocked, shadow row stays.
+    """
+    try:
+        resp = requests.get(f"https://clob.polymarket.com/markets/{condition_id}",
+                            timeout=8)
+        if not resp.ok:
+            return False, f"CLOB market fetch HTTP {resp.status_code}"
+        mkt = resp.json()
+    except Exception as exc:
+        return False, f"CLOB market fetch failed: {exc}"
+
+    q = (mkt.get("question") or "").lower()
+    if not q:
+        return False, "market has no question"
+    if _NOT_1X2_RE.search(q):
+        return False, f"not a 1X2 market: '{q}'"
+
+    qw = set(_norm(q).split())
+    h_words = {w for w in _norm(home).split() if len(w) >= 4}
+    a_words = {w for w in _norm(away).split() if len(w) >= 4}
+    if outcome_key == "draw":
+        if "draw" not in q:
+            return False, f"expected a draw market, got '{q}'"
+    elif outcome_key in ("home_win", "away_win"):
+        want, other = (h_words, a_words) if outcome_key == "home_win" else (a_words, h_words)
+        if "win" not in qw and "beat" not in qw:
+            return False, f"expected a moneyline question, got '{q}'"
+        if not want or not (want & qw):
+            return False, f"question does not name the {outcome_key} team: '{q}'"
+        if other & qw:
+            return False, f"question names both teams — ambiguous ML: '{q}'"
+    else:
+        return False, f"unsupported outcome_key '{outcome_key}' for live"
+
+    tokens = mkt.get("tokens") or []
+    tok = next((t for t in tokens if str(t.get("token_id")) == str(token_id)), None)
+    if tok is None:
+        return False, "token_id not found in market tokens"
+    if str(tok.get("outcome", "")).strip().lower() != "yes":
+        return False, f"token outcome is '{tok.get('outcome')}', expected 'Yes'"
+    return True, "ok"
+
+
 def _attempt_live_buy(conn, shadow_id: int, token_id: str, fair: float, ask: float) -> bool:
     """Place a live BUY, wait 8s, confirm fill. Returns True if filled.
     On success updates convergence_shadow with pm_live=TRUE and real matched size/cost.
     On failure cancels the order and returns False.
     """
-    buy_limit = round(min(fair - EXIT_BUFFER_PP / 100.0, 0.97), 4)
-    buy_limit = max(buy_limit, round(ask, 4))
+    # Execute AT the ask (±1¢ for queue), never up to model fair: a limit at
+    # fair sweeps thin books — positions 124/126 paid an 0.80 limit for a
+    # $0.07 token. Cap by fair-minus-buffer as a sanity bound.
+    buy_limit = round(min(ask + 0.01, fair - EXIT_BUFFER_PP / 100.0, 0.97), 4)
+    if buy_limit < ask:
+        log.info(f"    [LIVE] skip — fair-buffer limit {buy_limit:.3f} below ask {ask:.3f}")
+        return False
     live_size = max(PM_MIN_SHARES, round(CONV_LIVE_STAKE_USD / ask, 2))
     actual_notional = round(live_size * ask, 2)
 
@@ -472,10 +540,12 @@ def _attempt_live_buy(conn, shadow_id: int, token_id: str, fair: float, ask: flo
 
 
 def _retry_live_buy(conn, shadow_id: int, token_id: str,
-                    match_key: tuple, outcome_key: str, entry_minute: int) -> None:
+                    match_key: tuple, outcome_key: str, entry_minute: int,
+                    fair_fn) -> None:
     """Retry a live BUY up to CONV_ENTRY_RETRIES times after the first attempt missed.
     Each attempt re-fetches the current ask from the CLOB and re-runs the sim from
     the current live state to confirm the edge is still there before placing.
+    fair_fn: run_once's fair_for closure (sim fair probs for a match key).
     """
     for attempt in range(1, CONV_ENTRY_RETRIES + 1):
         time.sleep(CONV_RETRY_WAIT)
@@ -490,7 +560,7 @@ def _retry_live_buy(conn, shadow_id: int, token_id: str,
             return
 
         # Re-run sim from current live state to get a fresh fair value.
-        fresh_sim = fair_for(*match_key)
+        fresh_sim = fair_fn(*match_key)
         if not fresh_sim:
             log.warning(f"    → retry {attempt}: match no longer live in DC model — aborting")
             return
@@ -581,10 +651,6 @@ def _open_shadow(conn, *, token_id, condition_id, question, home, away, outcome_
         tb_tag = f" [TIME BOMB {tb_zone}]" if in_tb else ""
         goal_tag = " [POST-GOAL]" if post_goal else ""
         log.info(f"    → shadow position #{rid} opened{tb_tag}{goal_tag}")
-
-        if CONV_LIVE_MODE:
-            _attempt_live_buy(conn, rid, token_id, fair, ask)
-
         return rid
     except psycopg2.errors.UniqueViolation:
         conn.rollback()  # already have an open position on this token
@@ -758,9 +824,10 @@ def run_once(dry_run: bool = False,
                     continue
                 pre_goal = prev_scores.get(key)
                 pre_goal_score = f"{pre_goal[0]}-{pre_goal[1]}" if pre_goal and is_post_goal else None
+                condition_id = str(mkt.get("conditionId") or mkt.get("id") or "")
                 rid = _open_shadow(
                     conn, token_id=token_id,
-                    condition_id=str(mkt.get("conditionId") or mkt.get("id") or ""),
+                    condition_id=condition_id,
                     question=mkt.get("question", ""), home=home, away=away,
                     outcome_key=outcome_key, play_type=play_type,
                     fixture_id=ls["fixture_id"], ask=ask, fair=fair, edge_pp=edge_pp,
@@ -768,16 +835,20 @@ def run_once(dry_run: bool = False,
                     post_goal=is_post_goal, pre_goal_score=pre_goal_score,
                     goal_detected_minute=minute if is_post_goal else None,
                 )
-                if rid:
-                    log.info(f"    → shadow position #{rid} opened")
-                    if CONV_LIVE_MODE:
-                        # Check if first attempt filled; if not, retry with fresh price.
-                        cur_check = conn.cursor()
-                        cur_check.execute("SELECT pm_live FROM convergence_shadow WHERE id=%s", (rid,))
-                        already_live = cur_check.fetchone()[0]
-                        cur_check.close()
-                        if not already_live:
-                            _retry_live_buy(conn, rid, token_id, key, outcome_key, minute)
+                if rid and CONV_LIVE_MODE:
+                    # Hard guard: confirm on the CLOB that this condition_id
+                    # really is the intended 1X2 market and the token is its
+                    # YES side, BEFORE any real order (incl. retries).
+                    live_ok, why = _verify_live_market(
+                        token_id, condition_id, outcome_key, home, away)
+                    if not live_ok:
+                        log.warning(f"    [LIVE] BLOCKED by wrong-market guard: {why} "
+                                    f"— position #{rid} stays shadow-only")
+                    else:
+                        filled = _attempt_live_buy(conn, rid, token_id, fair, ask)
+                        if not filled:
+                            _retry_live_buy(conn, rid, token_id, key, outcome_key,
+                                            minute, fair_for)
                 break  # one market per match per cycle
 
     if conn:
