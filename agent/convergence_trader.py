@@ -80,6 +80,14 @@ CONV_ENTRY_RETRIES = int(os.environ.get("CONV_ENTRY_RETRIES", "2"))  # max extra
 CONV_RETRY_WAIT = int(os.environ.get("CONV_RETRY_WAIT", "10"))       # seconds between retry attempts
 TARGET_EXIT_PCT = float(os.environ.get("CONV_TARGET_PCT", "0.20"))   # exit rule 4: +20% default
 PRICE_BAND = (0.05, 0.95)                                            # sane entry-ask band
+# Stale-feed guards: a huge in-play "edge" usually means PM repriced a goal that
+# api-football hasn't reported yet (PM watches the broadcast; our feed lags 1-3min).
+# Above the cap we still record the SHADOW entry (could be a genuinely thin book)
+# but never commit real money to it.
+MAX_LIVE_EDGE_PP = float(os.environ.get("CONV_MAX_LIVE_PP", "20.0"))  # live-money edge cap
+FLICKER_WINDOW_S = int(os.environ.get("CONV_FLICKER_WINDOW", "180"))  # 2nd score change within this = flicker
+FLICKER_HOLD_POLLS = 1                                                # stable polls to confirm after a flicker
+DECREASE_HOLD_POLLS = int(os.environ.get("CONV_DECREASE_HOLD", "3"))  # stable polls after a score DECREASE (VAR/feed fix)
 SIM_N = 30_000
 HOURS_WINDOW = 4
 GOAL_POLL_INTERVAL = int(os.environ.get("CONV_GOAL_POLL", "60"))     # seconds between score polls
@@ -661,17 +669,22 @@ def _open_shadow(conn, *, token_id, condition_id, question, home, away, outcome_
 
 def run_once(dry_run: bool = False,
              post_goal_keys: Optional[set] = None,
-             prev_scores: Optional[dict] = None) -> dict:
+             prev_scores: Optional[dict] = None,
+             entry_frozen_keys: Optional[set] = None) -> dict:
     """One scan cycle.
     post_goal_keys: set of (home, away) tuples where a goal was just detected —
                     these get a lower MIN_ENTRY_MINUTE and are flagged post_goal=True.
-    prev_scores: dict (home, away) → (hg, ag) from previous cycle, used to record
-                 the pre-goal score on new entries.
+    prev_scores: dict (home, away) → (hg, ag) score before the last change, used to
+                 record the pre-goal score on new entries.
+    entry_frozen_keys: matches whose score is unstable (VAR reversal / feed flicker) —
+                       NO entries, shadow included; exits and settlement unaffected.
     """
     if post_goal_keys is None:
         post_goal_keys = set()
     if prev_scores is None:
         prev_scores = {}
+    if entry_frozen_keys is None:
+        entry_frozen_keys = set()
     model = DixonColesModel.load(PARAMS_PATH)
     norm_idx = {_norm(t): i for i, t in enumerate(model.teams)}
 
@@ -783,6 +796,10 @@ def run_once(dry_run: bool = False,
         ls = live.get(key)
         if not ls:
             continue
+        if key in entry_frozen_keys:
+            log.info(f"  entries FROZEN (score unstable) — {key[0]} v {key[1]} "
+                     f"{ls['home_score']}-{ls['away_score']} @{ls['minute']}'")
+            continue
         minute = ls["minute"]
         is_post_goal = key in post_goal_keys
         min_minute = POST_GOAL_MIN_MINUTE if is_post_goal else MIN_ENTRY_MINUTE
@@ -813,10 +830,17 @@ def run_once(dry_run: bool = False,
                 token_id = _pm_token_id(mkt, "yes")
                 if not token_id:
                     continue
+                # PM disagreeing with our state by this much usually means PM
+                # already priced a goal our feed hasn't seen → shadow-only.
+                stale_suspect = edge_pp > MAX_LIVE_EDGE_PP
                 score = f"{ls['home_score']}-{ls['away_score']}"
                 tb_zone = _time_bomb_zone(ask)
                 tb_tag = f" [{tb_zone.upper()}]" if tb_zone else ""
                 pg_tag = " [POST-GOAL]" if is_post_goal else ""
+                if stale_suspect:
+                    log.warning(f"  STALE-FEED SUSPECT +{edge_pp}pp > {MAX_LIVE_EDGE_PP}pp cap | "
+                                f"{home} {score} {away} @{minute}' | {outcome_key} | "
+                                f"ask {ask:.3f} fair {fair:.3f} — shadow only, no live order")
                 log.info(f"  ENTRY signal +{edge_pp}pp | {home} {score} {away} @{minute}' | "
                          f"{outcome_key} | ask {ask:.3f} (@{1/ask:.2f}) fair {fair:.3f} (@{1/fair:.2f}){tb_tag}{pg_tag}")
                 n_entries += 1
@@ -835,7 +859,7 @@ def run_once(dry_run: bool = False,
                     post_goal=is_post_goal, pre_goal_score=pre_goal_score,
                     goal_detected_minute=minute if is_post_goal else None,
                 )
-                if rid and CONV_LIVE_MODE:
+                if rid and CONV_LIVE_MODE and not stale_suspect:
                     # Hard guard: confirm on the CLOB that this condition_id
                     # really is the intended 1X2 market and the token is its
                     # YES side, BEFORE any real order (incl. retries).
@@ -859,17 +883,75 @@ def run_once(dry_run: bool = False,
             "entries": n_entries, "dry_run": dry_run}
 
 
+class _ScoreState:
+    """Per-match score stability across polls.
+
+    A clean goal (single increase, no recent change) triggers an immediate
+    post-goal cycle, same speed as before. Two patterns freeze ENTRIES for the
+    match until the score holds for N consecutive polls (exits never freeze):
+      • score DECREASE — VAR reversal or feed correction (DECREASE_HOLD_POLLS);
+      • flicker — a 2nd change within FLICKER_WINDOW_S (FLICKER_HOLD_POLLS).
+    """
+
+    def __init__(self):
+        self.prev_scores: dict[tuple[str, str], tuple[int, int]] = {}
+        self.pre_change_scores: dict[tuple[str, str], tuple[int, int]] = {}
+        self.last_change_ts: dict[tuple[str, str], float] = {}
+        self.hold: dict[tuple[str, str], int] = {}
+
+    def update(self, live: dict, now: float) -> tuple[set, set, set]:
+        """Ingest one poll. Returns (goal_keys, released_keys, frozen_keys)."""
+        goal_keys: set[tuple[str, str]] = set()
+        released_keys: set[tuple[str, str]] = set()
+        for key, ls in live.items():
+            score = (ls["home_score"], ls["away_score"])
+            prev = self.prev_scores.get(key)
+            if prev is not None and score != prev:
+                home, away = key
+                change = (f"{home} v {away} {prev[0]}-{prev[1]} → "
+                          f"{score[0]}-{score[1]} @{ls['minute']}'")
+                decreased = score[0] < prev[0] or score[1] < prev[1]
+                last_change = self.last_change_ts.get(key)
+                flicker = (last_change is not None
+                           and (now - last_change) < FLICKER_WINDOW_S)
+                if decreased:
+                    self.hold[key] = max(self.hold.get(key, 0), DECREASE_HOLD_POLLS)
+                    log.warning(f"  🔄 SCORE CORRECTION (VAR/feed?): {change} — "
+                                f"entries frozen until stable {DECREASE_HOLD_POLLS} polls")
+                elif flicker:
+                    self.hold[key] = max(self.hold.get(key, 0), FLICKER_HOLD_POLLS)
+                    log.warning(f"  ⚠️ SCORE FLICKER (2nd change <{FLICKER_WINDOW_S}s): {change} — "
+                                f"entries need {FLICKER_HOLD_POLLS} confirming poll(s)")
+                else:
+                    log.info(f"  ⚽ GOAL: {change}")
+                goal_keys.add(key)
+                self.pre_change_scores[key] = prev
+                self.last_change_ts[key] = now
+            elif prev is not None and self.hold.get(key, 0) > 0:
+                self.hold[key] -= 1
+                if self.hold[key] <= 0:
+                    del self.hold[key]
+                    released_keys.add(key)
+                    log.info(f"  ✅ score stable — entries unfrozen: {key[0]} v {key[1]} "
+                             f"{score[0]}-{score[1]} @{ls['minute']}'")
+            self.prev_scores[key] = score
+        frozen = {k for k, v in self.hold.items() if v > 0}
+        return goal_keys, released_keys, frozen
+
+
 def run_forever(dry_run: bool = False) -> None:
     """Run indefinitely:
     - Poll api-football every GOAL_POLL_INTERVAL seconds (default 60s) for live scores.
     - On score change (goal detected): immediately run a full scan cycle.
+    - Score decreases / rapid flickers freeze entries for that match until the
+      score is stable (exits still run every cycle); a release triggers a cycle.
     - Also run a full cycle every FULL_CYCLE_INTERVAL seconds (default 300s) regardless.
     Uses ~660 api-football requests/day during an 11-hour match window.
     """
     model = DixonColesModel.load(PARAMS_PATH)
     norm_idx = {_norm(t): i for i, t in enumerate(model.teams)}
 
-    prev_scores: dict[tuple[str, str], tuple[int, int]] = {}
+    state = _ScoreState()
     last_full_cycle = 0.0
     cycle_n = 0
 
@@ -881,30 +963,21 @@ def run_forever(dry_run: bool = False) -> None:
 
         # Always fetch live state (1 api-football call per poll)
         live = _fetch_live(norm_idx, model.teams)
+        goal_keys, released_keys, frozen = state.update(live, now)
 
-        # Detect goals: score changed since last poll
-        goal_keys: set[tuple[str, str]] = set()
-        for key, ls in live.items():
-            score = (ls["home_score"], ls["away_score"])
-            prev = prev_scores.get(key)
-            if prev is not None and score != prev:
-                home, away = key
-                log.info(f"  ⚽ GOAL: {home} v {away} "
-                         f"{prev[0]}-{prev[1]} → {score[0]}-{score[1]} @{ls['minute']}'")
-                goal_keys.add(key)
-            prev_scores[key] = score
-
-        # Run full cycle on goal OR on schedule
-        if goal_keys or (now - last_full_cycle >= FULL_CYCLE_INTERVAL):
+        # Run full cycle on goal/release OR on schedule
+        trigger = goal_keys | released_keys
+        if trigger or (now - last_full_cycle >= FULL_CYCLE_INTERVAL):
             cycle_n += 1
-            if goal_keys:
-                names = ", ".join(f"{k[0]} v {k[1]}" for k in goal_keys)
+            if trigger:
+                names = ", ".join(f"{k[0]} v {k[1]}" for k in trigger)
                 log.info(f"── cycle {cycle_n} [GOAL: {names}] ──")
             else:
                 log.info(f"── cycle {cycle_n} [scheduled] ──")
             try:
-                run_once(dry_run=dry_run, post_goal_keys=goal_keys,
-                         prev_scores=prev_scores)
+                run_once(dry_run=dry_run, post_goal_keys=trigger,
+                         prev_scores=state.pre_change_scores,
+                         entry_frozen_keys=frozen)
             except Exception as exc:
                 log.error(f"cycle error: {exc}", exc_info=True)
             last_full_cycle = now
