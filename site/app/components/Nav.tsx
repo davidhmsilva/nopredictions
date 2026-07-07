@@ -125,7 +125,7 @@ export function MobileNav({
     <div className="mobile-nav">
       <button
         className={section === 'home' && !isScanner ? 'active' : ''}
-        onClick={() => { window.location.href = '/'; }}
+        onClick={() => { window.location.href = '/dashboard'; }}
       >
         <span className="icn">◆</span>
         <span>HOME</span>
