@@ -1597,7 +1597,18 @@ button { font-family: var(--font); }
 }
 .lp-term-dot { width: 10px; height: 10px; border-radius: 50%; background: #262626; }
 .lp-term-title { margin-left: 10px; font-size: 9px; letter-spacing: 2px; color: var(--grey); }
-.lp-term-body { padding: 18px 18px 16px; min-height: 168px; font-size: 12px; line-height: 2; }
+/* Fixed height so the page doesn't reflow as lines type in.
+   Mobile wraps more (longer lines) → taller; desktop overrides below. */
+.lp-term-body {
+  padding: 18px 18px 16px;
+  height: 310px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 2;
+}
+@media (min-width: 960px) {
+  .lp-term-body { height: 240px; }
+}
 .lp-term-line { white-space: pre-wrap; word-break: break-word; }
 .lp-term-prompt { color: var(--accent); }
 .lp-term-cmd { color: var(--white); }
@@ -1684,6 +1695,10 @@ button { font-family: var(--font); }
 }
 .lp-input::placeholder { color: var(--grey); }
 .lp-input:focus { border-color: var(--accent); }
+/* iOS auto-zooms on focus for inputs under 16px; bump up on phones. */
+@media (max-width: 768px) {
+  .lp-input { font-size: 16px; }
+}
 .lp-form-submit {
   width: 100%;
   margin-top: 4px;
