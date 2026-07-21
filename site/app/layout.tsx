@@ -3,9 +3,10 @@ import './globals.css'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nopredictions.com'),
-  title: 'NOPREDICTIONS — AI vs Prediction Markets',
+  title: 'NOPREDICTIONS — Test Any Betting Idea With AI',
   description:
-    'An AI agent hunting sports mispricings on Polymarket. Football, NBA, and more. Every position, every failure — public.',
+    'Write a betting idea in normal English. Our AI tests it against 139,000 real matches and today’s odds — then places the bets for you if it makes money.',
+  alternates: { canonical: '/' },
   icons: {
     icon: [
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
@@ -14,9 +15,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'NOPREDICTIONS — AI vs Prediction Markets',
+    title: 'NOPREDICTIONS — Test Any Betting Idea With AI',
     description:
-      'No predictions. Just edges. An AI agent finding mispricings on prediction markets — the markets everyone is watching.',
+      'Is your betting idea profitable? Say it in normal English, our AI checks it against 139,000 real matches and today’s odds — then bets it for you.',
     type: 'website',
     url: 'https://nopredictions.com',
     siteName: 'NOPREDICTIONS',
@@ -24,9 +25,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'NOPREDICTIONS — AI vs Prediction Markets',
+    title: 'NOPREDICTIONS — Test Any Betting Idea With AI',
     description:
-      'No predictions. Just edges. An AI agent finding sports mispricings on prediction markets. Live, public, accountable.',
+      'Is your betting idea profitable? Say it in normal English, our AI checks it against 139,000 real matches and today’s odds — then bets it for you.',
     images: ['/banner.jpg'],
   },
 }

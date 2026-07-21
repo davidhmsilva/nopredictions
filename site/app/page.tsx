@@ -3,14 +3,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { supabase, fetchPaperTrades, type PaperTrade } from './lib/supabase'
 
-const X_URL = 'https://x.com'
-
 // ── Live ticker (real positions from the agent) ─────────────────────────────
 
 function tickerLabel(t: PaperTrade): string {
-  if (t.result === 'won') return `WON +${(Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0)).toFixed(2)}u`
-  if (t.result === 'lost') return `LOST -${Number(t.stake_units ?? 0).toFixed(2)}u`
-  return `OPEN +${Number(t.expected_edge ?? 0).toFixed(1)}pp`
+  const stake = Number(t.stake_units ?? 0)
+  if (t.result === 'won' && stake > 0) {
+    return `WON +${Math.round(((Number(t.payout_units ?? 0) - stake) / stake) * 100)}%`
+  }
+  if (t.result === 'won') return 'WON'
+  if (t.result === 'lost') return 'LOST'
+  return 'BET PLACED'
 }
 
 function LiveTicker() {
@@ -23,9 +25,9 @@ function LiveTicker() {
   }, [])
 
   return (
-    <div className="ticker-bar lp-ticker">
+    <div className="ticker-bar lp-ticker" aria-hidden="true">
       <div className="ticker-inner">
-        <span className="ticker-item"><b>● LIVE</b> — REAL POSITIONS FROM OUR AGENT</span>
+        <span className="ticker-item"><b>● LIVE</b> — REAL BETS PLACED BY OUR AGENT</span>
         {trades.map(t => (
           <span key={t.id} className={`ticker-item${t.result === 'lost' ? ' down' : ''}`}>
             {t.market_title.length > 44 ? t.market_title.slice(0, 41) + '…' : t.market_title}{' '}
@@ -41,31 +43,31 @@ function LiveTicker() {
 
 const SCENARIOS: { cmd: string; lines: { text: string; cls: string }[] }[] = [
   {
-    cmd: 'test "Draws are overpriced on Polymarket in low-scoring derbies"',
+    cmd: 'test "Draws are too cheap in low-scoring derbies"',
     lines: [
-      { text: 'parsing hypothesis… ok', cls: 'lp-term-dim' },
-      { text: 'scanning 139,241 matches · 22 leagues · 2010-2026', cls: 'lp-term-dim' },
-      { text: 'backtest   n=482 · yield +11.2% · CLV +2.3% · p=0.01', cls: 'lp-term-dim' },
-      { text: 'live check PM 28¢ vs MODEL 33¢ → +5pp edge', cls: 'lp-term-dim' },
-      { text: '✓ EDGE FOUND — READY TO DEPLOY', cls: 'lp-term-ok' },
+      { text: 'reading your idea… ok', cls: 'lp-term-dim' },
+      { text: 'checking 139,241 real matches · 22 leagues · 2010-2026', cls: 'lp-term-dim' },
+      { text: 'backtest   482 bets · profit +11.2% · not luck (p=0.01)', cls: 'lp-term-dim' },
+      { text: 'live odds  market 28¢ vs our price 33¢ → 5¢ too cheap', cls: 'lp-term-dim' },
+      { text: '✓ EDGE FOUND — READY TO BET', cls: 'lp-term-ok' },
     ],
   },
   {
     cmd: 'test "Home favorites bounce back after a heavy midweek loss"',
     lines: [
-      { text: 'parsing hypothesis… ok', cls: 'lp-term-dim' },
-      { text: 'scanning 139,241 matches · filters: form, schedule', cls: 'lp-term-dim' },
-      { text: 'backtest   n=1,204 · yield +1.1% · p=0.41', cls: 'lp-term-dim' },
-      { text: '✗ NO EDGE — HYPOTHESIS REJECTED', cls: 'lp-term-warn' },
+      { text: 'reading your idea… ok', cls: 'lp-term-dim' },
+      { text: 'checking 139,241 real matches · form + schedule', cls: 'lp-term-dim' },
+      { text: 'backtest   1,204 bets · profit +1.1% · could be luck (p=0.41)', cls: 'lp-term-dim' },
+      { text: '✗ NO EDGE — IDEA REJECTED, DO NOT BET', cls: 'lp-term-warn' },
     ],
   },
   {
-    cmd: 'test "NBA road favorites on back-to-backs underperform the spread"',
+    cmd: 'test "NBA road favorites lose more on back-to-back nights"',
     lines: [
-      { text: 'parsing hypothesis… ok', cls: 'lp-term-dim' },
-      { text: 'scanning 15,415 NBA games · schedule model on', cls: 'lp-term-dim' },
-      { text: 'backtest   n=356 · yield +6.8% · p=0.03', cls: 'lp-term-dim' },
-      { text: '✓ EDGE FOUND — READY TO DEPLOY', cls: 'lp-term-ok' },
+      { text: 'reading your idea… ok', cls: 'lp-term-dim' },
+      { text: 'checking 15,415 real NBA games · rest days on', cls: 'lp-term-dim' },
+      { text: 'backtest   356 bets · profit +6.8% · not luck (p=0.03)', cls: 'lp-term-dim' },
+      { text: '✓ EDGE FOUND — READY TO BET', cls: 'lp-term-ok' },
     ],
   },
 ]
@@ -113,7 +115,7 @@ function AgentTerminal() {
     <div className="lp-term">
       <div className="lp-term-head">
         <span className="lp-term-dot" /><span className="lp-term-dot" /><span className="lp-term-dot" />
-        <span className="lp-term-title">NOPREDICTIONS AGENT — HYPOTHESIS TESTER</span>
+        <span className="lp-term-title">NOPREDICTIONS — BETTING IDEA TESTER</span>
       </div>
       <div className="lp-term-body">
         <div className="lp-term-line lp-term-cmd">
@@ -189,8 +191,8 @@ function BestCalls() {
   return (
     <section className="lp-section lp-section-alt">
       <div className="lp-wrap">
-        <div className="lp-section-eyebrow">// BEST CALLS — REAL LOGGED POSITIONS</div>
-        <h2 className="lp-h2">The market said no chance.<br />The model said value.</h2>
+        <div className="lp-section-eyebrow">// BEST CALLS — REAL BETS, LOGGED BEFORE KICKOFF</div>
+        <h2 className="lp-h2">The odds said no chance.<br />Our model said bet it.</h2>
         <div className="lp-wins">
           {wins.map(w => (
             <div key={w.id} className="lp-win">
@@ -201,7 +203,12 @@ function BestCalls() {
           ))}
         </div>
         <div className="lp-wins-note">
-          1u flat stakes · every position timestamped before kickoff · no cherry-picking
+          Same stake on every bet · each one timestamped before kickoff
+        </div>
+        <div className="lp-wins-honest">
+          These are the three best. They are not the whole story — the agent is down
+          overall right now, and every single bet it has ever placed, win or loss, is
+          public. <a href="/dashboard" className="lp-body-link">See the full record →</a>
         </div>
       </div>
     </section>
@@ -232,7 +239,7 @@ function WaitlistForm() {
 
   if (status === 'success' || status === 'duplicate') {
     return (
-      <div className="lp-form-success">
+      <div className="lp-form-success" role="status" aria-live="polite">
         <div className="lp-form-success-title">
           {status === 'success' ? "YOU'RE ON THE LIST ✓" : "YOU'RE ALREADY ON THE LIST ✓"}
         </div>
@@ -254,14 +261,20 @@ function WaitlistForm() {
           value={email}
           onChange={e => setEmail(e.target.value)}
           aria-label="Email address"
+          autoComplete="email"
+          inputMode="email"
+          spellCheck={false}
+          disabled={status === 'submitting'}
         />
         <button type="submit" className="lp-btn-primary lp-form-submit" disabled={status === 'submitting'}>
           {status === 'submitting' ? 'JOINING…' : 'JOIN THE WAITLIST'}
         </button>
       </div>
-      {status === 'error' && (
-        <div className="lp-form-error">Something went wrong. Please try again.</div>
-      )}
+      <div role="status" aria-live="polite">
+        {status === 'error' && (
+          <div className="lp-form-error">Something went wrong. Please try again.</div>
+        )}
+      </div>
       <div className="lp-form-note">
         We&apos;ll only email you when we have meaningful updates. No spam.
       </div>
@@ -282,6 +295,7 @@ export default function LandingPage() {
           <span className="lp-brand-sub">NO PREDICTIONS. ONLY EDGES.</span>
         </div>
         <div className="lp-nav-links">
+          <a href="/dashboard" className="lp-nav-link">LIVE TRACK RECORD</a>
           <a href="#waitlist" className="lp-nav-cta">JOIN WAITLIST</a>
         </div>
       </nav>
@@ -292,18 +306,20 @@ export default function LandingPage() {
       {/* ── 1 · HERO ── */}
       <section className="lp-hero lp-hero-fx">
         <div className="lp-wrap lp-hero-grid">
-          <div className="lp-eyebrow lp-ha-eyebrow"><span className="lp-live-dot">●</span> AI AGENTS · PREDICTION MARKETS · EARLY ACCESS</div>
+          <div className="lp-eyebrow lp-ha-eyebrow"><span className="lp-live-dot">●</span> TEST ANY BETTING IDEA · AI AGENTS · EARLY ACCESS</div>
           <h1 className="lp-h1 lp-ha-title">
-            NO PREDICTIONS.<br />
-            <span className="lp-accent lp-accent-glow">ONLY EDGES.</span><span className="lp-h1-cursor" />
+            IS YOUR<br />
+            BETTING IDEA<br />
+            <span className="lp-accent lp-accent-glow">PROFITABLE?</span><span className="lp-h1-cursor" />
           </h1>
           <div className="lp-ha-term">
             <AgentTerminal />
           </div>
           <p className="lp-sub lp-ha-sub">
-            Type a sports theory in plain English. An AI agent backtests it against
-            139,000+ real matches, checks it against live market prices, and — if the
-            edge is real — trades it for you. Automatically.
+            Write a betting idea in normal English — like &quot;draws are too cheap in
+            derbies&quot;. Our AI tests it against 139,000 real matches and today&apos;s
+            odds, and tells you if it makes money or loses it. If it makes money, an
+            agent places the bets for you on Polymarket, 24/7.
           </p>
           <div id="waitlist" className="lp-ha-form">
             <WaitlistForm />
@@ -315,50 +331,19 @@ export default function LandingPage() {
       {/* ── 1b · BEST CALLS (wow) ── */}
       <BestCalls />
 
-      {/* ── 2 · WHY YOU LOSE ── */}
-      <section className="lp-section">
-        <div className="lp-wrap">
-          <div className="lp-section-eyebrow">// WHY YOU LOSE</div>
-          <h2 className="lp-h2">Every bettor has a theory.<br />Almost nobody tests it.</h2>
-          <p className="lp-body" style={{ maxWidth: 640, margin: '0 auto' }}>
-            You watch the games. You read the news. You feel the line is wrong — and
-            sometimes you&apos;re right. But without testing, you can&apos;t tell an edge
-            from a bias. So wins feel like skill, losses feel like bad luck, and the
-            bankroll slowly bleeds.
-          </p>
-        </div>
-      </section>
-
-      {/* ── 3 · THE METHOD ── */}
-      <section className="lp-section lp-section-alt">
-        <div className="lp-wrap">
-          <div className="lp-section-eyebrow">// THE METHOD</div>
-          <h2 className="lp-h2">Type your theory.<br />Get the truth in seconds.</h2>
-          <p className="lp-body" style={{ maxWidth: 640, margin: '0 auto' }}>
-            We test your ideas the way a quant fund tests a strategy — against 139,000+
-            real matches and the live market line. No opinions. No hot takes. Just the
-            numbers, and a verdict: <strong>edge, or bias</strong>.
-            <br /><br />
-            <strong>If it&apos;s real, deploy it — an autonomous agent trades it for you.
-            If it&apos;s not, you just saved your bankroll.</strong>
-          </p>
-        </div>
-      </section>
-
-      {/* ── 4 · HOW IT WORKS ── */}
+      {/* ── 2 · HOW IT WORKS ── */}
       <section className="lp-section">
         <div className="lp-wrap">
           <div className="lp-section-eyebrow">// HOW IT WORKS</div>
-          <h2 className="lp-h2">Say it. Prove it. Deploy it.</h2>
+          <h2 className="lp-h2">Every bettor has a theory.<br />Almost nobody tests it.</h2>
           <div className="lp-steps">
 
             <div className="lp-step">
               <div className="lp-step-num">01</div>
               <div className="lp-step-title">SAY IT</div>
               <div className="lp-step-body">
-                Type any idea in plain English. &quot;Home favorites collapse after
-                European away games.&quot; That&apos;s it — no code, no spreadsheets,
-                no data science degree.
+                Type your betting idea in normal English. &quot;Home favorites collapse
+                after European away games.&quot; No code. No spreadsheets.
               </div>
             </div>
 
@@ -366,18 +351,18 @@ export default function LandingPage() {
               <div className="lp-step-num">02</div>
               <div className="lp-step-title">PROVE IT</div>
               <div className="lp-step-body">
-                The agent backtests it against 139,000+ real matches and prices it
-                against live market odds. You get a verdict in seconds: real edge,
-                or expensive bias.
+                The agent replays your idea over thousands of real matches and checks
+                it against today&apos;s odds. Answer in seconds:{' '}
+                <strong>it makes money, or it doesn&apos;t</strong>.
               </div>
             </div>
 
             <div className="lp-step">
               <div className="lp-step-num">03</div>
-              <div className="lp-step-title">DEPLOY IT</div>
+              <div className="lp-step-title">BET IT</div>
               <div className="lp-step-body">
-                One click launches your autonomous agent. It watches the markets 24/7,
-                sizes positions, manages risk, and executes. You check the P&amp;L.
+                If it makes money, one click starts an agent that places the bets for
+                you, 24/7. If it doesn&apos;t, you just saved your bankroll.
               </div>
             </div>
 
@@ -385,55 +370,62 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── 5 · KEY FEATURES ── */}
+      {/* ── 2b · QUESTIONS ── */}
       <section className="lp-section lp-section-alt">
         <div className="lp-wrap">
-          <div className="lp-section-eyebrow">// WHAT YOU GET</div>
-          <h2 className="lp-h2">A quant desk in your pocket.</h2>
-          <div className="lp-feat-grid">
+          <div className="lp-section-eyebrow">// STRAIGHT ANSWERS</div>
+          <h2 className="lp-h2">What this actually is.</h2>
+          <div className="lp-faq">
 
-            <div className="lp-feat">
-              <div className="lp-feat-title">HYPOTHESIS TESTER</div>
-              <div className="lp-feat-desc">Plain English in, verdict out. Backtest + market check in seconds.</div>
+            <div className="lp-faq-item">
+              <div className="lp-faq-q">So what do I get, exactly?</div>
+              <div className="lp-faq-a">
+                A place to check if a betting idea makes money before you risk anything
+                on it. You describe the idea in one sentence; we test it on real past
+                matches and real past odds, and show you the result. If it holds up, you
+                can hand it to an agent that places the bets for you.
+              </div>
             </div>
 
-            <div className="lp-feat">
-              <div className="lp-feat-title">AUTONOMOUS AGENTS</div>
-              <div className="lp-feat-desc">Deploy with one click. Risk limits built in. Kill switch always on.</div>
+            <div className="lp-faq-item">
+              <div className="lp-faq-q">Do I need to know maths or code?</div>
+              <div className="lp-faq-a">
+                No. You write one sentence in normal English. Everything else — the
+                statistics, the odds, the maths — happens behind the scenes. If your idea
+                is too vague to test, we tell you and help you sharpen it.
+              </div>
             </div>
 
-            <div className="lp-feat">
-              <div className="lp-feat-title">EDGE DETECTION</div>
-              <div className="lp-feat-desc">Always-on scanning for mispricings across prediction markets.</div>
+            <div className="lp-faq-item">
+              <div className="lp-faq-q">Where do the numbers come from?</div>
+              <div className="lp-faq-a">
+                139,000+ real matches in football and NBA going back to 2010, and the
+                closing odds from the sharpest bookmakers in the world. Ideas are tested
+                only on data that existed before each match — no cheating with hindsight.
+              </div>
             </div>
 
-            <div className="lp-feat">
-              <div className="lp-feat-title">ONE DASHBOARD</div>
-              <div className="lp-feat-desc">Every agent, every position, every P&amp;L — in one place.</div>
-            </div>
-
-            <div className="lp-feat">
-              <div className="lp-feat-title">SPORTS ONLY</div>
-              <div className="lp-feat-desc">Football, NBA, NFL. Built for sports, not for everything.</div>
-            </div>
-
-            <div className="lp-feat lp-feat-soon">
-              <div className="lp-feat-title">COMING SOON</div>
-              <div className="lp-feat-desc">Agent marketplace &amp; API access.</div>
+            <div className="lp-faq-item">
+              <div className="lp-faq-q">Will this make me money?</div>
+              <div className="lp-faq-a">
+                We can&apos;t promise that, and anyone who does is lying to you. Most
+                betting ideas turn out to be worth nothing — that is exactly the point of
+                testing them. What we promise is an honest answer, fast.
+              </div>
             </div>
 
           </div>
         </div>
       </section>
 
-      {/* ── 7 · FOOTER CTA ── */}
+      {/* ── 3 · FOOTER CTA ── */}
       <section className="lp-section lp-section-cta">
         <div className="lp-wrap" style={{ textAlign: 'center' }}>
           <div className="lp-section-eyebrow">// EARLY ACCESS</div>
           <h2 className="lp-h2">Stop betting on vibes.</h2>
           <p className="lp-sub" style={{ marginBottom: 32 }}>
-            Join the waitlist for early access, beta invites, and priority onboarding.
-            Your first hypothesis is waiting to be tested.
+            Join the waitlist for early access — and bring the betting idea you&apos;ve
+            never been able to check.
           </p>
           <div className="lp-cta-row">
             <a href="#waitlist" className="lp-btn-primary">JOIN THE WAITLIST ↑</a>
@@ -441,14 +433,19 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── 8 · FOOTER ── */}
+      {/* ── 4 · FOOTER ── */}
       <footer className="lp-section" style={{ padding: '40px 0' }}>
         <div className="lp-wrap" style={{ textAlign: 'center' }}>
           <div className="lp-footer-links">
-            <a href={X_URL} target="_blank" rel="noopener noreferrer">FOLLOW US ON X FOR UPDATES</a>
+            <a href="/dashboard">LIVE TRACK RECORD</a>
+            <a href="#waitlist">JOIN THE WAITLIST</a>
           </div>
           <div className="lp-footer-legal">
-            NOPREDICTIONS.COM — BUILDING THE FUTURE OF AI AGENTS IN SPORTS PREDICTION MARKETS
+            NOPREDICTIONS.COM — AI AGENTS THAT TEST AND PLACE SPORTS BETS ON PREDICTION MARKETS
+          </div>
+          <div className="lp-footer-legal lp-footer-disclaimer">
+            18+ ONLY · NOT FINANCIAL OR BETTING ADVICE · PAST RESULTS DO NOT PREDICT
+            FUTURE RESULTS · NEVER STAKE MONEY YOU CANNOT AFFORD TO LOSE
           </div>
         </div>
       </footer>

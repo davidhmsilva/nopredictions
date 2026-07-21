@@ -1134,7 +1134,7 @@ button { font-family: var(--font); }
 }
 
 /* ── Hero ── */
-.lp-hero { padding: 96px 0 80px; text-align: center; }
+.lp-hero { padding: 72px 0 80px; text-align: center; }
 .lp-eyebrow {
   font-size: 11px;
   letter-spacing: 4px;
@@ -1415,6 +1415,40 @@ button { font-family: var(--font); }
   letter-spacing: 2px;
   color: #444;
 }
+.lp-footer-disclaimer {
+  margin-top: 12px;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.9;
+}
+
+/* ── FAQ ── */
+.lp-faq {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+}
+.lp-faq-item {
+  background: var(--bg);
+  padding: 28px;
+  transition: background 0.15s;
+}
+.lp-faq-item:hover { background: #0e120f; }
+.lp-faq-q {
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  color: var(--white);
+  margin-bottom: 12px;
+}
+.lp-faq-a {
+  font-size: 13px;
+  color: var(--grey);
+  line-height: 1.8;
+}
 
 /* ── Colours ── */
 .lp-green { color: var(--green) !important; }
@@ -1458,7 +1492,9 @@ button { font-family: var(--font); }
 .lp-body-link { color: var(--accent); text-decoration: none; }
 .lp-body-link:hover { text-decoration: underline; }
 
-/* Hero: mobile = single column, ordered (headline → terminal → form → text) */
+/* Hero: one centred column at every width. The terminal is the proof, not the
+   pitch — beside the headline it competed for the eye and its edges lined up
+   with nothing, so it sits underneath, full width, sized to its content. */
 .lp-hero-grid {
   display: flex;
   flex-direction: column;
@@ -1467,36 +1503,18 @@ button { font-family: var(--font); }
 }
 .lp-ha-eyebrow { order: 1; }
 .lp-ha-title   { order: 2; }
-.lp-ha-term    { order: 3; width: 100%; margin-bottom: 28px; }
 .lp-ha-form    { order: 4; width: 100%; }
 .lp-ha-note    { order: 5; }
 .lp-ha-sub     { order: 6; margin: 28px auto 0; }
-.lp-ha-term .lp-term { margin: 0; max-width: none; }
+.lp-ha-term    { order: 7; width: 100%; margin-top: 36px; }
+.lp-ha-term .lp-term { margin: 0 auto; max-width: 900px; }
 
-/* Hero: desktop = two columns (pitch left, terminal right) */
 @media (min-width: 960px) {
-  .lp-hero-grid {
-    display: grid;
-    grid-template-columns: 1.05fr 1fr;
-    grid-template-areas:
-      "eyebrow term"
-      "title   term"
-      "sub     term"
-      "form    term"
-      "note    term";
-    column-gap: 56px;
-    row-gap: 0;
-    align-items: start;
-    text-align: left;
-    max-width: 1160px;
-  }
-  .lp-ha-eyebrow { grid-area: eyebrow; order: 0; }
-  .lp-ha-title   { grid-area: title; order: 0; font-size: clamp(28px, 3.6vw, 46px); }
-  .lp-ha-sub     { grid-area: sub; order: 0; margin: 0 0 32px; max-width: 520px; }
-  .lp-ha-form    { grid-area: form; order: 0; }
-  .lp-ha-form .lp-form { margin: 0; }
-  .lp-ha-note    { grid-area: note; order: 0; }
-  .lp-ha-term    { grid-area: term; order: 0; margin: 0; align-self: center; }
+  .lp-hero-grid { max-width: 1000px; }
+  /* Wide enough to read the pitch before being asked for an email. */
+  .lp-ha-title { font-size: clamp(28px, 4.4vw, 52px); }
+  .lp-ha-sub   { order: 3; margin: 0 auto 34px; max-width: 640px; }
+  .lp-ha-term  { margin-top: 48px; }
 }
 
 /* Best calls (real top wins) */
@@ -1535,9 +1553,18 @@ button { font-family: var(--font); }
   letter-spacing: 1px;
   color: var(--grey);
 }
+.lp-wins-honest {
+  margin: 18px auto 0;
+  max-width: 600px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--grey);
+}
 @media (max-width: 768px) {
   .lp-wins { grid-template-columns: 1fr; }
   .lp-win-title { min-height: 0; }
+  .lp-faq { grid-template-columns: 1fr; }
 }
 
 /* Hero FX: radial glows + grid */
@@ -1597,8 +1624,9 @@ button { font-family: var(--font); }
 }
 .lp-term-dot { width: 10px; height: 10px; border-radius: 50%; background: #262626; }
 .lp-term-title { margin-left: 10px; font-size: 9px; letter-spacing: 2px; color: var(--grey); }
-/* Fixed height so the page doesn't reflow as lines type in.
-   Mobile wraps more (longer lines) → taller; desktop overrides below. */
+/* Fixed height so the page doesn't reflow as lines type in — but only just
+   enough for the longest scenario, or the box reads as empty while it types.
+   Narrow screens wrap every line, so they need roughly half again as much. */
 .lp-term-body {
   padding: 18px 18px 16px;
   height: 310px;
@@ -1606,8 +1634,8 @@ button { font-family: var(--font); }
   font-size: 12px;
   line-height: 2;
 }
-@media (min-width: 960px) {
-  .lp-term-body { height: 240px; }
+@media (min-width: 600px) {
+  .lp-term-body { height: 208px; }
 }
 .lp-term-line { white-space: pre-wrap; word-break: break-word; }
 .lp-term-prompt { color: var(--accent); }
@@ -1741,4 +1769,95 @@ button { font-family: var(--font); }
 @media (max-width: 768px) {
   .lp-feat-grid { grid-template-columns: 1fr; }
   .lp-metrics-3 { grid-template-columns: 1fr; }
+}
+
+/* ── /test — hypothesis tester (backtest MVP) ─────────────────────────────── */
+
+.bt-root { min-height: 100vh; }
+.bt-wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+.bt-term { max-width: none; margin: 0 0 16px; }
+.bt-term-body { height: auto; min-height: 150px; max-height: 320px; overflow-y: auto; }
+.bt-form { display: flex; gap: 10px; margin-bottom: 14px; }
+.bt-input { flex: 1; min-width: 0; }
+.bt-submit { white-space: nowrap; }
+.bt-examples { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 28px; }
+.bt-chip {
+  background: var(--bg2); border: 1px solid var(--border); color: var(--grey);
+  font-family: inherit; font-size: 11px; padding: 6px 10px; cursor: pointer;
+  letter-spacing: 0.4px;
+}
+.bt-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--white); }
+.bt-chip:disabled { opacity: 0.4; cursor: default; }
+
+.bt-panel {
+  border: 1px solid var(--border); background: var(--bg2);
+  padding: 24px; margin-bottom: 24px;
+}
+.bt-verdict {
+  font-size: 15px; font-weight: 700; letter-spacing: 2px; margin-bottom: 10px;
+}
+.bt-verdict-ok { color: var(--green); }
+.bt-verdict-warn { color: #f0a030; }
+.bt-verdict-bad { color: #e05555; }
+.bt-text { color: var(--grey); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+.bt-interp { color: var(--white); }
+.bt-label {
+  font-size: 9px; letter-spacing: 2px; color: var(--grey); margin-bottom: 6px;
+  border-top: 1px solid var(--border); padding-top: 14px;
+}
+.bt-suggestion .bt-text { margin-bottom: 12px; }
+
+.bt-metrics {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--border); border: 1px solid var(--border); margin: 16px 0;
+}
+.bt-metric { background: var(--bg); padding: 14px 12px; }
+.bt-metric-v { font-size: 18px; font-weight: 700; color: var(--white); }
+.bt-metric-k { font-size: 8px; letter-spacing: 1.2px; color: var(--grey); margin-top: 4px; }
+.bt-pos { color: var(--green) !important; }
+.bt-neg { color: #e05555 !important; }
+
+.bt-chart { border: 1px solid var(--border); background: var(--bg); padding: 12px; margin: 16px 0; }
+.bt-chart-head, .bt-chart-foot {
+  display: flex; justify-content: space-between; font-size: 9px;
+  letter-spacing: 1.5px; color: var(--grey);
+}
+.bt-chart-head { margin-bottom: 8px; }
+.bt-chart-foot { margin-top: 6px; }
+.bt-chart-svg { width: 100%; height: 160px; display: block; }
+.bt-chart-zero { stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 4; }
+.bt-chart-line { fill: none; stroke-width: 1.5; }
+.bt-chart-line-pos { stroke: var(--green); }
+.bt-chart-line-neg { stroke: #e05555; }
+
+.bt-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.bt-table th {
+  text-align: left; font-size: 9px; letter-spacing: 1.5px; color: var(--grey);
+  padding: 6px 8px; border-bottom: 1px solid var(--border); font-weight: 400;
+}
+.bt-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--white); }
+
+.bt-caveats ul { margin: 4px 0 0 16px; }
+.bt-caveats li { color: var(--grey); font-size: 11px; line-height: 1.7; }
+
+.bt-foot {
+  text-align: center; font-size: 9px; letter-spacing: 1.5px; color: var(--grey);
+  line-height: 1.8;
+}
+
+@media (max-width: 640px) {
+  .bt-metrics { grid-template-columns: repeat(2, 1fr); }
+  .bt-form { flex-direction: column; }
+}
+
+/* ── Reduced motion: stop the marquee and the blinking cursors ─────────────
+   The ticker scrolls forever and three separate cursors blink; for users who
+   ask the OS for less motion that is a lot of unnecessary movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-inner { animation: none; transform: none; }
+  .ticker-bar { overflow-x: auto; }
+  .lp-live-dot,
+  .lp-h1-cursor,
+  .lp-term-cursor { animation: none; }
+  * { scroll-behavior: auto !important; }
 }
