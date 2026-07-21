@@ -1505,8 +1505,10 @@ button { font-family: var(--font); }
 .lp-ha-title   { order: 2; }
 .lp-ha-form    { order: 4; width: 100%; }
 .lp-ha-note    { order: 5; }
-.lp-ha-sub     { order: 6; margin: 28px auto 0; }
-.lp-ha-term    { order: 7; width: 100%; margin-top: 36px; }
+/* Narrow: terminal sits above the explanatory paragraph. Desktop moves the
+   paragraph up to order 3, which leaves the terminal last there. */
+.lp-ha-term    { order: 6; width: 100%; margin-top: 36px; }
+.lp-ha-sub     { order: 7; margin: 28px auto 0; }
 .lp-ha-term .lp-term { margin: 0 auto; max-width: 900px; }
 
 @media (min-width: 960px) {
@@ -1744,6 +1746,32 @@ button { font-family: var(--font); }
   letter-spacing: 1px;
   color: var(--red);
   text-align: center;
+  line-height: 1.6;
+}
+.lp-form-hint {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--grey);
+  text-align: center;
+  line-height: 1.6;
+}
+.lp-form-fix {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+/* Honeypot: kept off-screen instead of display:none, which bots skip over. */
+.lp-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
 }
 .lp-form-success {
   max-width: 440px;

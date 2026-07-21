@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { supabase, fetchPaperTrades, type PaperTrade } from './lib/supabase'
 
 // ── Live ticker (real positions from the agent) ─────────────────────────────
@@ -217,24 +217,88 @@ function BestCalls() {
 
 // ── Waitlist form ────────────────────────────────────────────────────────────
 
-type FormStatus = 'idle' | 'submitting' | 'success' | 'duplicate' | 'error'
+type FormStatus =
+  | 'idle' | 'submitting' | 'success' | 'duplicate'
+  | 'invalid' | 'disposable' | 'rate-limited' | 'error'
+
+// Stricter than the browser's type="email", which happily accepts "a@b".
+// Mirrors the CHECK constraint in db/027 so a bad address is caught here
+// instead of coming back as a database error.
+const EMAIL_RE =
+  /^[A-Za-z0-9._%+-]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}$/
+
+const DOMAIN_TYPOS: Record<string, string> = {
+  'gmial.com': 'gmail.com', 'gmai.com': 'gmail.com', 'gmail.co': 'gmail.com',
+  'gmail.con': 'gmail.com', 'gnail.com': 'gmail.com', 'gamil.com': 'gmail.com',
+  'hotmial.com': 'hotmail.com', 'hotmai.com': 'hotmail.com', 'hotmail.co': 'hotmail.com',
+  'outlok.com': 'outlook.com', 'outloo.com': 'outlook.com', 'outlook.co': 'outlook.com',
+  'yahooo.com': 'yahoo.com', 'yaho.com': 'yahoo.com', 'yahoo.co': 'yahoo.com',
+  'iclod.com': 'icloud.com', 'icloud.co': 'icloud.com', 'sapo.p': 'sapo.pt',
+}
+
+function typoFix(email: string): string | null {
+  const at = email.lastIndexOf('@')
+  if (at < 1) return null
+  const fixed = DOMAIN_TYPOS[email.slice(at + 1)]
+  return fixed ? `${email.slice(0, at)}@${fixed}` : null
+}
+
+const MESSAGES: Partial<Record<FormStatus, string>> = {
+  invalid: "That doesn't look like an email address. Check it and try again.",
+  disposable: 'Please use an inbox you actually read — we block throwaway addresses.',
+  'rate-limited': "That's a few signups from this connection already. Try again later.",
+  error: 'Something went wrong. Please try again.',
+}
 
 function WaitlistForm() {
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<FormStatus>('idle')
+  const [suggestion, setSuggestion] = useState<string | null>(null)
+  const honeypot = useRef<HTMLInputElement>(null)
+  const shownAt = useRef(Date.now())
+
+  async function submit(address: string) {
+    setStatus('submitting')
+    setSuggestion(null)
+
+    const { error } = await supabase.from('waitlist_signups').insert({ email: address })
+
+    if (!error) setStatus('success')
+    else if (error.code === '23505') setStatus('duplicate')
+    else if (error.message?.includes('waitlist_disposable_domain')) setStatus('disposable')
+    else if (error.message?.includes('waitlist_rate_limited')) setStatus('rate-limited')
+    else if (error.code === '23514') setStatus('invalid')
+    else setStatus('error')
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (status === 'submitting') return
-    setStatus('submitting')
 
-    const { error } = await supabase.from('waitlist_signups').insert({
-      email: email.trim().toLowerCase(),
-    })
+    // A bot fills every field it finds, including the one no human can see, and
+    // submits the moment the DOM is ready. Humans do neither. Both get the
+    // success screen so the bot has nothing to learn from.
+    if (honeypot.current?.value || Date.now() - shownAt.current < 2500) {
+      setStatus('success')
+      return
+    }
 
-    if (!error) setStatus('success')
-    else if (error.code === '23505') setStatus('duplicate')
-    else setStatus('error')
+    const clean = email.trim().toLowerCase()
+    if (!EMAIL_RE.test(clean) || clean.length < 6 || clean.length > 254 || clean.includes('..')) {
+      setSuggestion(null)
+      setStatus('invalid')
+      return
+    }
+
+    // Offer the fix once; submitting again keeps whatever they typed.
+    const fix = typoFix(clean)
+    if (fix && fix !== suggestion) {
+      setSuggestion(fix)
+      setStatus('idle')
+      return
+    }
+
+    await submit(clean)
   }
 
   if (status === 'success' || status === 'duplicate') {
@@ -252,6 +316,18 @@ function WaitlistForm() {
 
   return (
     <form className="lp-form" onSubmit={handleSubmit}>
+      {/* Honeypot: off-screen rather than display:none, which bots skip. */}
+      <div className="lp-hp" aria-hidden="true">
+        <label htmlFor="lp-company">Company — leave this empty</label>
+        <input
+          id="lp-company"
+          name="company"
+          type="text"
+          ref={honeypot}
+          tabIndex={-1}
+          autoComplete="off"
+        />
+      </div>
       <div className="lp-form-row">
         <input
           type="email"
@@ -259,8 +335,12 @@ function WaitlistForm() {
           className="lp-input"
           placeholder="EMAIL ADDRESS"
           value={email}
-          onChange={e => setEmail(e.target.value)}
+          onChange={e => {
+            setEmail(e.target.value)
+            if (status === 'invalid' || status === 'disposable') setStatus('idle')
+          }}
           aria-label="Email address"
+          aria-invalid={status === 'invalid' || status === 'disposable'}
           autoComplete="email"
           inputMode="email"
           spellCheck={false}
@@ -271,9 +351,20 @@ function WaitlistForm() {
         </button>
       </div>
       <div role="status" aria-live="polite">
-        {status === 'error' && (
-          <div className="lp-form-error">Something went wrong. Please try again.</div>
+        {suggestion && (
+          <div className="lp-form-hint">
+            Did you mean{' '}
+            <button
+              type="button"
+              className="lp-form-fix"
+              onClick={() => { setEmail(suggestion); setSuggestion(null); submit(suggestion) }}
+            >
+              {suggestion}
+            </button>
+            ? Otherwise just press join again.
+          </div>
         )}
+        {MESSAGES[status] && <div className="lp-form-error">{MESSAGES[status]}</div>}
       </div>
       <div className="lp-form-note">
         We&apos;ll only email you when we have meaningful updates. No spam.
