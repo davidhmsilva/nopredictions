@@ -13,6 +13,11 @@ __pycache__/
 .env.save
 .env.local
 .env.production.local
+# timestamped backups written by the key-rotation scripts — these carry
+# DATABASE_URL and POLYMARKET_PRIVATE_KEY, so match them broadly
+.env.bak*
+.env.*.bak
+.env.backup*
 
 # Cache
 .cache/
@@ -44,3 +49,4 @@ agent/node_modules/
 # Wallet bootstrap scripts (contain private-key handling)
 ingest/gen_pm_wallet.py
 ingest/add_pm_key.sh
+.vercel
