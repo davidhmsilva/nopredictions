@@ -45,6 +45,11 @@ agent/package.json
 agent/package-lock.json
 agent/node_modules/
 .claude/scheduled_tasks.lock
+# Claude Code worktrees. These were tracked as gitlinks, which left six full
+# checkouts of old code sharing the production DATABASE_URL — a stale resolver
+# run from any of them reintroduced the NET-style payout bug twice. See
+# db/025_payout_units_gross_guard.sql.
+.claude/worktrees/
 
 # Wallet bootstrap scripts (contain private-key handling)
 ingest/gen_pm_wallet.py
