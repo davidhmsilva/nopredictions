@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# NOPREDICTIONS — In-play Poisson daemon v3
-# Polls Polymarket in-play markets every 10 minutes for ~2 hours.
+# NOPREDICTIONS — In-play Poisson daemon v4 (continuous)
+# Polls Polymarket in-play markets every 10 minutes, 24/7.
+# Hourly cron retries if the process is dead; lockfile prevents overlap.
 # Features: DC model lambdas, aggressive trailing push, spread tracking,
-# live odds consensus (Pinnacle/Betfair), line movement detection.
-# Intended to be called by cron during match windows.
+# live odds consensus (Pinnacle/Betfair), line movement detection, Filter G live gate.
 
 set -euo pipefail
 
@@ -23,10 +23,10 @@ cd "$WORKDIR"
 echo $$ > "$LOCKFILE"
 trap 'rm -f "$LOCKFILE"' EXIT
 
-# 10-min polling: 12 cycles = 120 min (2 hours)
-# With live odds consensus + line movement detection
+# Continuous mode: 10-min polling, effectively forever (99999 cycles × 600s ≈ 70 days).
+# Hourly cron + lockfile = restart within ≤1h if process crashes.
 "$PYTHON" agent/run.py \
     --strategy poisson \
-    --cycles 12 \
+    --cycles 99999 \
     --interval 600 \
     >> "$LOGFILE" 2>&1

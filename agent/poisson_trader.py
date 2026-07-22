@@ -47,12 +47,24 @@ INPLAY_EDGE_THRESHOLD_PP = 5.0
 MAX_GOALS = 8
 WHALE_VOLUME_USDC = 10000  # threshold for significant whale activity
 
-# ─── Live filter (Filter F from backtest, n=58, yield=+74.5%) ────────────────
-# Only these outcome keys qualify for real-money execution.
-LIVE_POISSON_OUTCOMES: frozenset[str] = frozenset({'draw', 'btts'})
-# Skip the 8-12pp dead zone: -28.9% yield on n=35 in backtest.
-# Keep <8pp (+18.1%) and >=12pp (+48.1%).
+# ─── Live filter (Filter G — n=195 settled audit on 2026-06-10) ──────────────
+# Replaces Filter F. Audit by market × entry-price bucket:
+#   BTTS  ≥0.30  → n=26, 17W-9L, +13.08u, +50% ROI  → LIVE
+#   TOTALS ≥0.50 → n=30, 25W-5L, +9.61u, +32% ROI   → LIVE
+#   MONEYLINE ≥0.50 → n=15, 12W-3L, +1.99u, +13% ROI → LIVE
+#   DRAW (all)   → +59% ROI but driven by jackpot longshots (n=2 of n=48
+#                  carry +25u; removing them → flat) → PAPER only
+#   ANY entry <0.10 → 1W-25L, -8.14u (catastrophic, MONEYLINE <0.10 = 0W-16L) → BLOCK
+#   Spreads      → no data → PAPER only
+LIVE_MIN_PRICE_BTTS      = float(os.environ.get('POISSON_LIVE_MIN_PRICE_BTTS', '0.30'))
+LIVE_MIN_PRICE_TOTALS    = float(os.environ.get('POISSON_LIVE_MIN_PRICE_TOTALS', '0.50'))
+LIVE_MIN_PRICE_MONEYLINE = float(os.environ.get('POISSON_LIVE_MIN_PRICE_ML', '0.50'))
+LIVE_HARD_BLOCK_BELOW    = float(os.environ.get('POISSON_BLOCK_BELOW', '0.10'))
+# Dead-zone carry-over from Filter F (kept as extra safety belt).
 LIVE_POISSON_DEAD_ZONE = (8.0, 12.0)  # (inclusive, exclusive) in pp
+
+_LIVE_MONEYLINE_KEYS = frozenset({'home', 'away'})
+_LIVE_TOTALS_KEYS    = frozenset({'over_1_5', 'over_2_5', 'under_1_5', 'under_2_5'})
 
 # ─── DC model loader ────────────────────────────────────────────────────────
 
@@ -624,17 +636,37 @@ def _pm_yes_token(mkt: dict) -> str | None:
     return str(ids[0])
 
 
-def _is_live_eligible(outcome_key: str, edge_pp: float) -> bool:
+def _live_block_reason(outcome_key: str, edge_pp: float, yes_price: float) -> str | None:
     """
-    Filter F: Draw+BTTS only, skip the 8-12pp dead zone.
-    Backtest: n=58, yield=+74.5% vs +21.6% baseline.
+    Filter G: live-eligibility gate based on market × entry-price audit (n=195).
+    Returns None if eligible, else a short reason string.
     """
-    if outcome_key not in LIVE_POISSON_OUTCOMES:
-        return False
+    if yes_price is None:
+        return 'no price'
+    if yes_price < LIVE_HARD_BLOCK_BELOW:
+        return f'price<{LIVE_HARD_BLOCK_BELOW:.2f} (extreme longshot bucket = 1W-25L)'
     lo, hi = LIVE_POISSON_DEAD_ZONE
     if lo <= edge_pp < hi:
-        return False
-    return True
+        return f'dead zone ({lo}-{hi}pp)'
+    if outcome_key == 'btts':
+        if yes_price < LIVE_MIN_PRICE_BTTS:
+            return f'BTTS price<{LIVE_MIN_PRICE_BTTS:.2f}'
+        return None
+    if outcome_key in _LIVE_TOTALS_KEYS:
+        if yes_price < LIVE_MIN_PRICE_TOTALS:
+            return f'TOTALS price<{LIVE_MIN_PRICE_TOTALS:.2f}'
+        return None
+    if outcome_key in _LIVE_MONEYLINE_KEYS:
+        if yes_price < LIVE_MIN_PRICE_MONEYLINE:
+            return f'MONEYLINE price<{LIVE_MIN_PRICE_MONEYLINE:.2f}'
+        return None
+    if outcome_key == 'draw':
+        return 'DRAW paper-only (yield driven by jackpot longshots)'
+    return f'market type not whitelisted ({outcome_key})'
+
+
+def _is_live_eligible(outcome_key: str, edge_pp: float, yes_price: float = None) -> bool:
+    return _live_block_reason(outcome_key, edge_pp, yes_price) is None
 
 
 def _get_or_create_poisson_strategy(conn) -> int:
@@ -1147,31 +1179,30 @@ def run(dry_run: bool = False, tracker: Any = None) -> list[dict]:
                     log.info(f'     → Paper trade #{trade_id} logged ✅')
                     trade_info['trade_id'] = trade_id
 
-                    # Live execution — Filter F gate
-                    if os.getenv('PM_LIVE_MODE') == '1' and _is_live_eligible(outcome_key, edge_pp):
-                        try:
-                            from . import live_executor as _le
-                            yes_tok = _pm_yes_token(mkt)
-                            if yes_tok:
-                                log.info(f'     → Live eligible (Draw/BTTS, edge {edge_pp:.1f}pp) — submitting…')
-                                lr = _le.try_execute(
-                                    conn, trade_id=trade_id,
-                                    token_id=yes_tok, side='BUY', price=yes_price,
-                                    ask=mkt.get('bestAsk'),
-                                    fair_prob=fair_prob,
-                                    home=home, away=away,
-                                    outcome_key=outcome_key,
-                                )
-                                log.info(f'     → Live: status={lr.pm_order_status} order={lr.pm_order_id}')
-                            else:
-                                log.warning(f'     → Live skipped: no clobTokenIds in market')
-                        except Exception as _le_err:
-                            log.warning(f'     → Live exec failed (non-fatal): {_le_err}')
-                    elif os.getenv('PM_LIVE_MODE') == '1':
-                        lo, hi = LIVE_POISSON_DEAD_ZONE
-                        reason = ('not Draw/BTTS' if outcome_key not in LIVE_POISSON_OUTCOMES
-                                  else f'dead zone ({lo}-{hi}pp)')
-                        log.info(f'     → Live skipped: {reason}')
+                    # Live execution — Filter G gate (n=195 audit)
+                    if os.getenv('PM_LIVE_MODE') == '1':
+                        block_reason = _live_block_reason(outcome_key, edge_pp, yes_price)
+                        if block_reason is None:
+                            try:
+                                from . import live_executor as _le
+                                yes_tok = _pm_yes_token(mkt)
+                                if yes_tok:
+                                    log.info(f'     → Live eligible ({outcome_key} @ {yes_price:.2f}, edge {edge_pp:.1f}pp) — submitting…')
+                                    lr = _le.try_execute(
+                                        conn, trade_id=trade_id,
+                                        token_id=yes_tok, side='BUY', price=yes_price,
+                                        ask=mkt.get('bestAsk'),
+                                        fair_prob=fair_prob,
+                                        home=home, away=away,
+                                        outcome_key=outcome_key,
+                                    )
+                                    log.info(f'     → Live: status={lr.pm_order_status} order={lr.pm_order_id}')
+                                else:
+                                    log.warning(f'     → Live skipped: no clobTokenIds in market')
+                            except Exception as _le_err:
+                                log.warning(f'     → Live exec failed (non-fatal): {_le_err}')
+                        else:
+                            log.info(f'     → Live skipped: {block_reason}')
                 else:
                     log.info(f'     → Skipped (duplicate within 30 min)')
 
