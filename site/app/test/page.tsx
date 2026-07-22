@@ -1,0 +1,416 @@
+'use client'
+
+import { useRef, useState, type FormEvent } from 'react'
+
+import { isNbaMarket } from '../lib/backtest'
+
+// ── types mirrored from the API route ───────────────────────────────────────
+
+interface Stats {
+  n: number
+  wins: number
+  pushes?: number
+  hitRatePct: number
+  avgOdds: number | null
+  pnl: number
+  yieldPct: number
+  ci95Pct: number
+  pValue: number | null
+  clvPct: number | null
+  yieldOpenPct: number | null
+  nOpen: number
+  maxDrawdown: number
+  firstMatch: string | null
+  lastMatch: string | null
+}
+
+interface Verdict {
+  code: string
+  label: string
+  detail: string
+}
+
+interface SeasonRow {
+  season: number
+  n: number
+  wins: number
+  pnl: number
+}
+
+interface MonthRow {
+  month: string
+  n: number
+  pnl: number
+}
+
+interface ApiResult {
+  ok: boolean
+  error?: string
+  supported?: boolean
+  reason?: string
+  suggestion?: string | null
+  interpretation?: string | null
+  spec?: { market?: string }
+  verdict?: Verdict
+  stats?: Stats
+  seasons?: SeasonRow[]
+  monthly?: MonthRow[]
+  caveats?: string[]
+}
+
+const EXAMPLES = [
+  'Draws are underpriced in Serie B',
+  'Home favorites below 1.50 are free money in the Premier League',
+  'Back over 2.5 goals when both teams have been in high-scoring games',
+  'Away underdogs on short rest collapse in the Championship',
+  'Teams in terrible form bounce back at home in La Liga',
+]
+
+// ── equity curve ─────────────────────────────────────────────────────────────
+
+function EquityCurve({ monthly }: { monthly: MonthRow[] }) {
+  if (monthly.length < 2) return null
+  const W = 640
+  const H = 180
+  const PAD = 8
+  let cum = 0
+  const pts = monthly.map(m => (cum += m.pnl))
+  const min = Math.min(0, ...pts)
+  const max = Math.max(0, ...pts)
+  const range = max - min || 1
+  const x = (i: number) => PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
+  const y = (v: number) => PAD + (1 - (v - min) / range) * (H - 2 * PAD)
+  const path = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  const zeroY = y(0)
+  const final = pts[pts.length - 1]
+
+  return (
+    <div className="bt-chart">
+      <div className="bt-chart-head">
+        <span>CUMULATIVE P&amp;L (UNITS, 1U FLAT)</span>
+        <span className={final >= 0 ? 'bt-pos' : 'bt-neg'}>
+          {final >= 0 ? '+' : ''}
+          {final.toFixed(1)}u
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="bt-chart-svg" preserveAspectRatio="none">
+        <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} className="bt-chart-zero" />
+        <path d={path} className={final >= 0 ? 'bt-chart-line bt-chart-line-pos' : 'bt-chart-line bt-chart-line-neg'} />
+      </svg>
+      <div className="bt-chart-foot">
+        <span>{monthly[0].month}</span>
+        <span>{monthly[monthly.length - 1].month}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── page ─────────────────────────────────────────────────────────────────────
+
+type Phase = 'idle' | 'running' | 'done'
+
+export default function TestPage() {
+  const [input, setInput] = useState('')
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [termLines, setTermLines] = useState<{ text: string; cls: string }[]>([])
+  const [result, setResult] = useState<ApiResult | null>(null)
+  const [, setLastHypothesis] = useState('')
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  function pushLine(text: string, cls = 'lp-term-dim') {
+    setTermLines(prev => [...prev, { text, cls }])
+  }
+
+  async function run(hypothesis: string) {
+    if (!hypothesis.trim() || phase === 'running') return
+    timers.current.forEach(clearTimeout)
+    timers.current = []
+    setResult(null)
+    setPhase('running')
+    setLastHypothesis(hypothesis)
+    setTermLines([{ text: `> test "${hypothesis}"`, cls: 'lp-term-cmd' }])
+    timers.current.push(setTimeout(() => pushLine('parsing hypothesis…'), 400))
+    timers.current.push(setTimeout(() => pushLine('translating to a testable spec…'), 2200))
+    timers.current.push(
+      setTimeout(
+        () => pushLine('scanning 111,475 games · 22 football leagues + NBA…'),
+        5200,
+      ),
+    )
+
+    try {
+      const res = await fetch('/api/backtest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hypothesis }),
+      })
+      const data: ApiResult = await res.json()
+      timers.current.forEach(clearTimeout)
+
+      if (!data.ok) {
+        pushLine(`✗ ERROR — ${data.error ?? 'something went wrong'}`, 'lp-term-warn')
+        setPhase('done')
+        return
+      }
+      if (!data.supported) {
+        pushLine('✗ NOT TESTABLE WITH CURRENT DATA', 'lp-term-warn')
+        setResult(data)
+        setPhase('done')
+        return
+      }
+      const s = data.stats!
+      // name the dataset that actually ran — the pre-flight line is a guess
+      pushLine(
+        isNbaMarket(data.spec?.market ?? '')
+          ? 'dataset   NBA · 10,006 games · 2014-15 → 2021-22 · consensus close'
+          : 'dataset   football · 101,469 matches · 2012-2026 · Pinnacle close',
+      )
+      pushLine(
+        `backtest   n=${s.n.toLocaleString('en-US')} · yield ${s.yieldPct >= 0 ? '+' : ''}${s.yieldPct.toFixed(2)}% · p=${s.pValue != null ? s.pValue.toFixed(3) : 'n/a'}${s.clvPct != null ? ` · CLV ${s.clvPct >= 0 ? '+' : ''}${s.clvPct.toFixed(2)}%` : ''}`,
+      )
+      const cls =
+        data.verdict!.code === 'EDGE_FOUND'
+          ? 'lp-term-ok'
+          : data.verdict!.code === 'INSUFFICIENT_SAMPLE' || data.verdict!.code === 'NO_MATCHES'
+            ? 'lp-term-warn'
+            : 'lp-term-warn'
+      pushLine(`${data.verdict!.code === 'EDGE_FOUND' ? '✓' : '✗'} ${data.verdict!.label}`, cls)
+      setResult(data)
+      setPhase('done')
+    } catch {
+      timers.current.forEach(clearTimeout)
+      pushLine('✗ ERROR — network or server failure', 'lp-term-warn')
+      setPhase('done')
+    }
+  }
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    run(input)
+  }
+
+  const s = result?.stats
+  const showResults = phase === 'done' && result?.ok && result.supported && s
+
+  return (
+    <div className="lp-root bt-root">
+      <nav className="lp-nav">
+        <div className="lp-brand">
+          <span className="lp-brand-title">NOPREDICTIONS</span>
+          <span className="lp-brand-sub">HYPOTHESIS TESTER · PRIVATE BETA</span>
+        </div>
+      </nav>
+
+      <main className="bt-wrap">
+        <div className="lp-term bt-term">
+          <div className="lp-term-head">
+            <span className="lp-term-dot" />
+            <span className="lp-term-dot" />
+            <span className="lp-term-dot" />
+            <span className="lp-term-title">NOPREDICTIONS AGENT — HYPOTHESIS TESTER</span>
+          </div>
+          <div className="lp-term-body bt-term-body">
+            {termLines.length === 0 && (
+              <div className="lp-term-line lp-term-dim">
+                Type a football or NBA betting theory in plain English. The agent backtests it
+                against 111,475 real games — 101,469 football matches (2012-2026, Pinnacle
+                closing odds) and 10,006 NBA games (2014-15 to 2021-22) — and tells you the truth.
+              </div>
+            )}
+            {termLines.map((l, i) => (
+              <div key={i} className={`lp-term-line ${l.cls}`}>
+                {l.text}
+              </div>
+            ))}
+            {phase === 'running' && (
+              <div className="lp-term-line lp-term-cmd">
+                <span className="lp-term-cursor" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <form className="bt-form" onSubmit={handleSubmit}>
+          <input
+            className="lp-input bt-input"
+            placeholder='e.g. "Draws are underpriced in Serie B"'
+            value={input}
+            maxLength={500}
+            onChange={e => setInput(e.target.value)}
+            disabled={phase === 'running'}
+            aria-label="Hypothesis"
+          />
+          <button type="submit" className="lp-btn-primary bt-submit" disabled={phase === 'running'}>
+            {phase === 'running' ? 'TESTING…' : 'TEST IT'}
+          </button>
+        </form>
+
+        <div className="bt-examples">
+          {EXAMPLES.map(ex => (
+            <button
+              key={ex}
+              type="button"
+              className="bt-chip"
+              disabled={phase === 'running'}
+              onClick={() => {
+                setInput(ex)
+                run(ex)
+              }}
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+
+        {/* not testable */}
+        {phase === 'done' && result?.ok && result.supported === false && (
+          <section className="bt-panel">
+            <div className="bt-verdict bt-verdict-warn">NOT TESTABLE — YET</div>
+            <p className="bt-text">{result.reason}</p>
+            {result.suggestion && (
+              <div className="bt-suggestion">
+                <div className="bt-label">CLOSEST TESTABLE THEORY</div>
+                <p className="bt-text">&ldquo;{result.suggestion}&rdquo;</p>
+                <button
+                  type="button"
+                  className="lp-btn-primary bt-submit"
+                  onClick={() => {
+                    setInput(result.suggestion!)
+                    run(result.suggestion!)
+                  }}
+                >
+                  TEST THAT INSTEAD
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* results */}
+        {showResults && (
+          <section className="bt-panel">
+            <div
+              className={`bt-verdict ${
+                result!.verdict!.code === 'EDGE_FOUND'
+                  ? 'bt-verdict-ok'
+                  : result!.verdict!.code === 'INSUFFICIENT_SAMPLE' || result!.verdict!.code === 'NO_MATCHES'
+                    ? 'bt-verdict-warn'
+                    : 'bt-verdict-bad'
+              }`}
+            >
+              {result!.verdict!.label}
+            </div>
+            <p className="bt-text">{result!.verdict!.detail}</p>
+
+            {result!.interpretation && (
+              <>
+                <div className="bt-label">WHAT WAS ACTUALLY TESTED</div>
+                <p className="bt-text bt-interp">{result!.interpretation}</p>
+              </>
+            )}
+
+            {s.n > 0 && (
+              <>
+                <div className="bt-metrics">
+                  <div className="bt-metric">
+                    <div className="bt-metric-v">{s.n.toLocaleString('en-US')}</div>
+                    <div className="bt-metric-k">SELECTIONS</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className="bt-metric-v">{s.hitRatePct.toFixed(1)}%</div>
+                    <div className="bt-metric-k">HIT RATE</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className="bt-metric-v">{s.avgOdds != null ? s.avgOdds.toFixed(2) : '—'}</div>
+                    <div className="bt-metric-k">AVG ODDS</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className={`bt-metric-v ${s.pnl >= 0 ? 'bt-pos' : 'bt-neg'}`}>
+                      {s.pnl >= 0 ? '+' : ''}
+                      {s.pnl.toFixed(1)}u
+                    </div>
+                    <div className="bt-metric-k">TOTAL P&amp;L</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className={`bt-metric-v ${s.yieldPct >= 0 ? 'bt-pos' : 'bt-neg'}`}>
+                      {s.yieldPct >= 0 ? '+' : ''}
+                      {s.yieldPct.toFixed(2)}%
+                    </div>
+                    <div className="bt-metric-k">YIELD ± {s.ci95Pct.toFixed(2)} (95% CI)</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className="bt-metric-v">{s.pValue != null ? s.pValue.toFixed(3) : '—'}</div>
+                    <div className="bt-metric-k">P-VALUE VS ZERO</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className={`bt-metric-v ${(s.clvPct ?? 0) >= 0 ? 'bt-pos' : 'bt-neg'}`}>
+                      {s.clvPct != null ? `${s.clvPct >= 0 ? '+' : ''}${s.clvPct.toFixed(2)}%` : '—'}
+                    </div>
+                    <div className="bt-metric-k">AVG CLV (OPEN→CLOSE)</div>
+                  </div>
+                  <div className="bt-metric">
+                    <div className="bt-metric-v bt-neg">-{s.maxDrawdown.toFixed(1)}u</div>
+                    <div className="bt-metric-k">MAX DRAWDOWN</div>
+                  </div>
+                </div>
+
+                <EquityCurve monthly={result!.monthly ?? []} />
+
+                {(result!.seasons?.length ?? 0) > 1 && (
+                  <div className="bt-seasons">
+                    <div className="bt-label">BY SEASON</div>
+                    <table className="bt-table">
+                      <thead>
+                        <tr>
+                          <th>SEASON</th>
+                          <th>N</th>
+                          <th>HIT</th>
+                          <th>P&amp;L</th>
+                          <th>YIELD</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result!.seasons!.map(r => (
+                          <tr key={r.season}>
+                            <td>
+                              {r.season}-{String((r.season + 1) % 100).padStart(2, '0')}
+                            </td>
+                            <td>{r.n.toLocaleString('en-US')}</td>
+                            <td>{((r.wins / r.n) * 100).toFixed(0)}%</td>
+                            <td className={r.pnl >= 0 ? 'bt-pos' : 'bt-neg'}>
+                              {r.pnl >= 0 ? '+' : ''}
+                              {r.pnl.toFixed(1)}u
+                            </td>
+                            <td className={r.pnl >= 0 ? 'bt-pos' : 'bt-neg'}>
+                              {((r.pnl / r.n) * 100).toFixed(1)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {(result!.caveats?.length ?? 0) > 0 && (
+              <div className="bt-caveats">
+                <div className="bt-label">HONESTY NOTES</div>
+                <ul>
+                  {result!.caveats!.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+        )}
+
+        <footer className="bt-foot">
+          BACKTESTS RUN AGAINST CLOSING ODDS — PINNACLE FOR FOOTBALL, CONSENSUS FOR THE NBA · FLAT
+          1U STAKES · MIN 200 SELECTIONS FOR A VERDICT · PAST RESULTS ≠ FUTURE EDGE
+        </footer>
+      </main>
+    </div>
+  )
+}
