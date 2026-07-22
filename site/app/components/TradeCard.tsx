@@ -92,6 +92,10 @@ export function TradeCard({ trade, live = false }: { trade: PaperTrade; live?: b
 
   const modelProb = Number(trade.model_probability) * 100
   const modelOdds = Number(trade.model_probability) > 0 ? (1 / Number(trade.model_probability)).toFixed(2) : '—'
+  // Some strategies are deliberately model-free — FLB is a pure price filter
+  // with no fair-value estimate. Rendering those as 0.0% / +0.0% reads as a
+  // broken number rather than "not applicable".
+  const hasModel = trade.model_probability != null && Number(trade.model_probability) > 0
 
   return (
     <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', padding: '24px', marginBottom: '16px' }}>
@@ -150,11 +154,15 @@ export function TradeCard({ trade, live = false }: { trade: PaperTrade; live?: b
         <div>
           <div style={{ fontSize: '10px', color: 'var(--accent)', letterSpacing: '2px', marginBottom: '6px' }}>OUR ODDS</div>
           <div style={{ fontSize: '20px' }}>{modelOdds}</div>
-          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>{modelProb.toFixed(1)}%</div>
+          <div style={{ fontSize: '10px', color: 'var(--grey)', marginTop: '2px' }}>
+            {hasModel ? `${modelProb.toFixed(1)}%` : 'no model'}
+          </div>
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>EDGE</div>
-          <div style={{ fontSize: '20px', color: 'var(--green)' }}>+{edgePp.toFixed(1)}%</div>
+          <div style={{ fontSize: '20px', color: hasModel ? 'var(--green)' : 'var(--grey)' }}>
+            {hasModel ? `+${edgePp.toFixed(1)}%` : '—'}
+          </div>
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>STAKE</div>
