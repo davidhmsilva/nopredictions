@@ -111,6 +111,9 @@ SIM_MARKETS = {
     "btts", "no_btts",
     # Half-time
     "ht_home_win", "ht_draw", "ht_away_win",
+    # Half-time totals (observation only — see DISABLED_GROUPS)
+    "ht_over_0_5", "ht_over_1_5", "ht_over_2_5",
+    "ht_under_0_5", "ht_under_1_5", "ht_under_2_5",
     # Handicap (yes side of "Spread: X (-N.5)")
     "home_wins_by_2plus", "home_wins_by_3plus",
     "away_wins_by_2plus", "away_wins_by_3plus",
@@ -126,6 +129,14 @@ MARKET_GROUP: dict[str, str] = {
 for _line in ("0_5", "1_5", "2_5", "3_5", "4_5", "5_5"):
     MARKET_GROUP[f"over_{_line}"] = "totals"
     MARKET_GROUP[f"under_{_line}"] = "totals"
+for _line in ("0_5", "1_5", "2_5"):
+    MARKET_GROUP[f"ht_over_{_line}"] = "ht_totals"
+    MARKET_GROUP[f"ht_under_{_line}"] = "ht_totals"
+
+# Groups that only describe the first half — in-play they are resolved once 1H
+# is over, and the sim's "current score == HT score" assumption stops holding.
+# ht_home_win sits in its own group, so an `== "halftime"` check would miss it.
+HALF_SCOPED_GROUPS: set[str] = {"halftime", "ht_home_win", "ht_totals"}
 
 # Market groups disabled based on P&L audit (2026-06-05, n=384):
 #   btts    −27.7%  (n=59)  — sim sobreestima golos
@@ -138,6 +149,11 @@ if os.environ.get("SIM_ENABLE_GOALS_MARKETS") != "1":
     DISABLED_GROUPS |= {"btts", "totals"}
 if os.environ.get("SIM_ENABLE_HT_HOME") != "1":
     DISABLED_GROUPS.add("ht_home_win")
+# Half-time totals are priced for the observation layer only — never bet.
+# The 236-match study (2026-07-21) says PM overprices the over ~4pp during 0-0,
+# but every CI crosses zero and book liquidity is ~$900. Observe first.
+if os.environ.get("SIM_ENABLE_HT_TOTALS") != "1":
+    DISABLED_GROUPS.add("ht_totals")
 
 # Edge cap: above 15pp the model is likely overconfident (wrong team match, women's game,
 # etc.). P&L audit: 20pp+ yield = −76% (n=29). Below 5pp is noise (−46%, n=71).
@@ -421,6 +437,24 @@ _RE_SPREAD = re.compile(
     r"spread:\s*(.+?)\s*\(\s*[-−]\s*(\d+(?:\.\d+)?)\s*\)", re.I
 )
 _RE_WIN_BY = re.compile(r"win\s+by\s+(\d+)\s*(?:\+|or\s+more)?", re.I)
+_RE_HALF_TAG = re.compile(r"\b(?:1st|2nd|first|second)\s+half\b|\bhalf[-\s]?time\b", re.I)
+
+
+def _totals_scope(question: str, ou_start: int) -> str:
+    """
+    Scope of an O/U market, read from the text between the title's last ':' and
+    the O/U token. PM is rigidly consistent here (checked over 955 live
+    questions): '' → whole match, '1st Half' / '2nd Half' → that half, anything
+    else → a team total.
+
+    This replaces a team-name-overlap heuristic that silently failed on short
+    club names ('Jeju SK FC'), letting team totals through as match totals.
+    """
+    pre = question[:ou_start].split(":")[-1]
+    is_half = bool(_RE_HALF_TAG.search(pre))
+    if _RE_HALF_TAG.sub(" ", pre).strip():
+        return "team"
+    return "half" if is_half else "match"
 
 
 def _team_match(question_norm: str, home_norm_words: set, away_norm_words: set) -> Optional[str]:
@@ -465,8 +499,32 @@ def _classify_market(
             return f"{side}_wins_by_3plus"
         return None  # other lines not priced
 
+    # ── Second-half markets — NOT priced by the sim (would be mispriced as
+    # full-match winner). Reject before the half-time / ML branches.
+    if any(p in q for p in ("second half", "2nd half")):
+        return None
+
     # ── Half-time markets ────────────────────────────────────────────
     if any(p in q for p in ("first half", "1st half", "halftime", "half-time", "half time")):
+        # Half totals ("…: 1st Half O/U 0.5") live in the -more-markets sub-event
+        # and must be read as totals, not as the half-time 1X2. Team-qualified
+        # variants ("…: Jeju SK FC 1st Half O/U 0.5") are not priced.
+        hm = _RE_OVER_UNDER.search(q)
+        if hm:
+            if _totals_scope(q, hm.start()) != "half":
+                return None
+            raw_side = hm.group(1).lower()
+            side = "over" if raw_side in ("o/u", "ou") else raw_side
+            line = hm.group(2)
+            if "." not in line:
+                line = line + ".5"
+            key = f"ht_{side}_{line.replace('.', '_')}"
+            return key if key in SIM_MARKETS else None
+        # "Both Teams to Score in First Half" is its own market, not the HT 1X2.
+        # Reject before the team-name match below, which would read the trailing
+        # team name out of the title prefix and call it ht_away_win.
+        if "both teams" in q and "score" in q:
+            return None
         if "draw" in q:
             return "ht_draw"
         side = _team_match(_norm(q), h_words, a_words)
@@ -491,10 +549,7 @@ def _classify_market(
     if m:
         # Qualified totals are NOT the full-match total: team totals
         # ("…: Mexico O/U 1.5") and half totals ("…: 2nd Half O/U 0.5").
-        # The qualifier sits between the title prefix ("Home vs. Away:")
-        # and the O/U token.
-        pre = q[: m.start()].split(":")[-1]
-        if "half" in pre or _team_match(_norm(pre), h_words, a_words):
+        if _totals_scope(q, m.start()) != "match":
             return None
         raw_side = m.group(1).lower()
         # YES of "O/U N.M" = over. Treat both o/u and ou as over.

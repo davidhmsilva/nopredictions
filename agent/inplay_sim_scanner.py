@@ -49,6 +49,7 @@ from sim_scanner import (  # noqa: E402
     _extract_teams,
     _upsert_pm_market,
     MARKET_GROUP,
+    HALF_SCOPED_GROUPS,
     _group_outcomes,
     _SKIP_EVENT_TITLE,
 )
@@ -547,7 +548,7 @@ def run(
                     # valid up to minute 46. Skip past that to avoid false edges
                     # from pre-match PM prices that haven't been locked.
                     if (
-                        MARKET_GROUP.get(outcome_key) == "halftime"
+                        MARKET_GROUP.get(outcome_key) in HALF_SCOPED_GROUPS
                         and minute >= 47
                     ):
                         continue

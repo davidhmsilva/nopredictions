@@ -245,7 +245,7 @@ def collect_live() -> list[dict]:
                     continue
                 # Halftime markets are stale once 1H is over (sim assumes
                 # current score == HT score, only valid to ~minute 46).
-                if ss.MARKET_GROUP.get(outcome_key) == "halftime" and ls["minute"] >= 47:
+                if ss.MARKET_GROUP.get(outcome_key) in ss.HALF_SCOPED_GROUPS and ls["minute"] >= 47:
                     continue
                 model_prob = float(sim_p[outcome_key])
                 rows.append({

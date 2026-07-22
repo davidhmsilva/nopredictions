@@ -86,6 +86,14 @@ def price_markets(result: SimResult, top_k_scores: int = 6) -> Dict[str, Any]:
     out["ht_draw"] = float((ht_diff == 0).mean())
     out["ht_away_win"] = float((ht_diff < 0).mean())
 
+    # ── Half-time totals ─────────────────────────────────────────────
+    ht_total = ht_h + ht_a
+    for line in (0, 1, 2):
+        p_over = float((ht_total > line).mean())
+        out[f"ht_over_{line}_5"] = p_over
+        out[f"ht_under_{line}_5"] = 1.0 - p_over
+    out["exp_ht_goals"] = float(ht_total.mean())
+
     # ── HT/FT 3×3 grid ───────────────────────────────────────────────
     ht_res = np.where(ht_diff > 0, 1, np.where(ht_diff < 0, 2, 0))
     ft_res = np.where(diff > 0, 1, np.where(diff < 0, 2, 0))
