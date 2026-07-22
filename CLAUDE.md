@@ -126,6 +126,8 @@ Schema is live. Key tables:
 | `matches` | One row per match with result (~124k rows) |
 | `match_stats` | xG, shots, corners, cards (~91k rows; 16k with xG) |
 | `match_odds` | Opening + closing odds (Pinnacle, Bet365, Betfair Exchange, etc.) |
+| `nba_odds` | NBA closing ML/spread/total, 2014-15→2021-22 (consensus, not Pinnacle) |
+| `bt_nba` | Flattened NBA backtest features — 10,006 games ✅ |
 | `research_hypotheses` | Legacy — hypothesis log from retired research pipeline |
 | `backtest_runs` | Legacy — backtest results |
 | `strategies` | Active trading strategies (Sharp Consensus, Poisson, ELO, DC, NBA Elo, Sim Pre-Match, Sim In-Play) |
@@ -195,6 +197,24 @@ Tables:
 - Polls live football matches every N minutes
 - Feeds the PM-vs-Poisson In-Play strategy
 - Requires `FOOTBALL_API_KEY` in `.env`
+
+### Stage H — NBA historical closing lines ✅ COMPLETE
+- **10,006 NBA games** with closing moneyline, spread and total (`nba_odds`, `bt_nba`)
+- Seasons **2014-15 → 2021-22 only** — the source archive is unmaintained and
+  the original host no longer serves the files, so the range cannot be extended
+- Source: `github.com/flancast90/sportsbookreview-scraper` (MIT), a pre-scraped
+  sportsbookreview.com archive. **Consensus close, not Pinnacle.**
+- Spread/total prices are not archived → backtests assume -110 (1.909)
+- No opening price → **no CLV arm for the NBA**
+- ~7.4% of source rows have spread/total swapped; the loader repairs them
+- Powers the NBA arm of the Hypothesis Tester (`run_backtest_nba`)
+
+**To run:**
+```bash
+cd ingest && source .venv/bin/activate
+python stage_h_nba_odds.py              # download (cached) + load + refresh bt_nba
+python stage_h_nba_odds.py --dry-run    # parse and report, no writes
+```
 
 ### Stage G — International results ✅ COMPLETE
 - **8,394 matches** from Mart Jürisoo's international results dataset
