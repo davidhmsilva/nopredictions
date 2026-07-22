@@ -523,12 +523,43 @@ def _apply_injury_adjustments(pred: dict, home: str, away: str) -> dict:
 
 # ── Fetch PM events ───────────────────────────────────────────────────────────
 
+# Substrings that mark a women's competition in any PM slug/title we've seen.
+# PM titles often omit "Women" (just shows "Sweden vs. Italy"), so the slug is
+# the only reliable signal. Our DC model is trained on men's football → must
+# skip these entirely to avoid systematic mispricing.
+_WOMEN_SLUG_SUBSTRINGS = (
+    "wwc", "weuro", "wwcq", "wcl-w",   # PM-style women's competition prefixes
+    "women", "feminin", "ladies",       # plain-language markers
+    "-w-",                              # team-vs-team women's tag (e.g. "eng-w-vs-fra-w")
+)
+
+
+def _is_women_event(event: dict) -> bool:
+    """True if any slug/title field on the event or its markets references women."""
+    haystack_fields = [
+        event.get("slug", ""),
+        event.get("title", ""),
+        event.get("description", ""),
+        event.get("seriesSlug", ""),
+        event.get("category", ""),
+    ]
+    for mkt in event.get("markets", []) or []:
+        haystack_fields.append(mkt.get("slug", ""))
+        haystack_fields.append(mkt.get("groupItemTitle", ""))
+        haystack_fields.append(mkt.get("question", ""))
+    blob = " ".join(str(x) for x in haystack_fields).lower()
+    return any(tok in blob for tok in _WOMEN_SLUG_SUBSTRINGS)
+
+
 def _fetch_pm_events(days_ahead: int) -> list[dict]:
     """Paginate Gamma /events using simple YYYY-MM-DD dates.
 
     The Gamma API silently excludes restricted/negRisk events (all individual
     match markets) when end_date_min/max use ISO timestamps.  Simple date
     strings work correctly.  tag_slug is unreliable and omitted.
+
+    Filters out women's competitions — DC model is trained on men's football
+    only and systematically mis-prices women's matches.
     """
     now = datetime.now(timezone.utc)
     date_min = now.strftime("%Y-%m-%d")
@@ -551,6 +582,11 @@ def _fetch_pm_events(days_ahead: int) -> list[dict]:
             break
         events.extend(page)
 
+    n_raw = len(events)
+    events = [e for e in events if not _is_women_event(e)]
+    n_dropped = n_raw - len(events)
+    if n_dropped:
+        log.info(f"Filtered out {n_dropped} women's events (DC model is men-only)")
     log.info(f"Fetched {len(events)} PM events ({date_min} → {date_max})")
     return events
 
