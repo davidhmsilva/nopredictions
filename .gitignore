@@ -45,6 +45,9 @@ agent/package.json
 agent/package-lock.json
 agent/node_modules/
 .claude/scheduled_tasks.lock
+# flb_daemon.sh cadence state — machine-local, never shared
+agent/.flb_last_run
+agent/.flb_daemon.lock
 # Claude Code worktrees. These were tracked as gitlinks, which left six full
 # checkouts of old code sharing the production DATABASE_URL — a stale resolver
 # run from any of them reintroduced the NET-style payout bug twice. See
