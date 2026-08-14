@@ -29,9 +29,37 @@ a wrong one:
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
+
+# Clubs the two feeds simply call different things — "Wuhan San Zhen" against
+# "Wuhan Three Towns", "Shandong Taishan" against "Shandong Luneng". No amount
+# of token scoring reaches those; they are renames and translations, so they
+# have to be listed. Learned and maintained by learn_fixture_aliases.py.
+#
+# Kept separate from team_aliases.json on purpose: that one maps a Polymarket
+# name to a name in our own `teams` model, which is a different question with
+# different consumers (dc_scanner, model_pricer). Merging them would couple the
+# model's vocabulary to api-football's.
+ALIASES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "fixture_aliases.json")
+
+
+def _load_aliases() -> dict[str, str]:
+    try:
+        with open(ALIASES_PATH) as fh:
+            raw = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {_norm_key(k): v for k, v in (raw.get("aliases") or {}).items()}
+
+
+def _norm_key(name: str) -> str:
+    clean = _strip_accents(name).lower()
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", clean).split())
 
 # Both names must reach this. 0.5 is not enough: "River Plate" vs "Platense"
 # scores exactly 0.5 under the prefix rule, and it is not the same club.
@@ -60,9 +88,32 @@ _SQUAD_CANON = {
 }
 
 
+# NFKD decomposes an accent away from its base letter, but these are letters in
+# their own right and survive it untouched: "Lillestrøm" stays "Lillestrøm" and
+# never meets api-football's "Lillestrom". Nordic, Polish and Turkish clubs are
+# a whole class of names that fail on this, so they are folded explicitly rather
+# than listed one by one in the alias table.
+_LETTER_FOLD = str.maketrans({
+    "ø": "o", "Ø": "o", "æ": "ae", "Æ": "ae", "œ": "oe", "Œ": "oe",
+    "å": "a", "Å": "a", "ß": "ss", "đ": "d", "Đ": "d", "ð": "d", "Ð": "d",
+    "ł": "l", "Ł": "l", "ı": "i", "İ": "i", "þ": "th", "Þ": "th",
+})
+
+
 def _strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", s)
+    folded = s.translate(_LETTER_FOLD)
+    return "".join(c for c in unicodedata.normalize("NFKD", folded)
                    if not unicodedata.combining(c))
+
+
+_ALIASES: dict[str, str] = _load_aliases()
+
+
+def reload_aliases() -> int:
+    """Re-read the alias table. Used by the learner after it writes."""
+    global _ALIASES
+    _ALIASES = _load_aliases()
+    return len(_ALIASES)
 
 
 def tokens(name: str) -> tuple[frozenset[str], frozenset[str]]:
@@ -89,8 +140,17 @@ def _token_hit(a: str, b: str) -> bool:
     return 3 <= len(short) <= _MAX_ABBREV_LEN and long.startswith(short)
 
 
+def canonical(name: str) -> str | None:
+    """The alias-table key for a club, or None when it is not listed."""
+    return _ALIASES.get(_norm_key(name))
+
+
 def team_score(a: str, b: str) -> float:
     """0-1 similarity between two spellings of a club.
+
+    An explicit alias wins outright — the whole point of the table is the pairs
+    scoring cannot reach. It is still subject to the squad-marker check, so
+    aliasing a first team never drags its reserve side along with it.
 
     Full containment scores 1.0: the feeds disagree by ADDING words rather than
     changing them — Polymarket writes the official name ("Coventry City FC",
@@ -102,8 +162,25 @@ def team_score(a: str, b: str) -> float:
     keeps "Real Salt Lake" away from "Real Monarchs": one shared token out of
     three is 0.33, not the 0.5 that dividing by the shorter name would give.
     """
-    ta, _ = tokens(a)
-    tb, _ = tokens(b)
+    ta, ma = tokens(a)
+    tb, mb = tokens(b)
+    if ma != mb:
+        return 0.0
+
+    # An alias resolves to the OTHER feed's literal name, and the other side is
+    # then matched by exact equality rather than by scoring. That directness is
+    # what makes the table safe: api-football calls Dinamo Moskva plain
+    # "Dynamo", and mapping to the bare word would be lethal under the
+    # containment rule — "Dynamo" is inside Dynamo Kyiv, Dynamo Dresden, BFC
+    # Dynamo and Houston Dynamo. Under exact equality the alias reaches "Dynamo"
+    # and nothing else, so a club can be aliased to a generic-looking name
+    # without that name swallowing its namesakes.
+    ka, kb = _norm_key(a), _norm_key(b)
+    ca, cb = _ALIASES.get(ka), _ALIASES.get(kb)
+    if (ca is not None and ca == kb) or (cb is not None and cb == ka) or \
+       (ca is not None and ca == cb):
+        return 1.0
+
     if not ta or not tb:
         return 0.0
 

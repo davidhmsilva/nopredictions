@@ -337,6 +337,12 @@ def scan(days: int, verbose: bool) -> list[dict]:
             fee = taker_fee_pp(ask)
             rows.append({
                 "fixture": fx["title"],
+                # The fixture as api-football names it, carried through so an
+                # outlier can be audited without re-deriving the join. Every
+                # large "edge" this scan has produced so far was a wrong
+                # pairing, and reading the two names side by side is the fastest
+                # way to see it.
+                "af_fixture": f"{info['home']} v {info['away']}",
                 "league": info["league"],
                 "kickoff": info["kickoff"],
                 "side": side,
@@ -480,11 +486,15 @@ def report(rows: list[dict]) -> None:
             and (r["ask_depth_usd"] or 0) >= 50]
     print(f"\nOutcomes clearing +2pp under BOTH de-vig methods with $50+ depth: "
           f"{len(live)} of {len(trusted)}")
+    if live:
+        print("  (check the two names agree BEFORE reading the number — every "
+              "large gap this scan has produced was a wrong pairing)")
     for r in sorted(live, key=lambda x: -x["edge_prop_pp"])[:15]:
-        print(f"  {r['fixture'][:36]:36} {r['side']:5} "
+        print(f"  {r['fixture'][:34]:34} {r['side']:5} "
               f"pin {1 / r['pin_prop']:5.2f}  pm {1 / r['pm_ask']:5.2f}  "
               f"{r['edge_prop_pp']:+5.1f}pp / {r['edge_power_pp']:+5.1f}pp  "
               f"${r['ask_depth_usd']:.0f}")
+        print(f"      af: {r['af_fixture'][:60]}  [{r['league'][:24]}]")
 
     excluded = len(rows) - len(trusted)
     if excluded:

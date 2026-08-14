@@ -135,3 +135,55 @@ def test_containment_does_not_resurrect_platense():
 def test_abbreviations_are_short():
     assert team_score("Man City", "Manchester City") == 1.0     # 'man' is 3
     assert team_score("Sporting", "Sportivo Italiano") < 1.0    # 'sporting' is 8
+
+
+# ── letter folding ───────────────────────────────────────────────────────────
+
+def test_nordic_letters_fold():
+    """NFKD leaves ø, æ and å intact — they are letters, not accented vowels —
+    so "Lillestrøm" never met api-football's "Lillestrom" until they were folded
+    explicitly. This was a whole class of clubs, not a handful."""
+    for pm, af in [
+        ("Lillestrøm SK", "Lillestrom"),
+        ("Tromsø IL", "Tromso"),
+        ("FC Nordsjælland", "FC Nordsjaelland"),
+        ("Vålerenga Fotball", "Valerenga"),
+    ]:
+        assert team_score(pm, af) == 1.0, f"{pm} != {af}"
+
+
+# ── the alias table ──────────────────────────────────────────────────────────
+
+import fixture_match as fm  # noqa: E402
+
+
+def _with_aliases(monkeypatch, mapping):
+    monkeypatch.setattr(fm, "_ALIASES", {fm._norm_key(k): v for k, v in mapping.items()})
+
+
+def test_alias_reaches_its_target(monkeypatch):
+    _with_aliases(monkeypatch, {"Wolverhampton Wanderers FC": "wolves"})
+    assert fm.team_score("Wolverhampton Wanderers FC", "Wolves") == 1.0
+
+
+def test_alias_does_not_swallow_namesakes(monkeypatch):
+    """The safety property the whole design turns on. api-football calls Dinamo
+    Moskva plain "Dynamo", and under the containment rule a bare "Dynamo" is
+    inside Dynamo Kyiv, Dynamo Dresden, BFC Dynamo and Houston Dynamo. Because
+    the alias resolves to the literal name and is compared by EQUALITY, it
+    reaches exactly one club."""
+    _with_aliases(monkeypatch, {"FK Dinamo Moskva": "dynamo"})
+    assert fm.team_score("FK Dinamo Moskva", "Dynamo") == 1.0
+    for namesake in ("Dynamo Kyiv", "Dynamo Dresden", "BFC Dynamo", "Houston Dynamo"):
+        assert fm.team_score("FK Dinamo Moskva", namesake) < 0.6, namesake
+
+
+def test_alias_still_obeys_squad_markers(monkeypatch):
+    """Aliasing a first team must never drag its reserve side along."""
+    _with_aliases(monkeypatch, {"Wolverhampton Wanderers FC": "wolves"})
+    assert fm.team_score("Wolverhampton Wanderers FC", "Wolves U21") == 0.0
+
+
+def test_unaliased_names_are_unaffected(monkeypatch):
+    _with_aliases(monkeypatch, {"Wolverhampton Wanderers FC": "wolves"})
+    assert fm.team_score("Wollongong Wolves", "Wolverhampton Wanderers FC") == 0.0

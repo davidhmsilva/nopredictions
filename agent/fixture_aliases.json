@@ -1,0 +1,271 @@
+{
+ "_comment": "PM <-> api-football club aliases. See learn_fixture_aliases.py. Both spellings map to one key.",
+ "aliases": {
+  "AA Argentinos Juniors": "argentinos jrs",
+  "Aalesunds FK": "aalesund",
+  "Al Orobah Saudi Club": "al orubah",
+  "Audax CS Italiano": "a italiano",
+  "Bayern Munich": "bayern munchen",
+  "CA Newell's Old Boys": "newells old boys",
+  "CDPJuniorFC": "junior",
+  "CR Brasil": "crb",
+  "CS Independiente Rivadavia": "independ rivadavia",
+  "Clube Náutico Capibaribe": "nautico recife",
+  "D.C. United SC": "dc united",
+  "Dalian Yingbo FC": "dalian zhixing",
+  "Dinamo 1948": "dinamo bucuresti",
+  "FC København": "fc copenhagen",
+  "FK Dinamo Moskva": "dynamo",
+  "FK Epitsentr Dunaivtsi": "epitsentr dunayivtsi",
+  "FK Kryvbas Kryvyi Rih": "kryvbas kr",
+  "FK Obolon Kyiv": "obolon brovar",
+  "FK Polissia": "polessya",
+  "FK Spartak Moskva": "spartak moscow",
+  "Operário Ferroviário EC": "operario pr",
+  "PFK CSKA Moskva": "cska moscow",
+  "Pumas de la UNAM": "u n a m pumas",
+  "Queens Park Rangers FC": "qpr",
+  "Real Racing Club": "racing santander",
+  "Red Bull Bragantino": "rb bragantino",
+  "Stade Lavallois Mayenne FC": "laval",
+  "Stade Rennais FC": "rennes",
+  "Sutton United FC": "sutton utd",
+  "TSG Hoffenheim": "1899 hoffenheim",
+  "Tianjin Jinmen Hu FC": "tianjin teda",
+  "Ulsan HD FC": "ulsan hyundai fc",
+  "Wolverhampton Wanderers FC": "wolves"
+ },
+ "provenance": {
+  "1899 hoffenheim": {
+   "evidence": [
+    "Tottenham Hotspur vs. TSG Hoffenheim ~ Tottenham vs 1899 Hoffenheim"
+   ],
+   "league": "Friendlies Clubs",
+   "learned_at": "2026-08-14"
+  },
+  "a italiano": {
+   "evidence": [
+    "Everton de Viña del Mar vs. Audax CS Italiano ~ Everton de Vina vs A. Italiano"
+   ],
+   "league": "Primera División",
+   "learned_at": "2026-08-14"
+  },
+  "aalesund": {
+   "evidence": [
+    "Aalesunds FK vs. Vålerenga Fotball ~ Aalesund vs Valerenga"
+   ],
+   "league": "Eliteserien",
+   "learned_at": "2026-08-14"
+  },
+  "al orubah": {
+   "evidence": [
+    "Al Orobah Saudi Club vs. Abha Saudi Club ~ Al Orubah vs Abha"
+   ],
+   "league": "King's Cup",
+   "learned_at": "2026-08-14"
+  },
+  "argentinos jrs": {
+   "evidence": [
+    "CA River Plate vs. AA Argentinos Juniors ~ River Plate vs Argentinos JRS"
+   ],
+   "league": "Liga Profesional Argentina",
+   "learned_at": "2026-08-14"
+  },
+  "bayern munchen": {
+   "evidence": [
+    "Bayern Munich vs. RB Leipzig ~ Bayern München vs RB Leipzig"
+   ],
+   "league": "Friendlies Clubs",
+   "learned_at": "2026-08-14"
+  },
+  "crb": {
+   "evidence": [
+    "CR Brasil vs. Grêmio Novorizontino ~ CRB vs Novorizontino"
+   ],
+   "league": "Serie B",
+   "learned_at": "2026-08-14"
+  },
+  "cska moscow": {
+   "evidence": [
+    "PFK CSKA Moskva vs. FK Fakel Voronezh ~ CSKA Moscow vs Fakel"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "dalian zhixing": {
+   "evidence": [
+    "Yunnan Yukun FC vs. Dalian Yingbo FC ~ Yunnan Yukun vs Dalian Zhixing"
+   ],
+   "league": "Super League",
+   "learned_at": "2026-08-14"
+  },
+  "dc united": {
+   "evidence": [
+    "CF Montréal vs. D.C. United SC ~ CF Montreal vs DC United"
+   ],
+   "league": "Major League Soccer",
+   "learned_at": "2026-08-14"
+  },
+  "dinamo bucuresti": {
+   "evidence": [
+    "FC Rapid 1923 vs. Dinamo 1948 ~ Rapid vs Dinamo Bucuresti"
+   ],
+   "league": "Liga I",
+   "learned_at": "2026-08-14"
+  },
+  "dynamo": {
+   "evidence": [
+    "FK Zenit vs. FK Dinamo Moskva ~ Zenit vs Dynamo"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "epitsentr dunayivtsi": {
+   "evidence": [
+    "FK Epitsentr Dunaivtsi vs. RNK Veres Rivne ~ Epitsentr Dunayivtsi vs Veres Rivne"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "fc copenhagen": {
+   "evidence": [
+    "Randers FC vs. FC København ~ Randers FC vs FC Copenhagen"
+   ],
+   "league": "Superliga",
+   "learned_at": "2026-08-14"
+  },
+  "independ rivadavia": {
+   "evidence": [
+    "CA Belgrano vs. CS Independiente Rivadavia ~ Belgrano Cordoba vs Independ. Rivadavia"
+   ],
+   "league": "Liga Profesional Argentina",
+   "learned_at": "2026-08-14"
+  },
+  "junior": {
+   "evidence": [
+    "Boyacá Chicó FC vs. CDPJuniorFC ~ Chico vs Junior"
+   ],
+   "league": "Primera A",
+   "learned_at": "2026-08-14"
+  },
+  "kryvbas kr": {
+   "evidence": [
+    "FK Kryvbas Kryvyi Rih vs. FK Livyi Bereh ~ Kryvbas KR vs Livyi Bereh"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "laval": {
+   "evidence": [
+    "Stade Lavallois Mayenne FC vs. FC Nantes ~ Laval vs Nantes"
+   ],
+   "league": "Ligue 2",
+   "learned_at": "2026-08-14"
+  },
+  "nautico recife": {
+   "evidence": [
+    "AA Ponte Preta vs. Clube Náutico Capibaribe ~ Ponte Preta vs Nautico Recife"
+   ],
+   "league": "Serie B",
+   "learned_at": "2026-08-14"
+  },
+  "newells old boys": {
+   "evidence": [
+    "CA Newell's Old Boys vs. CD Riestra ~ Newells Old Boys vs Deportivo Riestra"
+   ],
+   "league": "Liga Profesional Argentina",
+   "learned_at": "2026-08-14"
+  },
+  "obolon brovar": {
+   "evidence": [
+    "FK Kudrivka vs. FK Obolon Kyiv ~ Kudrivka vs Obolon'-Brovar"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "operario pr": {
+   "evidence": [
+    "Operário Ferroviário EC vs. Avaí FC ~ Operario-PR vs Avai"
+   ],
+   "league": "Serie B",
+   "learned_at": "2026-08-14"
+  },
+  "polessya": {
+   "evidence": [
+    "FK Polissia vs. FK Zorya Luhansk ~ Polessya vs Zorya Luhansk"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "qpr": {
+   "evidence": [
+    "Portsmouth FC vs. Queens Park Rangers FC ~ Portsmouth vs QPR"
+   ],
+   "league": "Championship",
+   "learned_at": "2026-08-14"
+  },
+  "racing santander": {
+   "evidence": [
+    "Real Racing Club vs. Villarreal CF ~ Racing Santander vs Villarreal"
+   ],
+   "league": "La Liga",
+   "learned_at": "2026-08-14"
+  },
+  "rb bragantino": {
+   "evidence": [
+    "CA Paranaense vs. Red Bull Bragantino ~ Atletico Paranaense vs RB Bragantino"
+   ],
+   "league": "Serie A",
+   "learned_at": "2026-08-14"
+  },
+  "rennes": {
+   "evidence": [
+    "Sunderland AFC vs. Stade Rennais FC ~ Sunderland vs Rennes"
+   ],
+   "league": "Friendlies Clubs",
+   "learned_at": "2026-08-14"
+  },
+  "spartak moscow": {
+   "evidence": [
+    "FK Baltika Kaliningrad vs. FK Spartak Moskva ~ Baltika vs Spartak Moscow"
+   ],
+   "league": "Premier League",
+   "learned_at": "2026-08-14"
+  },
+  "sutton utd": {
+   "evidence": [
+    "Sutton United FC vs. Altrincham FC ~ Sutton Utd vs Altrincham"
+   ],
+   "league": "National League",
+   "learned_at": "2026-08-14"
+  },
+  "tianjin teda": {
+   "evidence": [
+    "Tianjin Jinmen Hu FC vs. Beijing Guoan FC ~ Tianjin Teda vs Beijing Guoan"
+   ],
+   "league": "Super League",
+   "learned_at": "2026-08-14"
+  },
+  "u n a m pumas": {
+   "evidence": [
+    "Pumas de la UNAM vs. Querétaro FC ~ U.N.A.M. - Pumas vs Club Queretaro"
+   ],
+   "league": "Liga MX",
+   "learned_at": "2026-08-14"
+  },
+  "ulsan hyundai fc": {
+   "evidence": [
+    "Ulsan HD FC vs. Gangwon FC ~ Ulsan Hyundai FC vs Gangwon FC"
+   ],
+   "league": "K League 1",
+   "learned_at": "2026-08-14"
+  },
+  "wolves": {
+   "evidence": [
+    "Wolverhampton Wanderers FC vs. Blackburn Rovers FC ~ Wolves vs Blackburn"
+   ],
+   "league": "Championship",
+   "learned_at": "2026-08-14"
+  }
+ }
+}
