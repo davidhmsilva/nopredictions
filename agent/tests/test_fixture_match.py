@@ -187,3 +187,63 @@ def test_alias_still_obeys_squad_markers(monkeypatch):
 def test_unaliased_names_are_unaffected(monkeypatch):
     _with_aliases(monkeypatch, {"Wolverhampton Wanderers FC": "wolves"})
     assert fm.team_score("Wollongong Wolves", "Wolverhampton Wanderers FC") == 0.0
+
+
+# ── women's competitions ─────────────────────────────────────────────────────
+
+def test_womens_league_makes_the_w_suffix_redundant():
+    """api-football tags every club in a women's competition with a "W" and
+    Polymarket does not, because the whole competition is women's. Comparing as
+    written failed every NWSL fixture."""
+    assert fm.pair_score("Angel City FC", "Washington Spirit",
+                         "Angel City W", "Washington Spirit W",
+                         "NWSL Women") > 0.9
+
+
+def test_the_w_suffix_still_separates_men_from_women():
+    """Outside a women's competition the marker must stay disqualifying."""
+    assert fm.pair_score("Angel City FC", "Washington Spirit",
+                         "Angel City W", "Washington Spirit W",
+                         "Major League Soccer") == 0.0
+
+
+# ── apostrophes and abbreviations ────────────────────────────────────────────
+
+def test_apostrophes_do_not_split_a_word():
+    """"Al Ta'ee" split into "ta" + "ee" and so never met "Al Taee"."""
+    assert team_score("Al Ta'ee Saudi Club", "Al Taee") == 1.0
+    assert team_score("CA Newell's Old Boys", "Newells Old Boys") == 1.0
+
+
+def test_utd_is_united():
+    assert team_score("Sheffield United FC", "Sheffield Utd") == 1.0
+    assert team_score("Sutton United FC", "Sutton Utd") == 1.0
+
+
+# ── the hand-curated table ───────────────────────────────────────────────────
+
+def test_manual_aliases_resolve():
+    """The shipped table, not a fixture — these are the pairs that motivated it."""
+    for pm, af in [
+        ("Wuhan San Zhen FC", "Wuhan Three Towns"),
+        ("Shanghai Haigang FC", "SHANGHAI SIPG"),
+        ("Shandong Taishan FC", "Shandong Luneng"),
+        ("Zhejiang Zhiye FC", "Hangzhou Greentown"),
+        ("CA Mineiro", "Atletico-MG"),
+        ("AD Tarma", "ADT"),
+    ]:
+        assert fm.team_score(pm, af) == 1.0, f"{pm} != {af}"
+
+
+def test_alias_key_ignores_club_suffixes():
+    """PM is inconsistent about "FC" between an event title and its questions,
+    so one alias must cover both spellings."""
+    assert fm._norm_key("Wuhan San Zhen FC") == fm._norm_key("Wuhan San Zhen")
+
+
+def test_manual_alias_may_cross_a_squad_marker():
+    """Celta Fortuna is the official name of the side af writes "Celta de Vigo
+    II". A hand-curated alias is allowed to say so; nothing infers it."""
+    assert fm.team_score("Celta Fortuna", "Celta de Vigo II") == 1.0
+    # but an unaliased first team still never meets its reserve side
+    assert fm.team_score("Minnesota United", "Minnesota United II") == 0.0

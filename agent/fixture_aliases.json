@@ -1,39 +1,59 @@
 {
- "_comment": "PM <-> api-football club aliases. See learn_fixture_aliases.py. Both spellings map to one key.",
+ "_comment": "PM <-> api-football club aliases. Both sides are stored as written; keys are normalised at load (accents folded, club suffixes dropped). Learned entries come from learn_fixture_aliases.py; manual ones carry a 'why' in provenance. An alias resolves to api-football's literal name and is matched by EQUALITY, never by scoring.",
  "aliases": {
   "AA Argentinos Juniors": "argentinos jrs",
+  "AD Tarma": "ADT",
   "Aalesunds FK": "aalesund",
+  "Accrington Stanley FC": "Accrington ST",
+  "Al Bukiryah Club": "Al Bukayriyah",
+  "Al Hazem SC": "Al-Hazm",
+  "Al Khaleej Saudi Club": "Al Khaleej Saihat",
   "Al Orobah Saudi Club": "al orubah",
+  "Al Taawoun Saudi Club": "Al Taawon",
   "Audax CS Italiano": "a italiano",
   "Bayern Munich": "bayern munchen",
+  "CA Mineiro": "Atletico-MG",
   "CA Newell's Old Boys": "newells old boys",
   "CDPJuniorFC": "junior",
   "CR Brasil": "crb",
   "CS Independiente Rivadavia": "independ rivadavia",
+  "CU Tecnica de Cajamarca": "UTC Cajamarca",
+  "Celta Fortuna": "Celta de Vigo II",
+  "Chengdu Rongcheng": "Chengdu Better City",
+  "Chongqing Tonglianglong": "Chongqing Tongliang Long",
   "Clube Náutico Capibaribe": "nautico recife",
   "D.C. United SC": "dc united",
   "Dalian Yingbo FC": "dalian zhixing",
   "Dinamo 1948": "dinamo bucuresti",
+  "Estudiantes de La Plata": "Estudiantes L.P.",
   "FC København": "fc copenhagen",
+  "FC Mito Holly Hock": "Mito Hollyhock",
   "FK Dinamo Moskva": "dynamo",
   "FK Epitsentr Dunaivtsi": "epitsentr dunayivtsi",
   "FK Kryvbas Kryvyi Rih": "kryvbas kr",
   "FK Obolon Kyiv": "obolon brovar",
   "FK Polissia": "polessya",
   "FK Spartak Moskva": "spartak moscow",
+  "Gimnasia y Esgrima de La Plata": "Gimnasia L.P.",
   "Operário Ferroviário EC": "operario pr",
   "PFK CSKA Moskva": "cska moscow",
   "Pumas de la UNAM": "u n a m pumas",
+  "Qingdao Hainiu": "Qingdao Jonoon",
+  "Qingdao Xihaian": "Qingdao Youth Island",
   "Queens Park Rangers FC": "qpr",
   "Real Racing Club": "racing santander",
   "Red Bull Bragantino": "rb bragantino",
+  "Shandong Taishan": "Shandong Luneng",
+  "Shanghai Haigang": "SHANGHAI SIPG",
   "Stade Lavallois Mayenne FC": "laval",
   "Stade Rennais FC": "rennes",
   "Sutton United FC": "sutton utd",
   "TSG Hoffenheim": "1899 hoffenheim",
   "Tianjin Jinmen Hu FC": "tianjin teda",
   "Ulsan HD FC": "ulsan hyundai fc",
-  "Wolverhampton Wanderers FC": "wolves"
+  "Wolverhampton Wanderers FC": "wolves",
+  "Wuhan San Zhen": "Wuhan Three Towns",
+  "Zhejiang Zhiye": "Hangzhou Greentown"
  },
  "provenance": {
   "1899 hoffenheim": {
@@ -42,6 +62,106 @@
    ],
    "league": "Friendlies Clubs",
    "learned_at": "2026-08-14"
+  },
+  "ADT": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Asociacion Deportiva Tarma = ADT; unique at 08-15 18:00"
+  },
+  "Accrington ST": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "af abbreviates Stanley to ST; af ALSO carries 'Accrington Stanley', which containment still reaches"
+  },
+  "Al Bukayriyah": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "transliteration; King's Cup, unique at 08-16 16:15"
+  },
+  "Al Khaleej Saihat": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Al-Khaleej is based in Saihat; same fixture"
+  },
+  "Al Taawon": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Pro League, verified unique at kickoff 08-15 16:15"
+  },
+  "Al-Hazm": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "transliteration; same fixture"
+  },
+  "Atletico-MG": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Clube Atletico Mineiro; Serie A vs Gremio 08-16 19:00"
+  },
+  "Celta de Vigo II": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Celta Fortuna IS Celta B — marker mismatch is expected here"
+  },
+  "Chengdu Better City": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "renamed from Chengdu Better City in 2021"
+  },
+  "Chongqing Tongliang Long": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "same name, af spaces it"
+  },
+  "Estudiantes L.P.": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "af abbreviates La Plata; unique at 08-15 19:45"
+  },
+  "Gimnasia L.P.": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "same fixture"
+  },
+  "Hangzhou Greentown": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "renamed from Hangzhou Greentown in 2020"
+  },
+  "Mito Hollyhock": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "PM splits Hollyhock into two words"
+  },
+  "Qingdao Jonoon": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "renamed; af founded 1990 matches the club's lineage"
+  },
+  "Qingdao Youth Island": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Qingdao West Coast, formerly Youth Island; both founded 2007"
+  },
+  "SHANGHAI SIPG": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "renamed from Shanghai SIPG in 2021"
+  },
+  "Shandong Luneng": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "renamed from Shandong Luneng in 2021"
+  },
+  "UTC Cajamarca": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "Universidad Tecnica de Cajamarca = UTC; same fixture"
+  },
+  "Wuhan Three Towns": {
+   "learned_at": "2026-08-14",
+   "source": "manual",
+   "why": "PM writes the pinyin of 三镇; af writes its translation"
   },
   "a italiano": {
    "evidence": [

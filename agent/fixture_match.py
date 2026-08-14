@@ -54,12 +54,22 @@ def _load_aliases() -> dict[str, str]:
             raw = json.load(fh)
     except (OSError, json.JSONDecodeError):
         return {}
-    return {_norm_key(k): v for k, v in (raw.get("aliases") or {}).items()}
+    # Values are normalised too, so the file may hold api-football's name as
+    # written ("SHANGHAI SIPG") and stay readable to whoever edits it by hand.
+    return {_norm_key(k): _norm_key(v) for k, v in (raw.get("aliases") or {}).items()}
 
 
 def _norm_key(name: str) -> str:
+    """Lookup key for the alias table.
+
+    Club suffixes are dropped, so "Wuhan San Zhen" and "Wuhan San Zhen FC" are
+    one entry rather than two — Polymarket is not consistent about them between
+    an event title and its market questions, and an alias that only fires on one
+    spelling is worse than none.
+    """
     clean = _strip_accents(name).lower()
-    return " ".join(re.sub(r"[^a-z0-9 ]", " ", clean).split())
+    clean = re.sub(r"[^a-z0-9 ]", " ", clean.replace("'", "").replace("’", ""))
+    return " ".join(t for t in clean.split() if t and t not in _NOISE)
 
 # Both names must reach this. 0.5 is not enough: "River Plate" vs "Platense"
 # scores exactly 0.5 under the prefix rule, and it is not the same club.
@@ -116,14 +126,49 @@ def reload_aliases() -> int:
     return len(_ALIASES)
 
 
+# Abbreviations too established to reach by prefix. "Utd" is not a prefix of
+# "United" and never will be, but the two are the same word everywhere in
+# football. Kept deliberately short — every entry is a claim that two spellings
+# are always the same club, and a wrong one is a wrong fixture.
+# "st" is deliberately absent: api-football writes Accrington Stanley as
+# "Accrington ST", so expanding it to "saint" is actively wrong as often as it
+# is right. Ambiguous abbreviations belong in the alias table, where a human
+# decides one club at a time.
+_SYNONYMS = {
+    "utd": "united",
+    "ath": "athletic", "atl": "atletico", "dep": "deportivo",
+    "spts": "sporting", "cty": "city", "acad": "academy",
+}
+
+
 def tokens(name: str) -> tuple[frozenset[str], frozenset[str]]:
     """(identity tokens, canonical squad markers) for a team name."""
     clean = _strip_accents(name).lower()
-    clean = re.sub(r"[^a-z0-9 ]", " ", clean)
+    # Apostrophes are dropped, not spaced: "Al Ta'ee" is one word and splitting
+    # it into "ta" + "ee" is why it never met api-football's "Al Taee".
+    # Everything else becomes a separator, so "Sochaux-Montbeliard" stays two.
+    clean = re.sub(r"[^a-z0-9 ]", " ", clean.replace("'", "").replace("’", ""))
     raw = [t for t in clean.split() if t]
     markers = frozenset(_SQUAD_CANON[t] for t in raw if t in _SQUAD_CANON)
-    ident = frozenset(t for t in raw if t not in _SQUAD_CANON and t not in _NOISE)
+    ident = frozenset(_SYNONYMS.get(t, t) for t in raw
+                      if t not in _SQUAD_CANON and t not in _NOISE)
     return ident, markers
+
+
+# api-football tags every club in a women's competition with a "W", where
+# Polymarket does not — the whole competition is women's, so the marker carries
+# no information there. Comparing the two as written makes every NWSL fixture
+# fail the squad check. When the competition is already women's the marker is
+# redundant and is dropped from both sides; outside such a competition it stays
+# disqualifying, so a men's side can never meet a women's one.
+_WOMENS_LEAGUE_RE = re.compile(
+    r"\bwomen|\bwomens|\bfeminin|\bfemenin|\bfeminil|\bfrauen|\bnwsl\b|\bwsl\b|\(w\)",
+    re.I,
+)
+
+
+def is_womens_competition(league: str | None) -> bool:
+    return bool(league) and bool(_WOMENS_LEAGUE_RE.search(league))
 
 
 # An abbreviation is short. "Man" standing in for "Manchester" is the case the
@@ -145,12 +190,18 @@ def canonical(name: str) -> str | None:
     return _ALIASES.get(_norm_key(name))
 
 
-def team_score(a: str, b: str) -> float:
+def team_score(a: str, b: str, *, womens: bool = False) -> float:
     """0-1 similarity between two spellings of a club.
 
-    An explicit alias wins outright — the whole point of the table is the pairs
-    scoring cannot reach. It is still subject to the squad-marker check, so
-    aliasing a first team never drags its reserve side along with it.
+    An explicit alias wins outright, INCLUDING over the squad-marker check —
+    the table is hand-curated and exists precisely for pairs that scoring
+    cannot reach, and some of them are legitimately marker-mismatched:
+    "Celta Fortuna" is the official name of the side api-football writes as
+    "Celta de Vigo II". Nothing infers such an alias; the learner refuses to
+    propose a marker mismatch, so they only ever arrive by hand.
+
+    `womens` says the competition is already women's, which makes api-football's
+    "W" suffix redundant rather than distinguishing.
 
     Full containment scores 1.0: the feeds disagree by ADDING words rather than
     changing them — Polymarket writes the official name ("Coventry City FC",
@@ -164,8 +215,9 @@ def team_score(a: str, b: str) -> float:
     """
     ta, ma = tokens(a)
     tb, mb = tokens(b)
-    if ma != mb:
-        return 0.0
+    if womens:
+        ma = ma - {"women"}
+        mb = mb - {"women"}
 
     # An alias resolves to the OTHER feed's literal name, and the other side is
     # then matched by exact equality rather than by scoring. That directness is
@@ -181,6 +233,8 @@ def team_score(a: str, b: str) -> float:
        (ca is not None and ca == cb):
         return 1.0
 
+    if ma != mb:
+        return 0.0
     if not ta or not tb:
         return 0.0
 
@@ -198,12 +252,12 @@ def squads_agree(a: str, b: str) -> bool:
     return ma == mb
 
 
-def pair_score(pm_home: str, pm_away: str, af_home: str, af_away: str) -> float:
+def pair_score(pm_home: str, pm_away: str, af_home: str, af_away: str,
+               league: str | None = None) -> float:
     """Score for a whole fixture. 0 when either side fails its own bar."""
-    if not squads_agree(pm_home, af_home) or not squads_agree(pm_away, af_away):
-        return 0.0
-    h = team_score(pm_home, af_home)
-    a = team_score(pm_away, af_away)
+    womens = is_womens_competition(league)
+    h = team_score(pm_home, af_home, womens=womens)
+    a = team_score(pm_away, af_away, womens=womens)
     if min(h, a) < MIN_SIDE_SCORE:
         return 0.0
     return (h + a) / 2
@@ -259,7 +313,8 @@ def best_match(
             # No PM kickoff to check against — names alone have already been
             # shown to be insufficient, so only an exact-ish pair is accepted.
             pass
-        s = pair_score(pm_h, pm_a, info.get("home", ""), info.get("away", ""))
+        s = pair_score(pm_h, pm_a, info.get("home", ""), info.get("away", ""),
+                       info.get("league"))
         if s > 0:
             scored.append((s, fid))
 
