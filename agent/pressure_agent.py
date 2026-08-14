@@ -58,10 +58,10 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../ingest/
 
 import late_goals_table as lgt                                      # noqa: E402
 from edge_engine import taker_fee_pp                                # noqa: E402
+from fixture_match import pair_score, split_title                   # noqa: E402
 from late_goals_observer import (                                   # noqa: E402
     _fetch_book,
     _fetch_events,
-    _norm,
     infer_goals,
     ladder_consistent,
     ladder_of,
@@ -150,19 +150,24 @@ def pressure_index_of(sig: PressureSignals) -> float:
 # ── PM <-> api-football matching ─────────────────────────────────────────────
 
 def match_pm_fixture(sig: PressureSignals, pm_fixtures: list[dict]) -> dict | None:
-    """Find the PM fixture for an api-football one. Loose, because the two feeds
-    disagree on club naming constantly ("Man City" / "Manchester City" / "Man.
-    City"). Both team names must hit, so a loose match is still a safe one."""
-    want_h, want_a = _norm(sig.home), _norm(sig.away)
-    words = lambda s: [w for w in s.split() if len(w) > 3]           # noqa: E731
+    """Find the PM fixture for an api-football one.
 
+    Token matching with squad-marker and kick-off gates — see fixture_match. The
+    earlier substring version paired a first team with its own reserve side and
+    a club with an unrelated one, and priced each PM board against the wrong
+    match's state.
+    """
+    best, best_score = None, 0.0
     for fx in pm_fixtures:
-        title = _norm(fx["title"])
-        if not words(want_h) or not words(want_a):
+        split = split_title(fx["title"])
+        if not split:
             continue
-        if any(w in title for w in words(want_h)) and any(w in title for w in words(want_a)):
-            return fx
-    return None
+        score = pair_score(split[0], split[1], sig.home, sig.away)
+        if score > best_score:
+            best, best_score = fx, score
+        elif score == best_score and score > 0:
+            best = None                 # ambiguous: two fixtures fit equally
+    return best
 
 
 # ── one cycle ────────────────────────────────────────────────────────────────
