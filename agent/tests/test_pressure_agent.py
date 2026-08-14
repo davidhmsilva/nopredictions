@@ -147,3 +147,39 @@ def test_entry_window_stays_inside_the_baseline_grid():
     import late_goals_table as lgt
     assert pa.MIN_MINUTE >= lgt.WIDE_MINUTES[0]
     assert pa.MAX_MINUTE <= lgt.WIDE_MINUTES[-1] + 3   # lookup snaps within 3'
+
+
+# ── tracker lifecycle ────────────────────────────────────────────────────────
+
+def test_finished_fixtures_stop_being_reported():
+    """A fixture that drops off the live feed must stop producing signals.
+
+    self.snapshots is never emptied, so returning every tracked fixture means a
+    match that ended hours ago keeps being reported each cycle with its final
+    snapshot — frozen minute, frozen score. The pressure agent writes one row
+    per signal, so that would fill the observation table with copies of a match
+    nobody is playing.
+    """
+    from live_tracker import LiveMatchTracker, StatSnapshot, MISSING_POLLS_BEFORE_DROP
+
+    t = LiveMatchTracker()
+    t.fixture_info[7] = {"home": "A", "away": "B", "league": "L", "fixture_id": 7}
+    t.snapshots[7].append(StatSnapshot(minute=90, timestamp=0.0, home_shots_total=9))
+
+    assert t.get_signals(7) is not None          # tracked, so still answerable
+    for _ in range(MISSING_POLLS_BEFORE_DROP + 1):
+        t._prune(live_now=set())
+    assert 7 not in t.snapshots                  # gone after the grace period
+
+
+def test_halftime_gap_does_not_lose_the_window_baseline():
+    """api-football drops some fixtures at half time. Pruning on the first miss
+    would discard the history the window deltas are computed against."""
+    from live_tracker import LiveMatchTracker, StatSnapshot
+
+    t = LiveMatchTracker()
+    t.snapshots[7].append(StatSnapshot(minute=45, timestamp=0.0))
+    t._prune(live_now=set())
+    assert 7 in t.snapshots
+    t._prune(live_now={7})                       # back on the feed
+    assert t._missing[7] == 0

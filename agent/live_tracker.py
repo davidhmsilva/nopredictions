@@ -36,6 +36,10 @@ log = logging.getLogger(__name__)
 
 PRESSURE_WINDOW_MIN = 15
 MIN_MINUTE_FOR_SIGNALS = 15
+# api-football drops a fixture from the live feed briefly at half time on some
+# competitions. Dropping its snapshot history on the first miss would discard
+# the window baseline exactly when the second half starts.
+MISSING_POLLS_BEFORE_DROP = 20
 
 
 @dataclass
@@ -153,6 +157,7 @@ class LiveMatchTracker:
         self.window_minutes = window_minutes
         self.snapshots: dict[int, list[StatSnapshot]] = defaultdict(list)
         self.fixture_info: dict[int, dict] = {}
+        self._missing: dict[int, int] = {}
         self._last_poll: float = 0
 
     def poll(self) -> dict[int, PressureSignals]:
@@ -242,12 +247,37 @@ class LiveMatchTracker:
 
             self._last_poll = time.time()
 
-            # Generate signals for all tracked matches
-            return self.get_all_signals()
+            # Only the fixtures that are live RIGHT NOW. get_all_signals() walks
+            # everything ever tracked, and self.snapshots is never emptied, so
+            # returning it means a match that finished hours ago keeps being
+            # reported every cycle with its final snapshot — frozen minute,
+            # frozen score, forever. A consumer recording one row per signal
+            # would fill its table with copies of a match nobody is playing.
+            live_now = set(fixture_ids_with_stats)
+            self._prune(live_now)
+            return {fid: sig for fid, sig in self.get_all_signals().items()
+                    if fid in live_now}
 
         except Exception as e:
             log.error(f'[tracker] Poll error: {e}')
             return {}
+
+    def _prune(self, live_now: set[int]) -> None:
+        """Forget fixtures that have dropped off the live feed.
+
+        Kept for a few cycles first: api-football drops a fixture briefly at
+        half time on some competitions, and discarding its history immediately
+        would throw away the window baseline that makes the deltas meaningful.
+        """
+        for fid in list(self.snapshots):
+            if fid in live_now:
+                self._missing[fid] = 0
+                continue
+            self._missing[fid] = self._missing.get(fid, 0) + 1
+            if self._missing[fid] > MISSING_POLLS_BEFORE_DROP:
+                del self.snapshots[fid]
+                self.fixture_info.pop(fid, None)
+                del self._missing[fid]
 
     def _enrich_fixture(self, fid: int, snap: StatSnapshot) -> bool:
         """Fetch detailed statistics for a specific fixture."""
