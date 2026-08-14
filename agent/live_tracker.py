@@ -89,6 +89,28 @@ class PressureSignals:
     away_possession: float = 50.0
     home_reds: int = 0
     away_reds: int = 0
+    home_shots_on_total: int = 0
+    away_shots_on_total: int = 0
+    home_shots_total: int = 0
+    away_shots_total: int = 0
+    home_shots_inside_total: int = 0
+    away_shots_inside_total: int = 0
+    home_corners_total: int = 0
+    away_corners_total: int = 0
+    home_goals: int = 0
+    away_goals: int = 0
+    # False when there was no snapshot near (minute - window) and the window
+    # deltas below are the match totals scaled down instead of a real delta.
+    # A consumer that treats the fallback as a delta reads steady play as a
+    # surge, so it has to be able to tell the two apart.
+    has_window: bool = False
+    # False when api-football has no statistics coverage for this competition —
+    # which is most of the smaller leagues it reports as live. Every stat then
+    # sits at zero and the danger index collapses to its possession term (~5),
+    # which is indistinguishable from a genuinely dead match. Anything reading
+    # pressure MUST check this first, or a no-coverage fixture enters the record
+    # as strong evidence that low pressure precedes no goal.
+    has_stats: bool = False
     # Composite scores (0–100)
     home_danger_index: float = 0.0
     away_danger_index: float = 0.0
@@ -334,10 +356,30 @@ class LiveMatchTracker:
             away_possession=latest.away_possession,
             home_reds=latest.home_reds,
             away_reds=latest.away_reds,
+            home_shots_on_total=latest.home_shots_on,
+            away_shots_on_total=latest.away_shots_on,
+            home_shots_total=latest.home_shots_total,
+            away_shots_total=latest.away_shots_total,
+            home_shots_inside_total=latest.home_shots_inside,
+            away_shots_inside_total=latest.away_shots_inside,
+            home_corners_total=latest.home_corners,
+            away_corners_total=latest.away_corners,
+            home_goals=latest.home_goals,
+            away_goals=latest.away_goals,
         )
+
+        # Any non-zero stat proves the competition is covered. Goals alone do
+        # not: they come from the fixtures feed, which covers everything.
+        signals.has_stats = any((
+            latest.home_shots_total, latest.away_shots_total,
+            latest.home_shots_on, latest.away_shots_on,
+            latest.home_corners, latest.away_corners,
+            latest.home_xg, latest.away_xg,
+        ))
 
         # Window deltas
         window_start = self._find_window_start(snaps, latest.minute)
+        signals.has_window = window_start is not None
         if window_start:
             signals.home_shots_on_window = max(0, latest.home_shots_on - window_start.home_shots_on)
             signals.away_shots_on_window = max(0, latest.away_shots_on - window_start.away_shots_on)
