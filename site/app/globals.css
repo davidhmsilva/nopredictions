@@ -1995,9 +1995,90 @@ button { font-family: var(--font); }
 .gc-notes { padding-left: 16px; }
 .gc-notes li { margin-bottom: 6px; }
 
+/* ── context strip ── */
+.gc-context {
+  display: flex; gap: 10px; align-items: flex-start;
+  border-left: 2px solid var(--grey); background: var(--bg2);
+  padding: 10px 12px; margin-bottom: 14px;
+  font-size: 11px; line-height: 1.6; color: var(--grey);
+}
+.gc-context-tag { color: var(--white); letter-spacing: 1px; flex-shrink: 0; }
+.gc-context b { color: var(--white); }
+
+/* ── WATCH CARD — the one thing the page is for ── */
+.gc-watch {
+  border: 1px solid var(--accent); background: var(--bg2);
+  padding: 16px; margin-bottom: 20px;
+}
+/* A card built on a move rather than on a measured rate does not get the
+   accent border — the frame should not promise more than the content. */
+.gc-watch-mover, .gc-watch-none { border-color: var(--border); }
+.gc-watch-tag {
+  font-size: 10px; letter-spacing: 2px; color: var(--accent); margin-bottom: 6px;
+}
+.gc-watch-mover .gc-watch-tag, .gc-watch-none .gc-watch-tag { color: var(--grey); }
+.gc-watch-state { font-size: 11px; color: var(--grey); margin-bottom: 12px; }
+.gc-watch-body { border-top: 1px solid var(--border); padding-top: 12px; }
+.gc-watch-market { font-size: 12px; color: var(--white); margin-bottom: 8px; }
+.gc-watch-prices { display: flex; gap: 10px; flex-wrap: wrap; }
+.gc-watch-price {
+  flex: 1 1 120px; border: 1px solid var(--border); background: var(--bg3);
+  padding: 8px 10px;
+}
+.gc-watch-price-label {
+  display: block; font-size: 9px; letter-spacing: 1px;
+  color: var(--grey); margin-bottom: 4px;
+}
+.gc-watch-price b { font-size: 20px; color: var(--white); }
+.gc-watch-price .gc-outcome-pct { display: block; margin-top: 2px; }
+.gc-watch-verdict {
+  margin-top: 12px; font-size: 12px; line-height: 1.7; color: var(--white);
+}
+.gc-why {
+  margin-top: 10px; background: none; border: none; padding: 0;
+  color: var(--grey); font-size: 10px; cursor: pointer; letter-spacing: 1px;
+}
+.gc-why:hover { color: var(--accent); }
+
+/* ── THE MARKET — five numbers, not sixty-five ── */
+.gc-headlines { display: flex; gap: 8px; flex-wrap: wrap; }
+.gc-headline {
+  flex: 1 1 100px; border: 1px solid var(--border); background: var(--bg2);
+  padding: 10px;
+}
+.gc-headline-label {
+  display: block; font-size: 10px; color: var(--grey); margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gc-headline b { font-size: 18px; color: var(--green); }
+.gc-headline b.gc-mid { color: var(--grey); }
+.gc-headline .gc-outcome-pct { margin-left: 6px; }
+
+/* ── movement ── */
+.gc-movers { margin-top: 10px; }
+.gc-mover {
+  display: flex; justify-content: space-between; gap: 12px;
+  border-top: 1px solid var(--border); padding: 8px 0; font-size: 11px;
+}
+.gc-mover-q { color: var(--grey); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gc-mover-move { white-space: nowrap; color: var(--grey); }
+.gc-mover-move b { color: var(--white); }
+
+/* ── collapsed board ── */
+.gc-board-toggle {
+  width: 100%; display: flex; justify-content: space-between; align-items: center;
+  background: var(--bg2); border: 1px solid var(--border); padding: 12px;
+  color: var(--white); font-size: 11px; letter-spacing: 2px; cursor: pointer;
+}
+.gc-board-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.gc-search-wide { width: 100%; margin: 8px 0; }
+
 @media (max-width: 600px) {
   .gc-teams { gap: 10px; }
   .gc-team { font-size: 13px; }
   .gc-score { font-size: 18px; }
   .gc-stat-label { min-width: 90px; font-size: 9px; }
+  .gc-watch-price b { font-size: 17px; }
+  .gc-headline { flex: 1 1 90px; }
+  .gc-mover { flex-direction: column; gap: 2px; }
 }

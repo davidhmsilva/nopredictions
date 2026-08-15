@@ -1,22 +1,48 @@
 import { NextResponse } from 'next/server'
 import {
   buildGroups,
+  buildHeadlines,
+  buildMovers,
+  buildWatch,
   fetchBook,
   fetchEvent,
   fetchHistory,
   fetchKalshi,
   fetchLive,
   fetchSiblings,
+  matchTotalLine,
+  pmOver25,
   takerFeePp,
   KALSHI_FEE_RATE,
   type GameData,
   type MarketGroup,
+  type PricePoint,
 } from '../../lib/gamecenter'
 
 // Top-of-book is fetched for the most-traded markets only. Every extra token is
 // a CLOB round trip, and a fixture board runs to 85 markets — pulling books for
 // all of them would make the page slower than it is useful.
 const BOOKS_FOR_TOP = 12
+// Price history is one more round trip per token, and only the busiest markets
+// have enough flow for 24h of it to mean anything.
+const HISTORY_FOR_TOP = 6
+
+/** Polymarket's Over 2.5 as it stood BEFORE kick-off.
+ *
+ *  The fair-value table buckets on the pre-match total, so once a match is live
+ *  the current quote is the wrong number — it has already absorbed the goals.
+ *  The last history point at or before the listed start time is the right one.
+ *  Polymarket's listed time can run ahead of the real kick-off on smaller
+ *  leagues, which here is the safe direction: it only ever makes this reach
+ *  further back into genuinely pre-match trading. */
+function preKickoffPrice(points: PricePoint[], kickoff: string | null): number | null {
+  if (!points.length) return null
+  if (!kickoff) return points[0].p
+  const ko = Date.parse(kickoff) / 1000
+  if (!Number.isFinite(ko)) return points[0].p
+  const before = points.filter((p) => p.t <= ko)
+  return before.length ? before[before.length - 1].p : null
+}
 
 function extractTeams(title: string): { home: string; away: string } | null {
   const clean = title.replace(/\s+-\s+.*$/, '').trim()
@@ -133,14 +159,54 @@ export async function GET(request: Request) {
       notes.push('api-football has no in-game statistics coverage for this competition.')
     }
 
-    // The sparkline follows the busiest outcome of the busiest market.
-    const headline: MarketGroup | undefined = ranked[0]?.g
-    const headlineOutcome = headline?.outcomes.find((o) => o.tokenId)
-    const history = headlineOutcome?.tokenId
+    const kickoff = main.startTime ? String(main.startTime) : null
+
+    // 24h of price history for the busiest markets, plus the 2.5 total whatever
+    // its volume — that one is not decoration, it is what buckets the fixture.
+    const traded = groups
+      .map((g) => {
+        const o = g.outcomes.find((x) => /^(yes|over)$/i.test(x.name) && x.tokenId)
+          ?? g.outcomes.find((x) => x.tokenId)
+        return o?.tokenId ? { g, o } : null
+      })
+      .filter((x): x is { g: MarketGroup; o: (typeof groups)[0]['outcomes'][0] } => x !== null)
+
+    const total25 = traded.find((t) => matchTotalLine(t.g.question) === 2.5)
+    const wanted = [...traded.slice(0, HISTORY_FOR_TOP)]
+    if (total25 && !wanted.includes(total25)) wanted.push(total25)
+
+    const histories = await Promise.all(
+      wanted.map(async (t) => ({
+        question: t.g.question,
+        outcome: t.o.name,
+        tokenId: t.o.tokenId!,
+        points: await fetchHistory(t.o.tokenId!),
+      }))
+    )
+
+    const movers = buildMovers(histories)
+
+    // Pre-match bucket first, current quote only as a fallback: before kick-off
+    // the two are the same number, and after it the current quote is the wrong
+    // one to bucket on.
+    const total25History = histories.find((h) => h.tokenId === total25?.o.tokenId)
+    const preOver25 =
+      (total25History ? preKickoffPrice(total25History.points, kickoff) : null) ?? pmOver25(groups)
+
+    const headlines = buildHeadlines(groups, teams.home, teams.away)
+    const watch = buildWatch(groups, live, competition, preOver25, movers)
+
+    // The sparkline follows whatever the watch card is about, so the chart and
+    // the number underneath it are the same market.
+    const sparkFor =
+      histories.find((h) => watch.market && h.question.includes(watch.market.split(' —')[0]))
+      ?? total25History
+      ?? histories[0]
+    const history = sparkFor
       ? {
-          tokenId: headlineOutcome.tokenId,
-          label: `${headline!.question} — ${headlineOutcome.name}`,
-          points: await fetchHistory(headlineOutcome.tokenId),
+          tokenId: sparkFor.tokenId,
+          label: `${sparkFor.question} — ${sparkFor.outcome}`,
+          points: sparkFor.points,
         }
       : null
 
@@ -150,9 +216,12 @@ export async function GET(request: Request) {
       home: teams.home,
       away: teams.away,
       competition,
-      kickoff: main.startTime ? String(main.startTime) : null,
+      kickoff,
       pmUrl: `https://polymarket.com/event/${slug}`,
       live,
+      watch,
+      headlines,
+      movers: movers.slice(0, 3),
       groups,
       history,
       kalshi,

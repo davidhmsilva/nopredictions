@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Nav, MobileNav } from '../../components/Nav'
 import type { Section } from '../../lib/types'
-import type { GameData, MarketGroup, Outcome, PricePoint } from '../../lib/gamecenter'
+import type {
+  GameData, Headline, MarketGroup, Mover, Outcome, PricePoint, WatchCard,
+} from '../../lib/gamecenter'
 
 const WATCHLIST_KEY = 'np_watchlist'
 
@@ -36,46 +38,9 @@ function money(v: number | null | undefined): string {
   return `$${v.toFixed(0)}`
 }
 
-// ── sparkline ────────────────────────────────────────────────────────────────
+// ── header ───────────────────────────────────────────────────────────────────
 
-function Sparkline({ points }: { points: PricePoint[] }) {
-  if (points.length < 2) return null
-  const W = 320
-  const H = 48
-  const ps = points.map((p) => p.p)
-  const lo = Math.min(...ps)
-  const hi = Math.max(...ps)
-  const span = hi - lo || 1
-  const d = points
-    .map((p, i) => {
-      const x = (i / (points.length - 1)) * W
-      const y = H - ((p.p - lo) / span) * H
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-  const first = ps[0]
-  const last = ps[ps.length - 1]
-  const up = last >= first
-  const movePp = (last - first) * 100
-
-  return (
-    <div className="gc-spark">
-      <svg viewBox={`0 0 ${W} ${H}`} className="gc-spark-svg" preserveAspectRatio="none">
-        <path d={d} fill="none" stroke={up ? 'var(--green)' : 'var(--red)'} strokeWidth="1.5" />
-      </svg>
-      <div className="gc-spark-meta">
-        <span>{pct(first)} → {pct(last)}</span>
-        <span className={up ? 'c-green' : 'c-red'}>
-          {movePp > 0 ? '+' : ''}{movePp.toFixed(1)}pp / 24h
-        </span>
-      </div>
-    </div>
-  )
-}
-
-// ── live header ──────────────────────────────────────────────────────────────
-
-function LiveHeader({ data }: { data: GameData }) {
+function GameHeader({ data }: { data: GameData }) {
   const live = data.live
   const kickoff = data.kickoff ? new Date(data.kickoff) : null
 
@@ -113,44 +78,200 @@ function LiveHeader({ data }: { data: GameData }) {
           {live?.clockSource ? 'clock: api-football' : 'clock: unverified'}
         </span>
       </div>
+    </div>
+  )
+}
 
-      {live?.stats && (
-        <div className="gc-stats">
-          <StatRow label="xG" h={live.stats.homeXg?.toFixed(2)} a={live.stats.awayXg?.toFixed(2)} />
-          <StatRow label="Shots on target" h={live.stats.homeShotsOn} a={live.stats.awayShotsOn} />
-          <StatRow label="Total shots" h={live.stats.homeShotsTotal} a={live.stats.awayShotsTotal} />
-          <StatRow label="Corners" h={live.stats.homeCorners} a={live.stats.awayCorners} />
-          <StatRow
-            label="Possession"
-            h={live.stats.homePossession != null ? `${live.stats.homePossession}%` : null}
-            a={live.stats.awayPossession != null ? `${live.stats.awayPossession}%` : null}
-          />
-          {(live.stats.homeReds > 0 || live.stats.awayReds > 0) && (
-            <StatRow label="Red cards" h={live.stats.homeReds} a={live.stats.awayReds} />
-          )}
+// ── what happened before you got here ────────────────────────────────────────
+
+// A double-digit move on a fixture's main market is usually team news, and it
+// is the first thing a reader needs — but it lives below the fold in MOVEMENT,
+// so anything this big gets a line at the top as well.
+const BIG_MOVE_PP = 10
+
+function ContextStrip({ movers }: { movers: Mover[] }) {
+  const m = movers[0]
+  if (!m || Math.abs(m.movePp) < BIG_MOVE_PP) return null
+  const shorter = m.movePp > 0
+  return (
+    <div className="gc-context">
+      <span className="gc-context-tag">24H</span>
+      <span>
+        {m.question.replace(/\?$/, '').replace(/ on \d{4}-\d{2}-\d{2}/, '')} — {m.outcome}{' '}
+        went <b>{odds(m.from)} → {odds(m.to)}</b>{' '}
+        <span className={shorter ? 'c-green' : 'c-red'}>
+          ({m.movePp > 0 ? '+' : ''}{m.movePp.toFixed(1)}pp)
+        </span>
+        . Polymarket repriced this fixture hard; whatever the news was, the board already has it.
+      </span>
+    </div>
+  )
+}
+
+// ── the watch card ───────────────────────────────────────────────────────────
+
+function WatchBlock({ w }: { w: WatchCard }) {
+  const [why, setWhy] = useState(false)
+  // Green only when the price is BELOW the measured rate — the one direction in
+  // which the market being watched is the cheap side.
+  const cheap = w.gapPp != null && w.gapPp < 0
+
+  return (
+    <section className={`gc-watch gc-watch-${w.kind}`}>
+      <div className="gc-watch-tag">WATCH · {w.title}</div>
+      {w.state && <div className="gc-watch-state">{w.state}</div>}
+
+      {w.market && (
+        <div className="gc-watch-body">
+          <div className="gc-watch-market">{w.market}</div>
+          <div className="gc-watch-prices">
+            {/* The Polymarket box appears only when there is a comparable quote.
+                On a pre-match setup the price that matters does not exist yet,
+                and filling the slot with today's number invites the wrong
+                subtraction against the measured rate. */}
+            {w.pmProb != null && (
+              <div className="gc-watch-price">
+                <span className="gc-watch-price-label">Polymarket</span>
+                <b className={cheap ? 'c-green' : undefined}>{odds(w.pmProb)}</b>
+                <span className="gc-outcome-pct">{pct(w.pmProb)}</span>
+              </div>
+            )}
+            {w.fairProb != null && (
+              <div className="gc-watch-price">
+                <span className="gc-watch-price-label">Measured</span>
+                <b>{(1 / w.fairProb).toFixed(2)}</b>
+                <span className="gc-outcome-pct">
+                  {pct(w.fairProb)}{w.n ? ` · n=${w.n.toLocaleString()}` : ''}
+                </span>
+              </div>
+            )}
+            {w.gapPp != null && (
+              <div className="gc-watch-price">
+                <span className="gc-watch-price-label">Gap</span>
+                <b className={cheap ? 'c-green' : 'c-red'}>
+                  {w.gapPp > 0 ? '+' : ''}{w.gapPp.toFixed(1)}pp
+                </b>
+                <span className="gc-outcome-pct">
+                  {w.feePp != null ? `fee ${w.feePp.toFixed(2)}pp` : ''}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       )}
-    </div>
+
+      <p className="gc-watch-verdict">{w.verdict}</p>
+
+      {w.caveats.length > 0 && (
+        <>
+          <button className="gc-why" onClick={() => setWhy((v) => !v)}>
+            {why ? '▾' : '▸'} where this number comes from
+          </button>
+          {why && (
+            <ul className="gc-notes">
+              {w.caveats.map((c, i) => <li key={i}>{c}</li>)}
+            </ul>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
-function StatRow({
-  label, h, a,
-}: {
-  label: string
-  h: string | number | null | undefined
-  a: string | number | null | undefined
-}) {
+// ── the five numbers ─────────────────────────────────────────────────────────
+
+function Headlines({ items }: { items: Headline[] }) {
+  if (!items.length) return null
   return (
-    <div className="gc-stat-row">
-      <span className="gc-stat-h">{h ?? '—'}</span>
-      <span className="gc-stat-label">{label}</span>
-      <span className="gc-stat-a">{a ?? '—'}</span>
+    <section className="gc-section">
+      <h3 className="scan-group-title">THE MARKET</h3>
+      <div className="gc-headlines">
+        {items.map((h, i) => (
+          <div key={i} className="gc-headline">
+            <span className="gc-headline-label">{h.label}</span>
+            <b className={h.isMid ? 'gc-mid' : undefined}>{odds(h.prob)}</b>
+            <span className="gc-outcome-pct">{pct(h.prob)}{h.isMid ? ' mid' : ''}</span>
+            {h.spreadPp != null && (
+              <span className="gc-outcome-book">
+                {h.spreadPp.toFixed(1)}pp wide · {money(h.depthUsd)} at ask
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="gc-note">
+        Prices are the <b>ask</b> — what you would pay, not the mid. The mid is the number that
+        made a paper strategy book +141% where the same 15 decisions returned +3.4% live.
+      </p>
+    </section>
+  )
+}
+
+// ── movement ─────────────────────────────────────────────────────────────────
+
+function Sparkline({ points }: { points: PricePoint[] }) {
+  if (points.length < 2) return null
+  const W = 320
+  const H = 48
+  const ps = points.map((p) => p.p)
+  const lo = Math.min(...ps)
+  const hi = Math.max(...ps)
+  const span = hi - lo || 1
+  const d = points
+    .map((p, i) => {
+      const x = (i / (points.length - 1)) * W
+      const y = H - ((p.p - lo) / span) * H
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  const first = ps[0]
+  const last = ps[ps.length - 1]
+  const up = last >= first
+  const movePp = (last - first) * 100
+
+  return (
+    <div className="gc-spark">
+      <svg viewBox={`0 0 ${W} ${H}`} className="gc-spark-svg" preserveAspectRatio="none">
+        <path d={d} fill="none" stroke={up ? 'var(--green)' : 'var(--red)'} strokeWidth="1.5" />
+      </svg>
+      <div className="gc-spark-meta">
+        {/* Decimal on both ends, because a move from 2.13 to 1.27 is the thing
+            that happened; "47% → 79%" is the same fact in a unit nobody bets in. */}
+        <span>{odds(first)} → {odds(last)}</span>
+        <span className={up ? 'c-green' : 'c-red'}>
+          {movePp > 0 ? '+' : ''}{movePp.toFixed(1)}pp / 24h
+        </span>
+      </div>
     </div>
   )
 }
 
-// ── markets ──────────────────────────────────────────────────────────────────
+function Movement({ data }: { data: GameData }) {
+  if (!data.history || data.history.points.length < 2) return null
+  return (
+    <section className="gc-section">
+      <h3 className="scan-group-title">MOVEMENT — {data.history.label}</h3>
+      <Sparkline points={data.history.points} />
+      {data.movers.length > 0 && (
+        <div className="gc-movers">
+          {data.movers.map((m: Mover, i) => (
+            <div key={i} className="gc-mover">
+              <span className="gc-mover-q">{m.question} — {m.outcome}</span>
+              <span className="gc-mover-move">
+                {odds(m.from)} → <b>{odds(m.to)}</b>{' '}
+                <span className={m.movePp > 0 ? 'c-green' : 'c-red'}>
+                  ({m.movePp > 0 ? '+' : ''}{m.movePp.toFixed(1)}pp)
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── the full board, out of the way ───────────────────────────────────────────
 
 function OutcomeCell({ o }: { o: Outcome }) {
   const ask = o.book?.ask ?? null
@@ -202,7 +323,13 @@ function MarketBlock({ g }: { g: MarketGroup }) {
   )
 }
 
-function MarketsSection({ groups }: { groups: MarketGroup[] }) {
+/** The whole board, collapsed.
+ *
+ *  It used to open on load, and 65 markets is not context — it is the same wall
+ *  of prices Polymarket already shows, with our styling on it. Anyone who wants
+ *  the board is one click away; everyone else gets the fixture. */
+function AllMarkets({ groups }: { groups: MarketGroup[] }) {
+  const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
@@ -215,42 +342,48 @@ function MarketsSection({ groups }: { groups: MarketGroup[] }) {
     return acc
   }, {})
 
+  if (!groups.length) return null
+
   return (
     <section className="gc-section">
-      <div className="gc-section-head">
-        <h3 className="scan-group-title">MARKETS ({groups.length})</h3>
-        <input
-          className="gc-search"
-          placeholder="filter markets…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
+      <button className="gc-board-toggle" onClick={() => setOpen((v) => !v)}>
+        <span>{open ? '▾' : '▸'} ALL MARKETS</span>
+        <span className="gc-group-count">{groups.length}</span>
+      </button>
 
-      {Object.entries(byGroup).map(([name, list]) => {
-        // The first group is open by default; the rest collapse, because a
-        // fixture board runs to 85 markets and an open wall of them is unusable.
-        const isOpen = openGroups[name] ?? name === Object.keys(byGroup)[0]
-        return (
-          <div key={name} className="gc-group">
-            <button
-              className="gc-group-head"
-              onClick={() => setOpenGroups((s) => ({ ...s, [name]: !isOpen }))}
-            >
-              <span>{isOpen ? '▾' : '▸'} {name}</span>
-              <span className="gc-group-count">{list.length}</span>
-            </button>
-            {isOpen && list.map((g, i) => <MarketBlock key={i} g={g} />)}
-          </div>
-        )
-      })}
-
-      {filtered.length === 0 && <div className="scan-no-edge">No markets match “{query}”.</div>}
+      {open && (
+        <>
+          <input
+            className="gc-search gc-search-wide"
+            placeholder="filter markets…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {Object.entries(byGroup).map(([name, list]) => {
+            const isOpen = openGroups[name] ?? name === Object.keys(byGroup)[0]
+            return (
+              <div key={name} className="gc-group">
+                <button
+                  className="gc-group-head"
+                  onClick={() => setOpenGroups((s) => ({ ...s, [name]: !isOpen }))}
+                >
+                  <span>{isOpen ? '▾' : '▸'} {name}</span>
+                  <span className="gc-group-count">{list.length}</span>
+                </button>
+                {isOpen && list.map((g, i) => <MarketBlock key={i} g={g} />)}
+              </div>
+            )
+          })}
+          {filtered.length === 0 && (
+            <div className="scan-no-edge">No markets match “{query}”.</div>
+          )}
+        </>
+      )}
     </section>
   )
 }
 
-// ── Kalshi ───────────────────────────────────────────────────────────────────
+// ── Kalshi + caveats ─────────────────────────────────────────────────────────
 
 function KalshiSection({ data }: { data: GameData }) {
   if (!data.kalshi) return null
@@ -279,6 +412,37 @@ function KalshiSection({ data }: { data: GameData }) {
           fixtures quoted on both venues we found <b>zero</b> net arbitrages — the gross
           ceiling is one tick against a ~3pp fee bar. This is a price comparison, not a trade.
         </p>
+      )}
+    </section>
+  )
+}
+
+function Caveats({ data }: { data: GameData }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="gc-section">
+      <button className="gc-board-toggle" onClick={() => setOpen((v) => !v)}>
+        <span>{open ? '▾' : '▸'} WHAT THIS PAGE CANNOT TELL YOU</span>
+      </button>
+      {open && (
+        <ul className="gc-notes">
+          {data.notes.map((n, i) => <li key={i}>{n}</li>)}
+          <li>
+            No sportsbook column: our sharp benchmark is Pinnacle and Betfair, and that feed is
+            out of quota. Prices here are Polymarket&apos;s and Kalshi&apos;s own.
+          </li>
+          <li>
+            No model edge is shown anywhere. On 6 of 6 outcome groups Polymarket&apos;s price beat
+            our model on Brier score, so a &quot;model says X is cheap&quot; badge would be selling
+            something we measured as not working. Every fair value on this page is a counted
+            frequency, not a prediction.
+          </li>
+          <li>
+            Pre-match, Polymarket&apos;s football price is fair at the bid — the round trip costs
+            1.2-2.5pp and beats every entry signal we have tested. Edge has to come from
+            settlement or from in-play moves much larger than the spread.
+          </li>
+        </ul>
       )}
     </section>
   )
@@ -354,7 +518,10 @@ export default function GamePage({ params }: { params: { slug: string } }) {
 
         {data && (
           <>
-            <LiveHeader data={data} />
+            <GameHeader data={data} />
+            <ContextStrip movers={data.movers} />
+            <WatchBlock w={data.watch} />
+            <Headlines items={data.headlines} />
 
             <div className="gc-actions">
               <button className="gc-action" onClick={toggleWatch}>
@@ -370,35 +537,10 @@ export default function GamePage({ params }: { params: { slug: string } }) {
               )}
             </div>
 
-            {data.history && data.history.points.length > 1 && (
-              <section className="gc-section">
-                <h3 className="scan-group-title">PRICE — {data.history.label}</h3>
-                <Sparkline points={data.history.points} />
-              </section>
-            )}
-
-            <MarketsSection groups={data.groups} />
+            <Movement data={data} />
+            <AllMarkets groups={data.groups} />
             <KalshiSection data={data} />
-
-            {data.notes.length > 0 && (
-              <section className="gc-section">
-                <h3 className="scan-group-title">WHAT THIS PAGE CANNOT TELL YOU</h3>
-                <ul className="gc-notes">
-                  {data.notes.map((n, i) => (
-                    <li key={i}>{n}</li>
-                  ))}
-                  <li>
-                    No sportsbook column: our sharp benchmark is Pinnacle and Betfair, and that
-                    feed is out of quota. Prices here are Polymarket&apos;s and Kalshi&apos;s own.
-                  </li>
-                  <li>
-                    No model edge is shown. On 6 of 6 outcome groups Polymarket&apos;s price beat
-                    our model on Brier score, so a &quot;model says X is cheap&quot; badge would
-                    be selling something we measured as not working.
-                  </li>
-                </ul>
-              </section>
-            )}
+            <Caveats data={data} />
           </>
         )}
       </main>
