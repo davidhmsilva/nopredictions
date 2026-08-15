@@ -145,6 +145,7 @@ export interface GameData {
   pmUrl: string
   live: LiveState | null
   board: BoardState
+  pressure: Pressure | null
   watch: WatchCard
   headlines: Headline[]
   movers: Mover[]
@@ -1023,6 +1024,206 @@ export function leverageRead(p1: number, p2: number, goals: number): {
     // "Dear" means the quoted leveraged rung sits above what the measured
     // multiple would put it at, given PM's own one-goal price.
     dear: p2 / poissonP2 > measuredRatio,
+  }
+}
+
+// ── pressure ─────────────────────────────────────────────────────────────────
+//
+// "Is this game hot or cold" normally means shots, corners, xG — and that feed
+// is not available here. What IS available is the market's own answer, which is
+// the one that matters for a price anyway: how many more goals it is paying for.
+//
+// The hard part is that a remaining-goal expectation needs a clock to judge.
+// 0.9 goals left is scorching at 85' and dead at 50'. The way round it is to
+// measure the CHANGE at a constant score: time can only ever take danger away,
+// so an expectation that holds up is unambiguously a game heating up, whatever
+// minute it is. And the table says how fast danger normally drains — λ falls
+// about 5.5% a minute from 68' on — which turns the change into a unit:
+// danger-minutes spent per real minute. 1.0 is an average match. Below 1 the
+// game is holding danger better than average; above 1 it is dying.
+
+export interface Pressure {
+  remainingGoals: number
+  nextLine: number
+  nextOdds: number
+  level: 'hot' | 'warm' | 'steady' | 'cooling' | 'cold'
+  changePct: number | null
+  windowMin: number | null
+  burnRate: number | null        // danger-minutes per real minute
+  equivalentMinute: number | null
+  note: string
+}
+
+/** The minute at which an average match of this class has this much danger left.
+ *
+ *  Explicitly not a clock — it is where the fixture sits on the empirical decay
+ *  curve. Returns null outside the curve's range (68-88') rather than
+ *  extrapolating, which on a first half would mean inventing the number. */
+export function dangerEquivalentMinute(
+  lambda: number,
+  goals: number,
+  pOver25: number | null
+): { minute: number; extrapolated: boolean } | null {
+  const bucket = bucketOf(pOver25)
+  const curve: Array<{ m: number; l: number }> = []
+  for (const m of LATE.minutes) {
+    const cell = LATE.cells[`${m}|${goals}|${bucket}`] ?? LATE.cells[`${m}|${goals}|all`]
+    if (cell && cell.n >= LATE.min_cell_n && cell.p > 0 && cell.p < 1) {
+      curve.push({ m, l: -Math.log(1 - cell.p) })
+    }
+  }
+  if (curve.length < 2) return null
+
+  // The curve falls with the minute, so walk it until lambda is bracketed.
+  for (let i = 1; i < curve.length; i++) {
+    const a = curve[i - 1]
+    const b = curve[i]
+    if (lambda <= a.l && lambda >= b.l) {
+      const span = a.l - b.l
+      const f = span === 0 ? 0 : (a.l - lambda) / span
+      return { minute: a.m + f * (b.m - a.m), extrapolated: false }
+    }
+  }
+
+  // Above the top of the curve — a first half, or a game livelier than any 68'
+  // state the table holds. The curve is close to linear in the minute, so its
+  // top slope carries a short way back; beyond EXTRAPOLATE_MIN minutes it is
+  // guesswork and returns nothing instead. Flagged either way, because a
+  // number off the end of the measured range is not the same kind of number.
+  const EXTRAPOLATE_MIN = 20
+  if (lambda > curve[0].l) {
+    const slope = (curve[1].l - curve[0].l) / (curve[1].m - curve[0].m)   // negative
+    if (slope >= 0) return null
+    const back = (lambda - curve[0].l) / -slope
+    if (back > EXTRAPOLATE_MIN) return null
+    return { minute: curve[0].m - back, extrapolated: true }
+  }
+  return null
+}
+
+/** Where the market's goal expectation is, and which way it is moving.
+ *
+ *  The window is cut at the last big jump in the series: a goal moves the
+ *  current rung 10-40pp in one bucket, and before it that same token was
+ *  pricing a different question entirely (at 1-1 the "next goal" rung is Over
+ *  2.5, which an hour earlier at 0-1 was the "two more goals" rung). Measuring
+ *  across a goal compares two different bets. */
+export function buildPressure(
+  groups: MarketGroup[],
+  board: BoardState,
+  history: PricePoint[],
+  pOver25: number | null
+): Pressure | null {
+  if (board.phase !== 'live' || board.goals == null) return null
+  const line = board.goals + 0.5
+  const g = groups.find((x) => matchTotalLine(x.question) === line)
+  const over = g?.outcomes.find((o) => /^over$/i.test(o.name))
+  // The mid, not the ask: this is a rate estimate, and the ask carries half the
+  // spread as a fee rather than as danger.
+  const p = over?.price ?? null
+  if (p == null || p <= 0.02 || p >= 0.98) return null
+
+  const lambdaNow = -Math.log(1 - p)
+  const eq = dangerEquivalentMinute(lambdaNow, board.goals, pOver25)
+  const eqNow = eq?.minute ?? null
+
+  let changePct: number | null = null
+  let windowMin: number | null = null
+  let burnRate: number | null = null
+
+  // Only an UPWARD jump resets the window. A goal makes the rung above the score
+  // an easier question, so it snaps the price up — the two on this fixture were
+  // +29pp and +27.5pp. Downward moves of 8-10pp in a five-minute bucket are
+  // ordinary in-play decay, which is the very thing being measured; treating
+  // those as state changes left the window three points long and said nothing.
+  const pts = history.filter((x) => x.p > 0.02 && x.p < 0.98)
+  let start = 0
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].p - pts[i - 1].p >= 0.15) start = i
+  }
+  const window = pts.slice(start)
+  if (window.length >= 3) {
+    const then = window[0]
+    const mins = (window[window.length - 1].t - then.t) / 60
+    if (mins >= 12) {
+      // Both ends of the trend come from the SAME series. Taking "now" from the
+      // Gamma mid and "then" from the CLOB history mixes two sources that can
+      // sit 10pp apart, and the difference between them lands in the trend as
+      // if it were something the match did.
+      const last = window[window.length - 1]
+      const lambdaThen = -Math.log(1 - then.p)
+      const lambdaLast = -Math.log(1 - last.p)
+      windowMin = mins
+      changePct = (lambdaLast / lambdaThen - 1) * 100
+      const eqThen = dangerEquivalentMinute(lambdaThen, board.goals, pOver25)
+      const eqLast = dangerEquivalentMinute(lambdaLast, board.goals, pOver25)
+      if (eqThen != null && eqLast != null) burnRate = (eqLast.minute - eqThen.minute) / mins
+    }
+  }
+
+  // A rising expectation at a constant score is the one unambiguous reading:
+  // the clock can only subtract, so anything it does not subtract is danger the
+  // market has added. Everything else is graded on the burn rate where the
+  // curve can grade it, and left as steady where it cannot.
+  let level: Pressure['level'] = 'steady'
+  if (changePct != null && changePct > 2) level = 'hot'
+  else if (burnRate != null) {
+    level = burnRate < 0.5 ? 'hot'
+      : burnRate < 0.9 ? 'warm'
+      : burnRate <= 1.4 ? 'steady'
+      : burnRate <= 2.0 ? 'cooling'
+      : 'cold'
+  } else if (changePct != null) {
+    // No curve anchor, so the only reference left is the measured drain itself:
+    // λ falls about 5.5% a minute from 68' on. Anything much slower than that
+    // is a game holding danger; anything faster is one letting it go.
+    const expected = (Math.pow(0.945, windowMin ?? 0) - 1) * 100
+    const slack = changePct - expected
+    level = slack > 25 ? 'hot' : slack > 8 ? 'warm' : slack > -8 ? 'steady' : 'cooling'
+  }
+
+  const parts: string[] = [
+    `Polymarket asks ${(1 / p).toFixed(2)} for one more goal, which prices ` +
+    `${lambdaNow.toFixed(2)} more goals in whatever is left.`,
+  ]
+  if (eqNow != null) {
+    parts.push(
+      `That is as much danger as an average match of this class still carries at ` +
+      `${eqNow.toFixed(0)}'${eq?.extrapolated ? ' (past the end of the measured curve, ' +
+        'carried back on its own slope)' : ''} — a position on the decay curve, not a clock.`
+    )
+  }
+  if (burnRate != null && windowMin != null) {
+    parts.push(
+      `Over the last ${windowMin.toFixed(0)} minutes at ${board.goals} goal` +
+      `${board.goals === 1 ? '' : 's'} it has burned ${burnRate.toFixed(2)} danger-minutes ` +
+      `per real minute, against 1.0 for an average match — ` +
+      (burnRate < 0.9 ? 'the game is holding danger better than the clock takes it away.'
+        : burnRate <= 1.4 ? 'about what the clock alone does.'
+        : 'faster than the clock alone, so the market is writing this one off.')
+    )
+  } else if (changePct != null && windowMin != null) {
+    const expected = (Math.pow(0.945, windowMin) - 1) * 100
+    parts.push(
+      `Over the last ${windowMin.toFixed(0)} minutes at an unchanged score it has moved ` +
+      `${changePct > 0 ? '+' : ''}${changePct.toFixed(0)}%, against ${expected.toFixed(0)}% for ` +
+      `the measured drain of 5.5% a minute. Time alone can only take danger away, so anything ` +
+      `it has not taken is danger the market added.`
+    )
+  } else {
+    parts.push('Not enough settled history since the last goal to say which way it is moving.')
+  }
+
+  return {
+    remainingGoals: lambdaNow,
+    nextLine: line,
+    nextOdds: 1 / p,
+    level,
+    changePct,
+    windowMin,
+    burnRate,
+    equivalentMinute: eqNow,
+    note: parts.join(' '),
   }
 }
 

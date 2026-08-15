@@ -3,6 +3,7 @@ import {
   buildGroups,
   buildHeadlines,
   buildMovers,
+  buildPressure,
   buildWatch,
   fetchBook,
   fetchEvent,
@@ -177,6 +178,12 @@ export async function GET(request: Request) {
     const total25 = traded.find((t) => matchTotalLine(t.g.question) === 2.5)
     const wanted = [...traded.slice(0, HISTORY_FOR_TOP)]
     if (total25 && !wanted.includes(total25)) wanted.push(total25)
+    // Every full-match total, whatever its volume: the pressure reading follows
+    // the rung above the current score, and which rung that is changes with
+    // every goal. A ladder is at most six markets.
+    for (const t of traded) {
+      if (matchTotalLine(t.g.question) != null && !wanted.includes(t)) wanted.push(t)
+    }
 
     const histories = await Promise.all(
       wanted.map(async (t) => ({
@@ -207,6 +214,11 @@ export async function GET(request: Request) {
       (total25History ? preKickoffPrice(total25History.points, started) : null)
       ?? (started ? null : pmOver25(groups))
 
+    const nextRung = board.goals != null
+      ? histories.find((h) => matchTotalLine(h.question) === board.goals! + 0.5)
+      : undefined
+    const pressure = buildPressure(groups, board, nextRung?.points ?? [], preOver25)
+
     const headlines = buildHeadlines(groups, teams.home, teams.away)
     const watch = buildWatch(groups, live, board, competition, preOver25, movers)
 
@@ -234,6 +246,7 @@ export async function GET(request: Request) {
       pmUrl: `https://polymarket.com/event/${slug}`,
       live,
       board,
+      pressure,
       watch,
       headlines,
       movers: movers.slice(0, 3),

@@ -134,6 +134,119 @@ function ContextStrip({ movers, phase }: { movers: Mover[]; phase: GameData['boa
   )
 }
 
+// ── pressure ─────────────────────────────────────────────────────────────────
+
+// An average match is worth about 2.7 goals, so that is what a full bar means:
+// "the market still prices a whole match's worth of danger".
+const FULL_MATCH_GOALS = 2.7
+
+// The two states the empirical curve actually pins: what an average match of
+// this class still has left at 68' and at 88'.
+const MARKS = [
+  { at: 0.25, label: "avg 88'" },
+  { at: 0.9, label: "avg 68'" },
+]
+
+const LEVELS: Record<string, { label: string; cls: string }> = {
+  hot: { label: 'HOT', cls: 'gc-p-hot' },
+  warm: { label: 'WARM', cls: 'gc-p-warm' },
+  steady: { label: 'STEADY', cls: 'gc-p-steady' },
+  cooling: { label: 'COOLING', cls: 'gc-p-cool' },
+  cold: { label: 'COLD', cls: 'gc-p-cold' },
+}
+
+function PressureBar({ data }: { data: GameData }) {
+  const p = data.pressure
+  const stats = data.live?.stats
+  if (!p && !stats) return null
+
+  return (
+    <section className="gc-section">
+      <h3 className="scan-group-title">PRESSURE</h3>
+
+      {p && (
+        <div className="gc-pressure">
+          <div className="gc-pressure-head">
+            <span className={`gc-pressure-level ${LEVELS[p.level].cls}`}>
+              {LEVELS[p.level].label}
+            </span>
+            <span className="gc-pressure-num">
+              <b>{p.remainingGoals.toFixed(2)}</b> more goals priced in
+              {p.burnRate != null && (
+                <span className="gc-outcome-pct">
+                  {' '}· burning {p.burnRate.toFixed(2)} danger-min per minute
+                </span>
+              )}
+            </span>
+          </div>
+
+          <div className="gc-pressure-track">
+            <div
+              className={`gc-pressure-fill ${LEVELS[p.level].cls}`}
+              style={{ width: `${Math.min(100, (p.remainingGoals / FULL_MATCH_GOALS) * 100)}%` }}
+            />
+            {/* Where an average match sits at 68' and at 88', so the fill has
+                something to be read against rather than floating on its own. */}
+            {MARKS.map((m) => (
+              <span key={m.label} className="gc-pressure-tick"
+                style={{ left: `${(m.at / FULL_MATCH_GOALS) * 100}%` }} />
+            ))}
+          </div>
+          {/* The labels sit ON their marks. Spreading them evenly across the
+              track put "avg 88'" a third of the way along when its tick is at
+              a tenth, which reads as a scale and is not one. */}
+          <div className="gc-pressure-scale">
+            {MARKS.map((m) => (
+              <span key={m.label} style={{ left: `${(m.at / FULL_MATCH_GOALS) * 100}%` }}>
+                {m.label}
+              </span>
+            ))}
+            <span className="gc-pressure-scale-end">a full match</span>
+          </div>
+
+          <p className="gc-note">{p.note}</p>
+        </div>
+      )}
+
+      {/* When the live feed is actually answering, the real inputs go under the
+          market's own reading rather than replacing it — one is what is
+          happening, the other is what it is being paid for. */}
+      {stats && (
+        <div className="gc-stats">
+          <StatRow label="xG" h={stats.homeXg?.toFixed(2)} a={stats.awayXg?.toFixed(2)} />
+          <StatRow label="Shots on target" h={stats.homeShotsOn} a={stats.awayShotsOn} />
+          <StatRow label="Total shots" h={stats.homeShotsTotal} a={stats.awayShotsTotal} />
+          <StatRow label="Corners" h={stats.homeCorners} a={stats.awayCorners} />
+          <StatRow
+            label="Possession"
+            h={stats.homePossession != null ? `${stats.homePossession}%` : null}
+            a={stats.awayPossession != null ? `${stats.awayPossession}%` : null}
+          />
+          {(stats.homeReds > 0 || stats.awayReds > 0) && (
+            <StatRow label="Red cards" h={stats.homeReds} a={stats.awayReds} />
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function StatRow({
+  label, h, a,
+}: {
+  label: string
+  h: string | number | null | undefined
+  a: string | number | null | undefined
+}) {
+  return (
+    <div className="gc-stat-row">
+      <span className="gc-stat-h">{h ?? '—'}</span>
+      <span className="gc-stat-label">{label}</span>
+      <span className="gc-stat-a">{a ?? '—'}</span>
+    </div>
+  )
+}
+
 // ── the watch card ───────────────────────────────────────────────────────────
 
 function WatchBlock({ w }: { w: WatchCard }) {
@@ -546,6 +659,7 @@ export default function GamePage({ params }: { params: { slug: string } }) {
           <>
             <GameHeader data={data} />
             <ContextStrip movers={data.movers} phase={data.board.phase} />
+            <PressureBar data={data} />
             <WatchBlock w={data.watch} />
             <Headlines items={data.headlines} />
 

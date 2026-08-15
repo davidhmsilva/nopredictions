@@ -2010,6 +2010,42 @@ button { font-family: var(--font); }
 .gc-context-tag { color: var(--white); letter-spacing: 1px; flex-shrink: 0; }
 .gc-context b { color: var(--white); }
 
+/* ── PRESSURE ── */
+.gc-pressure { border: 1px solid var(--border); background: var(--bg2); padding: 14px; }
+.gc-pressure-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.gc-pressure-level {
+  font-size: 13px; letter-spacing: 2px; padding: 3px 8px; border: 1px solid currentColor;
+}
+.gc-pressure-num { font-size: 11px; color: var(--grey); }
+.gc-pressure-num b { font-size: 16px; color: var(--white); }
+
+.gc-p-hot { color: #ff6b35; }
+.gc-p-warm { color: #ffaa00; }
+.gc-p-steady { color: var(--grey); }
+.gc-p-cool { color: #5aa9e6; }
+.gc-p-cold { color: #4477aa; }
+
+.gc-pressure-track {
+  position: relative; height: 14px; background: var(--bg3);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.gc-pressure-fill { height: 100%; background: currentColor; opacity: 0.75; }
+.gc-pressure-tick {
+  position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border);
+}
+.gc-pressure-scale {
+  position: relative; height: 12px; margin-top: 4px;
+  font-size: 9px; color: var(--grey);
+}
+.gc-pressure-scale span {
+  position: absolute; transform: translateX(-50%); white-space: nowrap;
+}
+.gc-pressure-scale .gc-pressure-scale-end {
+  left: auto; right: 0; transform: none;
+}
+
 /* ── WATCH CARD — the one thing the page is for ── */
 .gc-watch {
   border: 1px solid var(--accent); background: var(--bg2);
