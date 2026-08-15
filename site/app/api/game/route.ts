@@ -10,6 +10,8 @@ import {
   fetchKalshi,
   fetchLive,
   fetchSiblings,
+  inferBoardState,
+  looksLive,
   matchTotalLine,
   pmOver25,
   takerFeePp,
@@ -31,17 +33,18 @@ const HISTORY_FOR_TOP = 6
  *
  *  The fair-value table buckets on the pre-match total, so once a match is live
  *  the current quote is the wrong number — it has already absorbed the goals.
- *  The last history point at or before the listed start time is the right one.
- *  Polymarket's listed time can run ahead of the real kick-off on smaller
- *  leagues, which here is the safe direction: it only ever makes this reach
- *  further back into genuinely pre-match trading. */
-function preKickoffPrice(points: PricePoint[], kickoff: string | null): number | null {
+ *
+ *  Polymarket's listed start time is not used to find the boundary, in either
+ *  direction. It ran ~30 min EARLY on the smaller leagues that invalidated 73k
+ *  of our own observations, and on Sevilla v Rayo (2026-08-15) it sat eight
+ *  hours LATE while the first half was already played — so "points before the
+ *  listed time" can be pure in-play trading. What is safe is the shape of the
+ *  window: a football match lasts two hours, so once the board says the fixture
+ *  is live, the oldest point in a 24h series is certainly pre-match. Before
+ *  kick-off, the newest point is the live pre-match price. */
+function preKickoffPrice(points: PricePoint[], started: boolean): number | null {
   if (!points.length) return null
-  if (!kickoff) return points[0].p
-  const ko = Date.parse(kickoff) / 1000
-  if (!Number.isFinite(ko)) return points[0].p
-  const before = points.filter((p) => p.t <= ko)
-  return before.length ? before[before.length - 1].p : null
+  return started ? points[0].p : points[points.length - 1].p
 }
 
 function extractTeams(title: string): { home: string; away: string } | null {
@@ -186,15 +189,26 @@ export async function GET(request: Request) {
 
     const movers = buildMovers(histories)
 
-    // Pre-match bucket first, current quote only as a fallback: before kick-off
-    // the two are the same number, and after it the current quote is the wrong
-    // one to bucket on.
     const total25History = histories.find((h) => h.tokenId === total25?.o.tokenId)
+
+    // What the board itself says about whether this fixture has kicked off —
+    // asked before the live feed rather than after it, because the feed is
+    // absent far more often than it is present.
+    const board = inferBoardState(groups, teams.home, teams.away)
+    if (board.phase === 'unknown' && total25History && looksLive(total25History.points)) {
+      // A goalless first half quotes the same rungs as a fixture that has not
+      // started; only the fact that every bucket keeps moving separates them.
+      board.phase = 'live'
+      board.evidence = 'no rung has resolved, but the ladder moves in every 5-minute bucket'
+    }
+
+    const started = board.phase === 'live' || board.phase === 'finished'
     const preOver25 =
-      (total25History ? preKickoffPrice(total25History.points, kickoff) : null) ?? pmOver25(groups)
+      (total25History ? preKickoffPrice(total25History.points, started) : null)
+      ?? (started ? null : pmOver25(groups))
 
     const headlines = buildHeadlines(groups, teams.home, teams.away)
-    const watch = buildWatch(groups, live, competition, preOver25, movers)
+    const watch = buildWatch(groups, live, board, competition, preOver25, movers)
 
     // The sparkline follows whatever the watch card is about, so the chart and
     // the number underneath it are the same market.
@@ -219,6 +233,7 @@ export async function GET(request: Request) {
       kickoff,
       pmUrl: `https://polymarket.com/event/${slug}`,
       live,
+      board,
       watch,
       headlines,
       movers: movers.slice(0, 3),

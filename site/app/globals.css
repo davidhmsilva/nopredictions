@@ -1995,6 +1995,11 @@ button { font-family: var(--font); }
 .gc-notes { padding-left: 16px; }
 .gc-notes li { margin-bottom: 6px; }
 
+.gc-ft-badge {
+  font-size: 9px; letter-spacing: 1px; color: var(--grey);
+  border: 1px solid var(--border); padding: 2px 5px; margin-left: 8px;
+}
+
 /* ── context strip ── */
 .gc-context {
   display: flex; gap: 10px; align-items: flex-start;

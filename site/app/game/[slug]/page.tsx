@@ -42,17 +42,31 @@ function money(v: number | null | undefined): string {
 
 function GameHeader({ data }: { data: GameData }) {
   const live = data.live
+  const board = data.board
   const kickoff = data.kickoff ? new Date(data.kickoff) : null
+
+  // The live feed wins when it is there; the board carries it when it is not,
+  // which is most of the time. Only when neither can say anything does the page
+  // fall back to showing a fixture that has not started.
+  const score =
+    live ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute }
+    : board.homeGoals != null && board.awayGoals != null
+      ? { h: board.homeGoals, a: board.awayGoals, minute: null }
+      : null
+  const inPlay = !!live || board.phase === 'live'
+  const badge = board.phase === 'finished' ? 'FT' : inPlay ? 'LIVE' : null
 
   return (
     <div className="gc-header">
       <div className="gc-teams">
         <span className="gc-team">{data.home}</span>
-        {live ? (
+        {score || badge ? (
           <span className="gc-score">
-            {live.homeGoals}-{live.awayGoals}
-            {live.minute != null && <span className="gc-minute">{live.minute}&apos;</span>}
-            <span className="analysis-live-badge">LIVE</span>
+            {score ? `${score.h}-${score.a}` : '·'}
+            {score?.minute != null && <span className="gc-minute">{score.minute}&apos;</span>}
+            {badge && (
+              <span className={badge === 'FT' ? 'gc-ft-badge' : 'analysis-live-badge'}>{badge}</span>
+            )}
           </span>
         ) : (
           <span className="analysis-vs">vs</span>
@@ -62,7 +76,10 @@ function GameHeader({ data }: { data: GameData }) {
 
       <div className="gc-header-meta">
         {data.competition && <span>{data.competition}</span>}
-        {kickoff && (
+        {/* The listed start time is shown only before kick-off. Once the board
+            says the ball is rolling it is worse than useless — on this fixture
+            Polymarket listed 21:30 while the first half was already played. */}
+        {kickoff && !inPlay && board.phase !== 'finished' && (
           <span>
             {kickoff.toLocaleString('en-GB', {
               weekday: 'short', day: 'numeric', month: 'short',
@@ -70,12 +87,15 @@ function GameHeader({ data }: { data: GameData }) {
             })}
           </span>
         )}
-        {/* Where the clock came from is not a detail. A minute taken from PM's
-            listed start time runs ~30 min ahead on smaller leagues, which is
-            what invalidated 73k of our own observations — so the page says
-            which source it is standing on. */}
+        {/* Which clock, and which score, the page is standing on. A minute taken
+            from PM's listed start time is what invalidated 73k of our own
+            observations, so "no minute" is stated rather than papered over. */}
         <span className={live?.clockSource ? 'gc-verified' : 'gc-unverified'}>
-          {live?.clockSource ? 'clock: api-football' : 'clock: unverified'}
+          {live?.clockSource
+            ? 'clock: api-football'
+            : inPlay || board.phase === 'finished'
+              ? `score: board${board.bookConfirmed ? ' + CLOB' : ''} · no minute`
+              : 'clock: unverified'}
         </span>
       </div>
     </div>
@@ -89,10 +109,11 @@ function GameHeader({ data }: { data: GameData }) {
 // so anything this big gets a line at the top as well.
 const BIG_MOVE_PP = 10
 
-function ContextStrip({ movers }: { movers: Mover[] }) {
+function ContextStrip({ movers, phase }: { movers: Mover[]; phase: GameData['board']['phase'] }) {
   const m = movers[0]
   if (!m || Math.abs(m.movePp) < BIG_MOVE_PP) return null
   const shorter = m.movePp > 0
+  const inPlay = phase === 'live' || phase === 'finished'
   return (
     <div className="gc-context">
       <span className="gc-context-tag">24H</span>
@@ -102,7 +123,12 @@ function ContextStrip({ movers }: { movers: Mover[] }) {
         <span className={shorter ? 'c-green' : 'c-red'}>
           ({m.movePp > 0 ? '+' : ''}{m.movePp.toFixed(1)}pp)
         </span>
-        . Polymarket repriced this fixture hard; whatever the news was, the board already has it.
+        {/* A 24h window on a live fixture spans the match itself. Calling that
+            "the market repricing on news" would be narrating goals as team
+            news, which is exactly what this page did before. */}
+        {inPlay
+          ? '. That window covers the match itself, so most of the move is the game, not news.'
+          : '. Polymarket repriced this fixture hard before a ball was kicked.'}
       </span>
     </div>
   )
@@ -519,7 +545,7 @@ export default function GamePage({ params }: { params: { slug: string } }) {
         {data && (
           <>
             <GameHeader data={data} />
-            <ContextStrip movers={data.movers} />
+            <ContextStrip movers={data.movers} phase={data.board.phase} />
             <WatchBlock w={data.watch} />
             <Headlines items={data.headlines} />
 

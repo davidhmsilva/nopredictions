@@ -101,7 +101,7 @@ export interface KalshiComparison {
  *  would be selling the one thing we measured as not working.
  */
 export interface WatchCard {
-  kind: 'live-late-goal' | 'setup-late-goal' | 'mover' | 'none'
+  kind: 'live-late-goal' | 'live-leverage' | 'live-state' | 'setup-late-goal' | 'mover' | 'none'
   title: string
   state: string | null       // "Rayo lead 1-0 · 76'" — the state the number is conditioned on
   market: string | null      // "Over 1.5 — full match"
@@ -144,6 +144,7 @@ export interface GameData {
   kickoff: string | null
   pmUrl: string
   live: LiveState | null
+  board: BoardState
   watch: WatchCard
   headlines: Headline[]
   movers: Mover[]
@@ -603,6 +604,226 @@ export async function fetchKalshi(
   return null
 }
 
+// ── reading the match off the board ──────────────────────────────────────────
+//
+// api-football answers on a small minority of polls — the daily quota is shared
+// with the crons and is routinely gone by midday — and its key is not even set
+// on the deployment. A page that can only see a live match through that feed is
+// blind for most of the football it is supposed to cover, which is how it came
+// to narrate an in-play move as pre-match team news.
+//
+// The board itself is not blind. An over rung quoted at ~1.00 has already paid,
+// which means the goals are on the pitch; the first-half markets resolve at
+// half time whatever anyone's clock says. None of it costs a request.
+
+// An over line at/above SETTLED has paid; at/below UNSETTLED_MAX it has not.
+// Between them is a dead zone that says nothing and poisons certainty — the
+// same thresholds the observer uses, for the same reason.
+const SETTLED_PRICE = 0.99
+const UNSETTLED_MAX = 0.95
+// Gamma lags the CLOB. On 20% of the first observation run's polls the CLOB ask
+// sat >20pp above the Gamma mid for the same token — a line the match has
+// already passed while Gamma still quotes it live. So where a book exists, it
+// referees the rung.
+const BOOK_SETTLED_BID = 0.97
+const BOOK_UNSETTLED_ASK = 0.96
+
+export type Phase = 'pre' | 'live' | 'finished' | 'unknown'
+
+export interface BoardState {
+  phase: Phase
+  goals: number | null           // total, only when the ladder is unambiguous
+  homeGoals: number | null
+  awayGoals: number | null
+  certain: boolean               // ladder is internally unambiguous
+  bookConfirmed: boolean         // and the CLOB agrees with it
+  firstHalfDone: boolean
+  evidence: string               // what the reading is standing on, in words
+}
+
+/** Total goals implied by an over ladder: (lower, upper, certain). */
+export function inferGoals(
+  ladder: Array<{ line: number; price: number | null }>
+): { lower: number; upper: number | null; certain: boolean } {
+  let lower = 0
+  let upper: number | null = null
+  let dead = false
+  for (const { line, price } of [...ladder].sort((a, b) => a.line - b.line)) {
+    if (price == null) continue
+    const n = Math.floor(line)
+    if (price >= SETTLED_PRICE) lower = Math.max(lower, n + 1)
+    else if (price <= UNSETTLED_MAX) upper = upper == null ? n : Math.min(upper, n)
+    else dead = true
+  }
+  if (upper != null && lower > upper) return { lower: 0, upper: null, certain: false }
+  return { lower, upper, certain: !dead && upper != null && lower === upper }
+}
+
+/** The over side of a line, whatever kind of total it is. */
+function overOf(g: MarketGroup): Outcome | undefined {
+  return g.outcomes.find((o) => /^over$/i.test(o.name))
+}
+
+/** Ladder for one flavour of total: the match, one team, or one half.
+ *
+ *  `qualifier` is what must sit between the colon and "O/U" — empty for the
+ *  match line. Reading a team total as the match line is the sub-market
+ *  confusion the paper trader's classifier already had to be guarded from. */
+function ladderFor(
+  groups: MarketGroup[],
+  qualifier: (prefix: string) => boolean
+): Array<{ line: number; price: number | null; group: MarketGroup }> {
+  const out: Array<{ line: number; price: number | null; group: MarketGroup }> = []
+  for (const g of groups) {
+    const tail = g.question.split(':').pop()?.trim() ?? ''
+    const m = tail.match(/^(.*?)\s*O\/U\s*(\d+(?:\.\d+)?)$/i)
+    if (!m) continue
+    if (!qualifier(m[1].trim())) continue
+    const o = overOf(g)
+    if (!o) continue
+    out.push({ line: parseFloat(m[2]), price: o.price, group: g })
+  }
+  return out
+}
+
+/** Does the CLOB back up the two rungs that pin the score?
+ *
+ *  The rung above the score must still look live and the rung below must look
+ *  paid. A 0-0 has no rung below, so there the upper one carries it alone —
+ *  that is all there is to check, not a relaxation. */
+function confirmWithBooks(
+  ladder: Array<{ line: number; price: number | null; group: MarketGroup }>,
+  goals: number
+): boolean {
+  const rung = (line: number) => ladder.find((x) => x.line === line)?.group
+  const above = rung(goals + 0.5)
+  const aboveBook = above ? overOf(above)?.book : null
+  if (!aboveBook?.ask || aboveBook.ask > BOOK_UNSETTLED_ASK) return false
+  if (goals === 0) return true
+  const below = rung(goals - 0.5)
+  const belowBook = below ? overOf(below)?.book : null
+  return !!belowBook?.bid && belowBook.bid >= BOOK_SETTLED_BID
+}
+
+/** Has this fixture kicked off, and where is it?
+ *
+ *  Never asks what time it is. Polymarket's listed start time is wrong in both
+ *  directions — it ran ~30 min early on the smaller leagues that invalidated
+ *  73k of our observations, and on this La Liga fixture it sat eight hours late
+ *  while the first half was already played. */
+export function inferBoardState(groups: MarketGroup[], home: string, away: string): BoardState {
+  const isTeam = (s: string, team: string) => s.length > 0 && teamScore(s, team) >= MIN_SIDE_SCORE
+
+  const match = ladderFor(groups, (p) => p === '')
+  const firstHalf = ladderFor(groups, (p) => /^1st half$/i.test(p))
+  // "Rayo Vallecano de Madrid 1st Half O/U 1.5" scores 0.6 against "Rayo
+  // Vallecano de Madrid" — enough to pass the team test — and a half rung in a
+  // full-match ladder reads back as a score the match has not reached.
+  const wholeMatch = (p: string) => !/\b(1st|2nd|first|second|half)\b/i.test(p)
+  const homeLad = ladderFor(groups, (p) => wholeMatch(p) && isTeam(p, home))
+  const awayLad = ladderFor(groups, (p) => wholeMatch(p) && isTeam(p, away))
+
+  const total = inferGoals(match)
+  const goals = total.certain ? total.lower : null
+  const bookConfirmed = goals != null && confirmWithBooks(match, goals)
+
+  // Half-time is the one moment the board timestamps for free: every 1st-half
+  // market resolves at once, whatever any clock says.
+  const fhTotal = inferGoals(firstHalf)
+  const firstHalfDone =
+    firstHalf.length > 0 &&
+    firstHalf.every((r) => r.price != null && (r.price >= SETTLED_PRICE || r.price <= 0.02))
+
+  // A resolved 1X2 is full time.
+  const result = groups.filter((g) => g.group === 'Match result')
+  const resultPrices = result
+    .map((g) => g.outcomes.find((o) => /^yes$/i.test(o.name))?.price)
+    .filter((p): p is number => p != null)
+  const finished =
+    resultPrices.length >= 2 &&
+    resultPrices.every((p) => p >= SETTLED_PRICE || p <= 1 - SETTLED_PRICE)
+
+  const started = (goals != null && goals > 0) || firstHalfDone || fhTotal.lower > 0
+
+  let phase: Phase = 'unknown'
+  if (finished) phase = 'finished'
+  else if (started) phase = 'live'
+  // No goals and no resolved half markets is a genuinely ambiguous board: a live
+  // goalless first half looks exactly like a fixture that has not kicked off.
+  // That is reported as unknown rather than guessed at in either direction.
+
+  // Split the score. Each team's own ladder answers directly when it is
+  // unambiguous; otherwise the match total closes the arithmetic.
+  const hg = inferGoals(homeLad)
+  const ag = inferGoals(awayLad)
+  let homeGoals = hg.certain ? hg.lower : null
+  let awayGoals = ag.certain ? ag.lower : null
+  if (goals != null) {
+    if (homeGoals == null && awayGoals != null) homeGoals = goals - awayGoals
+    if (awayGoals == null && homeGoals != null) awayGoals = goals - homeGoals
+    if (homeGoals != null && awayGoals != null && homeGoals + awayGoals !== goals) {
+      homeGoals = null
+      awayGoals = null
+    }
+  }
+
+  // Both-teams-to-score is a third witness, and on 2026-08-15 it was the one
+  // telling the truth: the match ladder pinned 2 goals and BTTS had settled
+  // yes, while Sevilla's own rung still sat at 0.745 — a stale Gamma mid that
+  // would have put a 1-1 match on the page as 0-2. A team ladder that says a
+  // side has not scored, against a settled BTTS that says it has, is wrong.
+  const btts = groups.find(
+    (g) => g.group === 'Both teams to score' && !/half|1st|2nd/i.test(g.question)
+  )
+  const bttsYes = btts?.outcomes.find((o) => /^yes$/i.test(o.name))?.price ?? null
+  const bothScored = bttsYes == null ? null : bttsYes >= SETTLED_PRICE ? true
+    : bttsYes <= 1 - SETTLED_PRICE ? false : null
+  if (bothScored != null && homeGoals != null && awayGoals != null) {
+    const splitSaysBoth = homeGoals > 0 && awayGoals > 0
+    if (splitSaysBoth !== bothScored) {
+      homeGoals = null
+      awayGoals = null
+    }
+  }
+  // Two goals and both teams on the scoresheet leaves exactly one scoreline.
+  if (homeGoals == null && bothScored === true && goals === 2) {
+    homeGoals = 1
+    awayGoals = 1
+  }
+
+  const bits: string[] = []
+  if (goals != null) bits.push(`over ladder pins ${goals} goal${goals === 1 ? '' : 's'}`)
+  if (goals != null && homeGoals == null) bits.push('team ladders disagree, so no scoreline')
+  if (bookConfirmed) bits.push('CLOB agrees on both rungs')
+  else if (goals != null) bits.push('no book to confirm it')
+  if (firstHalfDone) bits.push('1st-half markets resolved')
+  if (finished) bits.push('match result resolved')
+
+  return {
+    phase,
+    goals,
+    homeGoals,
+    awayGoals,
+    certain: total.certain,
+    bookConfirmed,
+    firstHalfDone,
+    evidence: bits.join(' · ') || 'nothing on the board has resolved yet',
+  }
+}
+
+/** Does this series look like a live market rather than a parked one?
+ *
+ *  Only ever used to upgrade an ambiguous board — a goalless first half quotes
+ *  the same rungs as a fixture that has not started. A pre-kickoff ladder is
+ *  flat at this resolution; a live one moves in almost every bucket. */
+export function looksLive(points: PricePoint[]): boolean {
+  const tail = points.slice(-8)
+  if (tail.length < 6) return false
+  let moved = 0
+  for (let i = 1; i < tail.length; i++) if (Math.abs(tail[i].p - tail[i - 1].p) >= 0.005) moved++
+  return moved >= tail.length - 3
+}
+
 // ── the watch card ───────────────────────────────────────────────────────────
 
 import LATE_GOALS from './late_goals.json'
@@ -739,7 +960,13 @@ export function buildHeadlines(groups: MarketGroup[], home: string, away: string
   push('Draw', result.find((g) => /draw|tie/i.test(g.question)), /^yes$/i)
   push(shortName(away), winMarket(away), /^yes$/i)
   push('Over 2.5', groups.find((g) => matchTotalLine(g.question) === 2.5), /^over$/i)
-  push('BTTS', groups.find((g) => g.group === 'Both teams to score'), /^yes$/i)
+  // "Both Teams to Score" and "Both Teams to Score in 1st Half" both classify as
+  // BTTS, and the half version resolves the moment the interval ends — a live
+  // board quotes it at 0.0005 next to a full-match line at 0.53. Taking the
+  // first match would show a resolved half market as the fixture's BTTS price.
+  push('BTTS', groups.find(
+    (g) => g.group === 'Both teams to score' && !/half|1st|2nd/i.test(g.question)
+  ), /^yes$/i)
 
   return out
 }
@@ -761,6 +988,44 @@ export function buildMovers(
     .sort((a, b) => Math.abs(b.movePp) - Math.abs(a.movePp))
 }
 
+/** How the two-goal rung compares with the one-goal rung PM is quoting.
+ *
+ *  A Poisson process ties them together: one goal rate explains both. Football
+ *  does not obey that late on, and — this is the part that matters — the
+ *  direction depends on the score. Measured over the 125 well-supported cells
+ *  from 68' on (n>=400 each):
+ *
+ *    already on 1+ goals : P(2 more) runs a median 0.81x the Poisson value,
+ *                          87 of 88 cells below it. The leveraged rung is dear.
+ *    still 0-0           : the opposite, median 1.20x, 32 of 37 cells above it.
+ *                          A goalless match late is a different animal.
+ *
+ *  So this returns the comparison AND the measured multiple for the state,
+ *  never a blanket claim about football.
+ */
+export function leverageRead(p1: number, p2: number, goals: number): {
+  lambda: number
+  poissonP2: number
+  quotedRatio: number
+  measuredRatio: number
+  dear: boolean
+} | null {
+  if (!(p1 > 0.02 && p1 < 0.98) || !(p2 > 0.001 && p2 < p1)) return null
+  const lambda = -Math.log(1 - p1)
+  const poissonP2 = 1 - Math.exp(-lambda) * (1 + lambda)
+  if (poissonP2 <= 0) return null
+  const measuredRatio = goals === 0 ? 1.20 : 0.81
+  return {
+    lambda,
+    poissonP2,
+    quotedRatio: p2 / poissonP2,
+    measuredRatio,
+    // "Dear" means the quoted leveraged rung sits above what the measured
+    // multiple would put it at, given PM's own one-goal price.
+    dear: p2 / poissonP2 > measuredRatio,
+  }
+}
+
 const NOT_A_TIP =
   'This is a price next to a measured rate, not a tip. Whether Polymarket misprices ' +
   'late goals is still unmeasured — our own observation run is at 9 usable entries.'
@@ -775,6 +1040,7 @@ const NOT_A_TIP =
 export function buildWatch(
   groups: MarketGroup[],
   live: LiveState | null,
+  board: BoardState,
   competition: string | null,
   preOver25: number | null,
   movers: Mover[]
@@ -829,8 +1095,95 @@ export function buildWatch(
     }
   }
 
-  // ── b. the setup: which late state to wait for, priced now.
-  if (preOver25 != null) {
+  // ── b. live on the board's own evidence, with no clock to key the table on.
+  //
+  // The table needs a minute and there is no honest one here, so this does not
+  // reach for it. What it can do without any clock is read the two rungs
+  // Polymarket is quoting against each other, which is a statement about the
+  // shape of its pricing rather than about the time.
+  if (board.phase === 'live' && board.goals != null) {
+    const g = board.goals
+    const scoreline =
+      board.homeGoals != null && board.awayGoals != null
+        ? `${board.homeGoals}-${board.awayGoals}`
+        : `${g} goal${g === 1 ? '' : 's'}`
+    const state =
+      `Live · ${scoreline}${board.firstHalfDone ? ' · second half' : ''} · ` +
+      `score read off the board (${board.evidence})`
+
+    const one = groups.find((x) => matchTotalLine(x.question) === g + 0.5)
+    const two = groups.find((x) => matchTotalLine(x.question) === g + 1.5)
+    const a1 = one ? askOf(one, /^over$/i) : null
+    const a2 = two ? askOf(two, /^over$/i) : null
+    const lev = a1 && a2 ? leverageRead(a1.ask, a2.ask, g) : null
+
+    const clockNote =
+      'No minute: api-football is out of quota and its key is not set on this deployment, ' +
+      'so the empirical late-goal table — which is keyed on the minute — is deliberately ' +
+      'not used here. Reading the two rungs against each other needs no clock.'
+    const scoreNote = board.bookConfirmed
+      ? 'Score confirmed against the CLOB on both rungs, not just Gamma. Gamma lags: on 20% ' +
+        'of one observation run\'s polls its mid sat >20pp from the CLOB ask on the same token.'
+      : 'Score read from Gamma\'s ladder with no book to referee it. Where api-football could ' +
+        'check, that ladder was wrong on 29% of polls — treat the scoreline as provisional.'
+
+    if (lev && a1 && a2) {
+      return {
+        kind: 'live-leverage',
+        title: 'Which rung is dear',
+        state,
+        market: `Over ${g + 0.5} (one more) vs Over ${g + 1.5} (two more)`,
+        pmOdds: dec(a2.ask),
+        pmProb: a2.ask,
+        fairOdds: dec(lev.poissonP2 * lev.measuredRatio),
+        fairProb: lev.poissonP2 * lev.measuredRatio,
+        n: null,
+        gapPp: (a2.ask - lev.poissonP2 * lev.measuredRatio) * 100,
+        feePp: takerFeePp(a2.ask),
+        verdict:
+          `Polymarket asks ${dec(a1.ask).toFixed(2)} for one more goal, which implies a ` +
+          `remaining rate of ${lev.lambda.toFixed(2)}. A Poisson process on that rate puts two ` +
+          `more at ${dec(lev.poissonP2).toFixed(2)}; Polymarket quotes ${dec(a2.ask).toFixed(2)}. ` +
+          (g === 0
+            ? `From 0-0 late, football runs OVER Poisson on the second goal — a median 1.20x across ` +
+              `37 well-supported cells, 32 of them above the Poisson value. `
+            : `Once a goal is on the board, football runs UNDER Poisson on the next one — a median ` +
+              `0.81x across 88 well-supported cells, 87 of them below the Poisson value. `) +
+          `That multiple puts two more at ${dec(lev.poissonP2 * lev.measuredRatio).toFixed(2)}, so ` +
+          `the leveraged rung looks ${lev.dear ? 'expensive' : 'cheap'} against it.`,
+        caveats: [
+          universeNote,
+          scoreNote,
+          clockNote,
+          'The 0.81x / 1.20x multiples are medians over the 68-88\' cells, not a fit to this ' +
+            'minute — without a clock this says which rung is off, not by exactly how much.',
+          NOT_A_TIP,
+        ],
+      }
+    }
+
+    // Live, but Polymarket is not quoting both rungs — say the state and the one
+    // price that exists, and claim nothing else.
+    return {
+      kind: 'live-state',
+      title: 'In play',
+      state,
+      market: a1 ? `Over ${g + 0.5} — one more goal` : null,
+      pmOdds: a1 ? dec(a1.ask) : null,
+      pmProb: a1?.ask ?? null,
+      fairOdds: null, fairProb: null, n: null, gapPp: null,
+      feePp: a1 ? takerFeePp(a1.ask) : null,
+      verdict:
+        `This fixture is in play — ${board.evidence}. Polymarket's listed start time is not ` +
+        `what says so, and is not trusted here: it ran ~30 min early on the leagues that ` +
+        `invalidated 73k of our own observations, and late by hours on others. Without a ` +
+        `minute there is no honest fair value to put next to this price.`,
+      caveats: [scoreNote, clockNote],
+    }
+  }
+
+  // ── c. the setup: which late state to wait for, priced now.
+  if (board.phase !== 'live' && board.phase !== 'finished' && preOver25 != null) {
     const rate = lateGoalRate(76, 1, preOver25, 1)
     if (rate) {
       return {
@@ -868,7 +1221,7 @@ export function buildWatch(
     }
   }
 
-  // ── c. nothing measured applies — say what actually moved.
+  // ── d. nothing measured applies — say what actually moved.
   const top = movers[0]
   if (top) {
     return {
