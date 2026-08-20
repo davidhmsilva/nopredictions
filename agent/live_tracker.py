@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -40,6 +40,59 @@ MIN_MINUTE_FOR_SIGNALS = 15
 # competitions. Dropping its snapshot history on the first miss would discard
 # the window baseline exactly when the second half starts.
 MISSING_POLLS_BEFORE_DROP = 20
+
+
+# The hand-written weights. xG carries 40% of the score and api-football supplies
+# it on only about 60% of the fixtures it covers with statistics at all.
+_W_XG, _W_SHOTS_ON, _W_SHOTS_IN, _W_CORNERS, _W_POSS = 0.40, 0.25, 0.15, 0.10, 0.10
+
+
+def danger_index(shots_on: float, shots_inside: float, xg: float,
+                 corners: float, possession: float,
+                 has_xg: bool = True) -> float:
+    """
+    Composite danger score 0–100.
+    Weights: xG(40%) + shots_on(25%) + shots_inside(15%) + corners(10%) + possession(10%)
+
+    The inputs are counts over a 15-MINUTE window. Anything measuring pressure
+    over a different span has to scale to that first, or the score is not on the
+    same axis as everyone else's — the whole point of one definition is that a
+    threshold like "pressure >= 45" means the same thing to every caller.
+
+    `has_xg=False` says the FEED carries no xG for this fixture, which is a very
+    different statement from "no chances were created". Without renormalising,
+    such a fixture can only ever score 60 out of 100, and measured against a
+    threshold calibrated on the mixed population it is not merely penalised — it
+    is excluded: on 165 real openings, 13.2% of fixtures WITH xG cleared 25 and
+    0.0% of those without did, at a p90 of 15.3 against 26.1. That gap is the
+    missing weight, not a difference in how the matches were played. So the
+    remaining weights are rescaled to sum to 1.
+
+    This assumes the missing term would have been proportional to the others,
+    which is an assumption and not a fact — xG correlates with shots inside the
+    box and on target, but it is not those. Every consumer stores has_xg on the
+    row so a later fit can control for it instead of treating two different
+    measurements as one.
+
+    Module level, and not a method, because the weights are the object under
+    test: they were written by hand and never estimated, and two copies of them
+    drifting apart would quietly split the evidence for refitting them.
+    """
+    xg_score = min(100, xg * 100)                      # 1.0 xG in window = 100
+    shots_on_score = min(100, shots_on * 20)           # 5 shots on target = 100
+    shots_inside_score = min(100, shots_inside * 15)   # ~7 shots inside = 100
+    corners_score = min(100, corners * 15)             # ~7 corners = 100
+    poss_score = max(0, (possession - 30) / 40 * 100)  # 30%=0, 70%=100
+
+    score = (
+        shots_on_score * _W_SHOTS_ON +
+        shots_inside_score * _W_SHOTS_IN +
+        corners_score * _W_CORNERS +
+        poss_score * _W_POSS
+    )
+    if not has_xg:
+        return score / (1.0 - _W_XG)
+    return score + xg_score * _W_XG
 
 
 @dataclass
@@ -77,6 +130,11 @@ class PressureSignals:
     away: str
     minute: int
     score: str
+    # Carried on the signal because every consumer writes it to a row and none
+    # of them can reach fixture_info. Without it the observation tables cannot
+    # answer "which competitions are we actually measuring" — which is the first
+    # question anyone asks of a coverage problem.
+    league: str | None = None
     # Raw deltas over the window
     home_shots_on_window: int = 0
     away_shots_on_window: int = 0
@@ -151,6 +209,31 @@ class PressureSignals:
         return '\n'.join(lines)
 
 
+# ── enrichment budget ────────────────────────────────────────────────────────
+# /fixtures?live=all does not carry statistics for most fixtures, so each one
+# needs its own /fixtures/statistics call. Polling every 60s and enriching every
+# live fixture costs ~90 calls a cycle = ~130k/day against a 75,000/day account
+# shared with 13 other scripts. We hit that wall daily, and because
+# _enrich_fixture used to swallow every failure into `return False`, the agent
+# labelled the result "no api-football stats coverage" — 36,917 rows on
+# 2026-08-15 alone. It was never a coverage problem. It was the budget.
+#
+# So: spend the calls where they can actually produce a decision (the caller
+# ranks fixtures), never re-fetch the same fixture inside the TTL, stop calling
+# a competition that has genuinely proven uncovered, and stop the moment the
+# API says the day is spent instead of burning the rest of the cycle on calls
+# that cannot succeed.
+# Worst case is 40*1440 + 1440 live calls = 59k/day against a 75k Ultra limit,
+# and the real figure is far below it because ENRICH_TTL_S throttles each fixture
+# to one call per three cycles: measured usage over ~4,000 cycles was 3,246 stats
+# calls, under one per cycle. The budget was never what bound us at 25 either —
+# it is raised here so that spare capacity can reach fixtures outside the trading
+# universe (see the callers' priority functions), not because 25 was exhausted.
+ENRICH_BUDGET_PER_CYCLE = 40
+ENRICH_TTL_S = 180              # in-game stats do not move fast enough to beat this
+NO_COVERAGE_STRIKES = 3         # distinct fixtures returning EMPTY before we blacklist
+
+
 class LiveMatchTracker:
     def __init__(self, window_minutes: int = PRESSURE_WINDOW_MIN):
         self.api_key = os.getenv('FOOTBALL_API_KEY', '')
@@ -159,14 +242,30 @@ class LiveMatchTracker:
         self.fixture_info: dict[int, dict] = {}
         self._missing: dict[int, int] = {}
         self._last_poll: float = 0
+        # enrichment bookkeeping
+        self._enrich_at: dict[int, float] = {}          # fid -> last attempt
+        self._empty_leagues: dict[str, set] = defaultdict(set)  # league -> fids seen empty
+        self._quota_spent_until: float = 0               # epoch; set when API says "day spent"
+        # Why each fixture has no stats this cycle. The agent records this
+        # verbatim, so a row can never again claim "no coverage" when the real
+        # answer was "we did not ask".
+        self.enrich_status: dict[int, str] = {}
+        self.last_enrich_report: dict[str, int] = {}
 
-    def poll(self) -> dict[int, PressureSignals]:
+    def poll(self, priority=None) -> dict[int, PressureSignals]:
         """
         Fetch all live fixtures, store stat snapshots, return pressure signals.
+
+        `priority(fid, snapshot) -> float` lets the caller rank which fixtures
+        are worth a paid /fixtures/statistics call this cycle; return a negative
+        rank to skip one outright. Without it every eligible fixture competes
+        equally for ENRICH_BUDGET_PER_CYCLE calls.
         """
         if not self.api_key:
             log.warning('[tracker] No FOOTBALL_API_KEY set')
             return {}
+
+        now = time.time()
 
         try:
             # Fetch live fixtures
@@ -231,19 +330,54 @@ class LiveMatchTracker:
                 self.snapshots[fid].append(snap)
                 fixture_ids_with_stats.append(fid)
 
-            # Fetch detailed stats for fixtures that need them
-            # (batch by fixture ID — the inline stats may be incomplete)
-            enriched = 0
+            # Fetch detailed stats for fixtures that need them, cheapest-first.
+            # `priority` is supplied by the caller because only the caller knows
+            # which fixtures can still produce a decision; the tracker must not
+            # guess. Higher rank is served first, negative means "do not spend".
+            self.enrich_status = {}
+            report = Counter()
+            candidates = []
             for fid in fixture_ids_with_stats:
-                snaps = self.snapshots[fid]
-                latest = snaps[-1]
-                # Only fetch detailed stats if inline stats were empty
-                if latest.home_shots_total == 0 and latest.away_shots_total == 0 and latest.minute > 5:
-                    if self._enrich_fixture(fid, latest):
-                        enriched += 1
+                latest = self.snapshots[fid][-1]
+                if latest.home_shots_total or latest.away_shots_total:
+                    continue                                  # inline stats were enough
+                if latest.minute <= 5:
+                    report['too early'] += 1
+                    continue
+                league = (self.fixture_info.get(fid, {}) or {}).get('league', '')
+                if len(self._empty_leagues.get(league, ())) >= NO_COVERAGE_STRIKES:
+                    self.enrich_status[fid] = 'league proven uncovered'
+                    report['league uncovered'] += 1
+                    continue
+                if now - self._enrich_at.get(fid, 0) < ENRICH_TTL_S:
+                    self.enrich_status[fid] = 'within TTL, using last fetch'
+                    report['within TTL'] += 1
+                    continue
+                rank = priority(fid, latest) if priority else 0
+                if rank < 0:
+                    self.enrich_status[fid] = 'not worth a call this cycle'
+                    report['deprioritised'] += 1
+                    continue
+                candidates.append((rank, fid, latest))
 
-            if enriched:
-                log.info(f'[tracker] Enriched {enriched} fixtures with detailed stats')
+            candidates.sort(key=lambda t: -t[0])
+            for rank, fid, latest in candidates[:ENRICH_BUDGET_PER_CYCLE]:
+                if now < self._quota_spent_until:
+                    self.enrich_status[fid] = 'api quota spent'
+                    report['quota'] += 1
+                    continue
+                self._enrich_at[fid] = now
+                status = self._enrich_fixture(fid, latest)
+                self.enrich_status[fid] = status
+                report[status] += 1
+            for rank, fid, latest in candidates[ENRICH_BUDGET_PER_CYCLE:]:
+                self.enrich_status[fid] = 'over cycle budget'
+                report['over budget'] += 1
+
+            self.last_enrich_report = dict(report)
+            if report:
+                log.info('[tracker] enrich: ' + ', '.join(
+                    f'{k}={v}' for k, v in sorted(report.items(), key=lambda kv: -kv[1])))
 
             self._last_poll = time.time()
 
@@ -279,8 +413,14 @@ class LiveMatchTracker:
                 self.fixture_info.pop(fid, None)
                 del self._missing[fid]
 
-    def _enrich_fixture(self, fid: int, snap: StatSnapshot) -> bool:
-        """Fetch detailed statistics for a specific fixture."""
+    def _enrich_fixture(self, fid: int, snap: StatSnapshot) -> str:
+        """Fetch detailed statistics for one fixture.
+
+        Returns WHY it went the way it did, never a bare bool. The distinction
+        that matters is 'empty' (this competition really has no stats) versus
+        'quota'/'http'/'error' (we failed to ask). Collapsing those into False
+        is what produced tens of thousands of rows mislabelled as uncovered.
+        """
         try:
             resp = requests.get(
                 'https://v3.football.api-sports.io/fixtures/statistics',
@@ -288,12 +428,32 @@ class LiveMatchTracker:
                 headers={'x-apisports-key': self.api_key},
                 timeout=8,
             )
+            if resp.status_code == 429:
+                self._quota_spent_until = time.time() + 300
+                return 'quota'
             if resp.status_code != 200:
-                return False
+                return f'http {resp.status_code}'
 
-            stats = resp.json().get('response', [])
+            body = resp.json()
+            # api-football answers 200 with an errors object when the plan's
+            # daily or per-minute allowance is gone. Treated as success, this
+            # reads as "no stats" for every fixture for the rest of the day.
+            errors = body.get('errors') or {}
+            if errors:
+                blob = str(errors).lower()
+                if 'limit' in blob or 'rate' in blob:
+                    # Day is spent: stop asking. Per-minute: back off briefly.
+                    self._quota_spent_until = time.time() + (
+                        3600 if 'day' in blob else 60)
+                    return 'quota'
+                return 'error'
+
+            stats = body.get('response', [])
             if not stats:
-                return False
+                league = (self.fixture_info.get(fid, {}) or {}).get('league', '')
+                if league:
+                    self._empty_leagues[league].add(fid)
+                return 'empty'
 
             info = self.fixture_info.get(fid, {})
             home = info.get('home', '')
@@ -302,9 +462,9 @@ class LiveMatchTracker:
                 is_home = team_stats.get('team', {}).get('name') == home
                 self._parse_stats(snap, team_stats.get('statistics', []), is_home)
 
-            return True
-        except Exception:
-            return False
+            return 'ok'
+        except Exception as exc:
+            return f'error {type(exc).__name__}'
 
     def _parse_stats(self, snap: StatSnapshot, stats: list[dict], is_home: bool):
         """Parse api-football statistics array into a snapshot."""
@@ -378,6 +538,7 @@ class LiveMatchTracker:
             fixture_id=fixture_id,
             home=info.get('home', '?'),
             away=info.get('away', '?'),
+            league=info.get('league'),
             minute=latest.minute,
             score=f'{latest.home_goals}-{latest.away_goals}',
             home_xg_total=latest.home_xg,
@@ -459,24 +620,14 @@ class LiveMatchTracker:
     def _danger_index(self, shots_on: int, shots_inside: int,
                       xg: float, corners: int, possession: float,
                       minute: int) -> float:
-        """
-        Composite danger score 0–100.
-        Weights: xG(40%) + shots_on(25%) + shots_inside(15%) + corners(10%) + possession(10%)
-        """
-        # Normalize each to 0–100 scale
-        xg_score = min(100, xg * 100)                   # 1.0 xG in window = 100
-        shots_on_score = min(100, shots_on * 20)         # 5 shots on target = 100
-        shots_inside_score = min(100, shots_inside * 15) # ~7 shots inside = 100
-        corners_score = min(100, corners * 15)           # ~7 corners = 100
-        poss_score = max(0, (possession - 30) / 40 * 100)  # 30%=0, 70%=100
+        """Composite danger score 0–100 over the rolling window.
 
-        return (
-            xg_score * 0.40 +
-            shots_on_score * 0.25 +
-            shots_inside_score * 0.15 +
-            corners_score * 0.10 +
-            poss_score * 0.10
-        )
+        Deliberately does NOT pass has_xg: Live Pressure Overs has 78 settled
+        entries and 154k rows recorded against the un-renormalised score, and
+        moving the axis under an open record mixes two populations in one yield.
+        Revisit when that arm next bumps its obs_version.
+        """
+        return danger_index(shots_on, shots_inside, xg, corners, possession)
 
     def get_all_signals(self) -> dict[int, PressureSignals]:
         """Get pressure signals for all tracked fixtures."""
