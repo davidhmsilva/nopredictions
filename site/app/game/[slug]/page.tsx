@@ -1,314 +1,276 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Nav, MobileNav } from '../../components/Nav'
 import type { Section } from '../../lib/types'
-import type {
-  GameData, Headline, MarketGroup, Mover, Outcome, PricePoint, WatchCard,
-} from '../../lib/gamecenter'
+import type { GameData, LiveStats, MarketGroup } from '../../lib/gamecenter'
+import { tradeable, type Look, type Pulse } from '../../lib/looks'
 
 const WATCHLIST_KEY = 'np_watchlist'
 
 // The user thinks in decimal odds, so every probability on this page carries the
-// price next to it.
-//
-// Outside SETTLED_BAND the decimal price stops being a price: an outcome quoted
-// at 0.001 renders as 1000.00, which reads like a bet nobody could place rather
-// than like a market that has already resolved. Those are labelled instead.
+// price. Outside this band the decimal stops describing a bet anyone would
+// place — an outcome at 0.001 renders as 1000.00 — so those are labelled.
 const SETTLED_BAND = 0.01
-
-function isSettled(p: number | null | undefined): boolean {
-  return p != null && (p <= SETTLED_BAND || p >= 1 - SETTLED_BAND)
-}
 
 function odds(p: number | null | undefined): string {
   if (p == null || p <= 0 || p >= 1) return '—'
-  if (isSettled(p)) return p >= 0.5 ? 'settled ✓' : 'settled ✗'
+  if (p <= SETTLED_BAND) return 'settled ✗'
+  if (p >= 1 - SETTLED_BAND) return 'settled ✓'
   return (1 / p).toFixed(2)
 }
 
 function pct(p: number | null | undefined): string {
-  return p == null ? '—' : `${(p * 100).toFixed(1)}%`
+  return p == null ? '—' : `${(p * 100).toFixed(0)}%`
 }
 
 function money(v: number | null | undefined): string {
   if (v == null) return '—'
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}k`
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(1)}k`
   return `$${v.toFixed(0)}`
 }
 
-// ── header ───────────────────────────────────────────────────────────────────
+function signed(pp: number | null | undefined): string {
+  return pp == null ? '—' : `${pp > 0 ? '+' : ''}${pp.toFixed(1)}pp`
+}
 
-function GameHeader({ data }: { data: GameData }) {
+// ── the state bar ────────────────────────────────────────────────────────────
+//
+// Everything a companion needs in the three seconds you look away from the
+// game: who is playing, what the score is, what minute it is.
+
+function StateBar({ data }: { data: GameData }) {
   const live = data.live
   const board = data.board
   const kickoff = data.kickoff ? new Date(data.kickoff) : null
 
-  // The live feed wins when it is there; the board carries it when it is not,
-  // which is most of the time. Only when neither can say anything does the page
-  // fall back to showing a fixture that has not started.
+  // The live feed wins when it is there; the board carries the score when it is
+  // not, which is most of the time on smaller competitions.
   const score =
-    live ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute }
-    : board.homeGoals != null && board.awayGoals != null
-      ? { h: board.homeGoals, a: board.awayGoals, minute: null }
-      : null
+    live
+      ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute }
+      : board.homeGoals != null && board.awayGoals != null
+        ? { h: board.homeGoals, a: board.awayGoals, minute: null }
+        : null
   const inPlay = !!live || board.phase === 'live'
   const badge = board.phase === 'finished' ? 'FT' : inPlay ? 'LIVE' : null
 
   return (
-    <div className="gc-header">
-      <div className="gc-teams">
-        <span className="gc-team">{data.home}</span>
-        {score || badge ? (
-          <span className="gc-score">
-            {score ? `${score.h}-${score.a}` : '·'}
-            {score?.minute != null && <span className="gc-minute">{score.minute}&apos;</span>}
-            {badge && (
-              <span className={badge === 'FT' ? 'gc-ft-badge' : 'analysis-live-badge'}>{badge}</span>
-            )}
+    <div className="gc-bar">
+      <div className="gc-bar-main">
+        <span className="gc-bar-team">{data.home}</span>
+        {score ? (
+          <span className="gc-bar-score">
+            {score.h}-{score.a}
           </span>
         ) : (
-          <span className="analysis-vs">vs</span>
+          <span className="gc-bar-vs">vs</span>
         )}
-        <span className="gc-team">{data.away}</span>
+        <span className="gc-bar-team gc-bar-team-a">{data.away}</span>
       </div>
 
-      <div className="gc-header-meta">
-        {data.competition && <span>{data.competition}</span>}
-        {/* The listed start time is shown only before kick-off. Once the board
-            says the ball is rolling it is worse than useless — on this fixture
-            Polymarket listed 21:30 while the first half was already played. */}
-        {kickoff && !inPlay && board.phase !== 'finished' && (
-          <span>
-            {kickoff.toLocaleString('en-GB', {
-              weekday: 'short', day: 'numeric', month: 'short',
-              hour: '2-digit', minute: '2-digit',
+      <div className="gc-bar-meta">
+        {badge && (
+          <span className={badge === 'FT' ? 'gc-ft-badge' : 'analysis-live-badge'}>{badge}</span>
+        )}
+        {score?.minute != null ? (
+          <span className="gc-bar-minute">{score.minute}&apos;</span>
+        ) : inPlay ? (
+          <span className="gc-bar-noclock" title={board.evidence ?? undefined}>
+            no clock
+          </span>
+        ) : kickoff ? (
+          <span className="gc-bar-ko">
+            {kickoff.toLocaleString(undefined, {
+              weekday: 'short', hour: '2-digit', minute: '2-digit',
             })}
           </span>
-        )}
-        {/* Which clock, and which score, the page is standing on. A minute taken
-            from PM's listed start time is what invalidated 73k of our own
-            observations, so "no minute" is stated rather than papered over. */}
-        <span className={live?.clockSource ? 'gc-verified' : 'gc-unverified'}>
-          {live?.clockSource
-            ? 'clock: api-football'
-            : inPlay || board.phase === 'finished'
-              ? `score: board${board.bookConfirmed ? ' + CLOB' : ''} · no minute`
-              : 'clock: unverified'}
-        </span>
+        ) : null}
+        {data.competition && <span className="gc-bar-comp">{data.competition}</span>}
       </div>
     </div>
   )
 }
 
-// ── what happened before you got here ────────────────────────────────────────
+// ── what just happened ───────────────────────────────────────────────────────
 
-// A double-digit move on a fixture's main market is usually team news, and it
-// is the first thing a reader needs — but it lives below the fold in MOVEMENT,
-// so anything this big gets a line at the top as well.
-const BIG_MOVE_PP = 10
-
-function ContextStrip({ movers, phase }: { movers: Mover[]; phase: GameData['board']['phase'] }) {
-  const m = movers[0]
-  if (!m || Math.abs(m.movePp) < BIG_MOVE_PP) return null
-  const shorter = m.movePp > 0
-  const inPlay = phase === 'live' || phase === 'finished'
-  return (
-    <div className="gc-context">
-      <span className="gc-context-tag">24H</span>
-      <span>
-        {m.question.replace(/\?$/, '').replace(/ on \d{4}-\d{2}-\d{2}/, '')} — {m.outcome}{' '}
-        went <b>{odds(m.from)} → {odds(m.to)}</b>{' '}
-        <span className={shorter ? 'c-green' : 'c-red'}>
-          ({m.movePp > 0 ? '+' : ''}{m.movePp.toFixed(1)}pp)
-        </span>
-        {/* A 24h window on a live fixture spans the match itself. Calling that
-            "the market repricing on news" would be narrating goals as team
-            news, which is exactly what this page did before. */}
-        {inPlay
-          ? '. That window covers the match itself, so most of the move is the game, not news.'
-          : '. Polymarket repriced this fixture hard before a ball was kicked.'}
-      </span>
-    </div>
-  )
-}
-
-// ── pressure ─────────────────────────────────────────────────────────────────
-
-// An average match is worth about 2.7 goals, so that is what a full bar means:
-// "the market still prices a whole match's worth of danger".
-const FULL_MATCH_GOALS = 2.7
-
-// The two states the empirical curve actually pins: what an average match of
-// this class still has left at 68' and at 88'.
-const MARKS = [
-  { at: 0.25, label: "avg 88'" },
-  { at: 0.9, label: "avg 68'" },
-]
-
-const LEVELS: Record<string, { label: string; cls: string }> = {
-  hot: { label: 'HOT', cls: 'gc-p-hot' },
-  warm: { label: 'WARM', cls: 'gc-p-warm' },
-  steady: { label: 'STEADY', cls: 'gc-p-steady' },
-  cooling: { label: 'COOLING', cls: 'gc-p-cool' },
-  cold: { label: 'COLD', cls: 'gc-p-cold' },
-}
-
-function PressureBar({ data }: { data: GameData }) {
-  const p = data.pressure
-  const stats = data.live?.stats
-  if (!p && !stats) return null
+function Pulse({ pulse, stats }: { pulse: Pulse[]; stats: LiveStats | null }) {
+  if (!pulse.length && !stats) return null
 
   return (
-    <section className="gc-section">
-      <h3 className="scan-group-title">PRESSURE</h3>
+    <section className="gc-pulse">
+      <div className="gc-eyebrow">Last 20 minutes</div>
 
-      {p && (
-        <div className="gc-pressure">
-          <div className="gc-pressure-head">
-            <span className={`gc-pressure-level ${LEVELS[p.level].cls}`}>
-              {LEVELS[p.level].label}
-            </span>
-            <span className="gc-pressure-num">
-              <b>{p.remainingGoals.toFixed(2)}</b> more goals priced in
-              {p.burnRate != null && (
-                <span className="gc-outcome-pct">
-                  {' '}· burning {p.burnRate.toFixed(2)} danger-min per minute
-                </span>
-              )}
-            </span>
-          </div>
-
-          <div className="gc-pressure-track">
-            <div
-              className={`gc-pressure-fill ${LEVELS[p.level].cls}`}
-              style={{ width: `${Math.min(100, (p.remainingGoals / FULL_MATCH_GOALS) * 100)}%` }}
-            />
-            {/* Where an average match sits at 68' and at 88', so the fill has
-                something to be read against rather than floating on its own. */}
-            {MARKS.map((m) => (
-              <span key={m.label} className="gc-pressure-tick"
-                style={{ left: `${(m.at / FULL_MATCH_GOALS) * 100}%` }} />
-            ))}
-          </div>
-          {/* The labels sit ON their marks. Spreading them evenly across the
-              track put "avg 88'" a third of the way along when its tick is at
-              a tenth, which reads as a scale and is not one. */}
-          <div className="gc-pressure-scale">
-            {MARKS.map((m) => (
-              <span key={m.label} style={{ left: `${(m.at / FULL_MATCH_GOALS) * 100}%` }}>
-                {m.label}
+      {pulse.length > 0 ? (
+        <ul className="gc-pulse-list">
+          {pulse.slice(0, 4).map((p, i) => (
+            <li key={i} className={p.movePp > 0 ? 'gc-pulse-up' : 'gc-pulse-down'}>
+              <span className="gc-pulse-move">{signed(p.movePp)}</span>
+              <span className="gc-pulse-what">
+                {p.question.split(':').pop()?.trim()} — {p.outcome}
               </span>
-            ))}
-            <span className="gc-pressure-scale-end">a full match</span>
-          </div>
-
-          <p className="gc-note">{p.note}</p>
-        </div>
+              <span className="gc-pulse-price">
+                {odds(p.from)} → {odds(p.to)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="gc-quiet">Prices have not moved. Nothing is happening.</p>
       )}
 
-      {/* When the live feed is actually answering, the real inputs go under the
-          market's own reading rather than replacing it — one is what is
-          happening, the other is what it is being paid for. */}
-      {stats && (
-        <div className="gc-stats">
-          <StatRow label="xG" h={stats.homeXg?.toFixed(2)} a={stats.awayXg?.toFixed(2)} />
-          <StatRow label="Shots on target" h={stats.homeShotsOn} a={stats.awayShotsOn} />
-          <StatRow label="Total shots" h={stats.homeShotsTotal} a={stats.awayShotsTotal} />
-          <StatRow label="Corners" h={stats.homeCorners} a={stats.awayCorners} />
-          <StatRow
-            label="Possession"
-            h={stats.homePossession != null ? `${stats.homePossession}%` : null}
-            a={stats.awayPossession != null ? `${stats.awayPossession}%` : null}
-          />
-          {(stats.homeReds > 0 || stats.awayReds > 0) && (
-            <StatRow label="Red cards" h={stats.homeReds} a={stats.awayReds} />
-          )}
-        </div>
-      )}
+      {stats && <StatStrip s={stats} />}
     </section>
   )
 }
 
-function StatRow({
-  label, h, a,
-}: {
-  label: string
-  h: string | number | null | undefined
-  a: string | number | null | undefined
-}) {
+function StatStrip({ s }: { s: LiveStats }) {
+  type Cell = string | number | null
+  const rows: Array<[string, Cell, Cell]> = ([
+    ['xG', s.homeXg?.toFixed(2) ?? null, s.awayXg?.toFixed(2) ?? null],
+    ['shots on', s.homeShotsOn, s.awayShotsOn],
+    ['shots', s.homeShotsTotal, s.awayShotsTotal],
+    ['corners', s.homeCorners, s.awayCorners],
+    ['possession', s.homePossession != null ? `${s.homePossession}%` : null,
+      s.awayPossession != null ? `${s.awayPossession}%` : null],
+  ] as Array<[string, Cell, Cell]>).filter(([, h, a]) => h != null || a != null)
+
+  if (!rows.length) return null
+
   return (
-    <div className="gc-stat-row">
-      <span className="gc-stat-h">{h ?? '—'}</span>
-      <span className="gc-stat-label">{label}</span>
-      <span className="gc-stat-a">{a ?? '—'}</span>
+    <div className="gc-statstrip">
+      {rows.map(([label, h, a]) => (
+        <span key={label} className="gc-statcell">
+          <b>{h ?? '—'}</b>
+          <em>{label}</em>
+          <b>{a ?? '—'}</b>
+        </span>
+      ))}
     </div>
   )
 }
 
-// ── the watch card ───────────────────────────────────────────────────────────
+// ── the shortlist ────────────────────────────────────────────────────────────
 
-function WatchBlock({ w }: { w: WatchCard }) {
-  const [why, setWhy] = useState(false)
-  // Green only when the price is BELOW the measured rate — the one direction in
-  // which the market being watched is the cheap side.
-  const cheap = w.gapPp != null && w.gapPp < 0
+const CALL_LABEL: Record<Look['call'], string> = {
+  back: 'CHEAP',
+  fair: 'FAIR',
+  rich: 'EXPENSIVE',
+}
+
+function LookRow({ look }: { look: Look }) {
+  const [open, setOpen] = useState(false)
+  const can = tradeable(look)
 
   return (
-    <section className={`gc-watch gc-watch-${w.kind}`}>
-      <div className="gc-watch-tag">WATCH · {w.title}</div>
-      {w.state && <div className="gc-watch-state">{w.state}</div>}
+    <li className={`gc-look gc-look-${look.call}${can ? '' : ' gc-look-untradeable'}`}>
+      <div className="gc-look-top">
+        <span className={`gc-call gc-call-${look.call}`}>{CALL_LABEL[look.call]}</span>
+        <span className="gc-look-side">{look.side}</span>
+        <span className="gc-look-odds">
+          {look.odds.toFixed(2)}
+          <i>{pct(look.prob)}</i>
+        </span>
+      </div>
 
-      {w.market && (
-        <div className="gc-watch-body">
-          <div className="gc-watch-market">{w.market}</div>
-          <div className="gc-watch-prices">
-            {/* The Polymarket box appears only when there is a comparable quote.
-                On a pre-match setup the price that matters does not exist yet,
-                and filling the slot with today's number invites the wrong
-                subtraction against the measured rate. */}
-            {w.pmProb != null && (
-              <div className="gc-watch-price">
-                <span className="gc-watch-price-label">Polymarket</span>
-                <b className={cheap ? 'c-green' : undefined}>{odds(w.pmProb)}</b>
-                <span className="gc-outcome-pct">{pct(w.pmProb)}</span>
-              </div>
-            )}
-            {w.fairProb != null && (
-              <div className="gc-watch-price">
-                <span className="gc-watch-price-label">Measured</span>
-                <b>{(1 / w.fairProb).toFixed(2)}</b>
-                <span className="gc-outcome-pct">
-                  {pct(w.fairProb)}{w.n ? ` · n=${w.n.toLocaleString()}` : ''}
-                </span>
-              </div>
-            )}
-            {w.gapPp != null && (
-              <div className="gc-watch-price">
-                <span className="gc-watch-price-label">Gap</span>
-                <b className={cheap ? 'c-green' : 'c-red'}>
-                  {w.gapPp > 0 ? '+' : ''}{w.gapPp.toFixed(1)}pp
-                </b>
-                <span className="gc-outcome-pct">
-                  {w.feePp != null ? `fee ${w.feePp.toFixed(2)}pp` : ''}
-                </span>
-              </div>
-            )}
-          </div>
+      <div className="gc-look-nums">
+        <span>
+          <em>measured</em>
+          <b>{look.fairOdds ? look.fairOdds.toFixed(2) : '—'}</b>
+          <i>{pct(look.fairProb)}</i>
+        </span>
+        <span className={look.edgePp != null && look.edgePp > 0 ? 'gc-pos' : 'gc-neg'}>
+          <em>edge after fee</em>
+          <b>{signed(look.edgePp)}</b>
+          <i>fee {look.feePp.toFixed(2)}pp</i>
+        </span>
+        <span>
+          <em>available</em>
+          <b>{look.isMid ? 'no book' : money(look.depthUsd)}</b>
+          <i>{look.spreadPp != null ? `${look.spreadPp.toFixed(1)}pp wide` : 'mid only'}</i>
+        </span>
+      </div>
+
+      <p className="gc-look-why">{look.why}</p>
+
+      <div className="gc-look-flags">
+        {look.n != null && <span className="gc-flag gc-flag-ok">measured · n={look.n.toLocaleString()}</span>}
+        {look.imported && <span className="gc-flag gc-flag-warn">imported rate</span>}
+        {look.isMid && <span className="gc-flag gc-flag-warn">not executable</span>}
+        {!look.isMid && look.depthUsd != null && look.depthUsd < 100 && (
+          <span className="gc-flag gc-flag-warn">thin</span>
+        )}
+        <button className="gc-why" onClick={() => setOpen((v) => !v)}>
+          {open ? 'hide detail' : 'where this comes from'}
+        </button>
+      </div>
+
+      {open && (
+        <ul className="gc-notes">
+          {look.detail.map((d, i) => (
+            <li key={i}>{d}</li>
+          ))}
+          <li>{look.market}</li>
+        </ul>
+      )}
+    </li>
+  )
+}
+
+function Looks({ data }: { data: GameData }) {
+  const looks = data.looks ?? []
+  // A price you cannot pay is not a look. Those stay collapsed rather than
+  // ranking alongside prices with a real book behind them.
+  const live = looks.filter(tradeable)
+  const mids = looks.filter((l) => !tradeable(l))
+  const backs = live.filter((l) => l.call === 'back')
+  const [showMids, setShowMids] = useState(false)
+
+  return (
+    <section className="gc-section">
+      <div className="gc-eyebrow">Worth a look</div>
+
+      {live.length === 0 ? (
+        <div className="gc-nothing">
+          <strong>No measured read on this fixture yet.</strong>
+          <span>{NO_READ_REASON(data)}</span>
         </div>
+      ) : (
+        <>
+          {backs.length === 0 && (
+            <div className="gc-verdict">
+              <strong>Nothing is cheap right now.</strong>
+              <span>
+                Every price below sits inside the taker fee of the rate we measured. That is the
+                normal state of this market — the prices are shown anyway, because &quot;the market has
+                this right&quot; is the answer to most questions worth asking mid-match.
+              </span>
+            </div>
+          )}
+          {/* Shown whether or not anything is cheap: the comparison IS the
+              product. A bettor watching wants "is 1.23 too short?" answered in
+              two seconds, and the answer is usually no. */}
+          <ul className="gc-looks">
+            {live.map((l) => (
+              <LookRow key={l.id} look={l} />
+            ))}
+          </ul>
+        </>
       )}
 
-      <p className="gc-watch-verdict">{w.verdict}</p>
-
-      {w.caveats.length > 0 && (
+      {mids.length > 0 && (
         <>
-          <button className="gc-why" onClick={() => setWhy((v) => !v)}>
-            {why ? '▾' : '▸'} where this number comes from
+          <button className="gc-more" onClick={() => setShowMids((v) => !v)}>
+            {showMids
+              ? 'hide markets with no order book'
+              : `${mids.length} more measured, but with no order book to trade against`}
           </button>
-          {why && (
-            <ul className="gc-notes">
-              {w.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          {showMids && (
+            <ul className="gc-looks gc-looks-quiet">
+              {mids.map((l) => (
+                <LookRow key={l.id} look={l} />
+              ))}
             </ul>
           )}
         </>
@@ -317,270 +279,144 @@ function WatchBlock({ w }: { w: WatchCard }) {
   )
 }
 
-// ── the five numbers ─────────────────────────────────────────────────────────
+/** Why the shortlist is empty. A companion that goes blank without saying why
+ *  is worse than one that says "not yet". */
+function NO_READ_REASON(data: GameData): string {
+  if (data.board.phase === 'finished') return 'This match is over.'
+  if (data.board.phase !== 'live') {
+    return (
+      'The measured tables are conditioned on a live state — a minute and a score — so they ' +
+      'have nothing to say before kick-off. Pre-match, Polymarket sits within 0.10pp of the ' +
+      'de-vigged Pinnacle line, which is another way of saying there is nothing here.'
+    )
+  }
+  if (!data.live) {
+    return (
+      'The match is live but no clock matched it: api-football did not have this fixture in ' +
+      'its live feed, and every measured rate here is keyed on the minute. Polymarket\'s own ' +
+      'listed start time is not used as a substitute — it ran half an hour early on some ' +
+      'leagues and eight hours late on others.'
+    )
+  }
+  if (data.live.minute != null && data.live.minute < 10) {
+    return 'Too early — the measured tables start at 10 minutes.'
+  }
+  return 'Polymarket is not quoting the rungs the measured tables price.'
+}
 
-function Headlines({ items }: { items: Headline[] }) {
-  if (!items.length) return null
+// ── the board, tradeable first ───────────────────────────────────────────────
+
+interface BoardRow {
+  question: string
+  outcome: string
+  ask: number
+  spreadPp: number
+  depthUsd: number | null
+}
+
+function Board({ groups }: { groups: MarketGroup[] }) {
+  const [open, setOpen] = useState(false)
+
+  const { rows, quoted } = useMemo(() => {
+    const rows: BoardRow[] = []
+    let quoted = 0
+    for (const g of groups) {
+      for (const o of g.outcomes) {
+        quoted++
+        const b = o.book
+        if (b?.ask == null || b?.bid == null) continue
+        if (b.ask <= SETTLED_BAND || b.ask >= 1 - SETTLED_BAND) continue
+        rows.push({
+          question: g.question,
+          outcome: o.name,
+          ask: b.ask,
+          spreadPp: (b.ask - b.bid) * 100,
+          depthUsd: b.askDepthUsd,
+        })
+      }
+    }
+    rows.sort((a, b) => a.spreadPp - b.spreadPp || (b.depthUsd ?? 0) - (a.depthUsd ?? 0))
+    return { rows, quoted }
+  }, [groups])
+
   return (
     <section className="gc-section">
-      <h3 className="scan-group-title">THE MARKET</h3>
-      <div className="gc-headlines">
-        {items.map((h, i) => (
-          <div key={i} className="gc-headline">
-            <span className="gc-headline-label">{h.label}</span>
-            <b className={h.isMid ? 'gc-mid' : undefined}>{odds(h.prob)}</b>
-            <span className="gc-outcome-pct">{pct(h.prob)}{h.isMid ? ' mid' : ''}</span>
-            {h.spreadPp != null && (
-              <span className="gc-outcome-book">
-                {h.spreadPp.toFixed(1)}pp wide · {money(h.depthUsd)} at ask
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-      <p className="gc-note">
-        Prices are the <b>ask</b> — what you would pay, not the mid. The mid is the number that
-        made a paper strategy book +141% where the same 15 decisions returned +3.4% live.
+      <div className="gc-eyebrow">The board</div>
+      <p className="gc-quiet">
+        {rows.length} of {quoted} quoted outcomes have a real order book. The rest are Gamma
+        mids — a number, not a price you can pay.
       </p>
-    </section>
-  )
-}
 
-// ── movement ─────────────────────────────────────────────────────────────────
-
-function Sparkline({ points }: { points: PricePoint[] }) {
-  if (points.length < 2) return null
-  const W = 320
-  const H = 48
-  const ps = points.map((p) => p.p)
-  const lo = Math.min(...ps)
-  const hi = Math.max(...ps)
-  const span = hi - lo || 1
-  const d = points
-    .map((p, i) => {
-      const x = (i / (points.length - 1)) * W
-      const y = H - ((p.p - lo) / span) * H
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-  const first = ps[0]
-  const last = ps[ps.length - 1]
-  const up = last >= first
-  const movePp = (last - first) * 100
-
-  return (
-    <div className="gc-spark">
-      <svg viewBox={`0 0 ${W} ${H}`} className="gc-spark-svg" preserveAspectRatio="none">
-        <path d={d} fill="none" stroke={up ? 'var(--green)' : 'var(--red)'} strokeWidth="1.5" />
-      </svg>
-      <div className="gc-spark-meta">
-        {/* Decimal on both ends, because a move from 2.13 to 1.27 is the thing
-            that happened; "47% → 79%" is the same fact in a unit nobody bets in. */}
-        <span>{odds(first)} → {odds(last)}</span>
-        <span className={up ? 'c-green' : 'c-red'}>
-          {movePp > 0 ? '+' : ''}{movePp.toFixed(1)}pp / 24h
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function Movement({ data }: { data: GameData }) {
-  if (!data.history || data.history.points.length < 2) return null
-  return (
-    <section className="gc-section">
-      <h3 className="scan-group-title">MOVEMENT — {data.history.label}</h3>
-      <Sparkline points={data.history.points} />
-      {data.movers.length > 0 && (
-        <div className="gc-movers">
-          {data.movers.map((m: Mover, i) => (
-            <div key={i} className="gc-mover">
-              <span className="gc-mover-q">{m.question} — {m.outcome}</span>
-              <span className="gc-mover-move">
-                {odds(m.from)} → <b>{odds(m.to)}</b>{' '}
-                <span className={m.movePp > 0 ? 'c-green' : 'c-red'}>
-                  ({m.movePp > 0 ? '+' : ''}{m.movePp.toFixed(1)}pp)
-                </span>
-              </span>
-            </div>
+      <table className="gc-board">
+        <thead>
+          <tr>
+            <th>Market</th>
+            <th>Side</th>
+            <th className="gc-r">Ask</th>
+            <th className="gc-r">Spread</th>
+            <th className="gc-r">Depth</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(open ? rows : rows.slice(0, 8)).map((r, i) => (
+            <tr key={i}>
+              <td className="gc-board-q">{r.question.split(':').pop()?.trim()}</td>
+              <td>{r.outcome}</td>
+              <td className="gc-r gc-mono">{odds(r.ask)}</td>
+              <td className="gc-r gc-mono">{r.spreadPp.toFixed(1)}pp</td>
+              <td className="gc-r gc-mono">{money(r.depthUsd)}</td>
+            </tr>
           ))}
-        </div>
+        </tbody>
+      </table>
+
+      {rows.length > 8 && (
+        <button className="gc-more" onClick={() => setOpen((v) => !v)}>
+          {open ? 'show fewer' : `show all ${rows.length}`}
+        </button>
       )}
     </section>
   )
 }
 
-// ── the full board, out of the way ───────────────────────────────────────────
+// ── the small print, behind a click ──────────────────────────────────────────
 
-function OutcomeCell({ o }: { o: Outcome }) {
-  const ask = o.book?.ask ?? null
-  const bid = o.book?.bid ?? null
-  const spreadPp = ask != null && bid != null ? (ask - bid) * 100 : null
-
-  return (
-    <div className="gc-outcome">
-      <span className="gc-outcome-name">{o.name}</span>
-      <span className="gc-outcome-price">
-        {/* The ask is what you would actually pay. The Gamma mid is shown only
-            when there is no book, and labelled as such. */}
-        {ask != null ? (
-          <>
-            <b className={isSettled(ask) ? 'gc-mid' : undefined}>{odds(ask)}</b>
-            <span className="gc-outcome-pct">{pct(ask)}</span>
-          </>
-        ) : (
-          <>
-            <b className="gc-mid">{odds(o.price)}</b>
-            <span className="gc-outcome-pct">
-              {pct(o.price)}{isSettled(o.price) ? '' : ' mid'}
-            </span>
-          </>
-        )}
-      </span>
-      {spreadPp != null && (
-        <span className="gc-outcome-book">
-          {spreadPp.toFixed(1)}pp wide · {money(o.book?.askDepthUsd)} at ask
-        </span>
-      )}
-    </div>
-  )
-}
-
-function MarketBlock({ g }: { g: MarketGroup }) {
-  return (
-    <div className="gc-market">
-      <div className="gc-market-head">
-        <span className="gc-market-q">{g.question}</span>
-        {g.volume != null && <span className="gc-market-vol">{money(g.volume)} vol</span>}
-      </div>
-      <div className="gc-outcomes">
-        {g.outcomes.map((o, i) => (
-          <OutcomeCell key={i} o={o} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/** The whole board, collapsed.
- *
- *  It used to open on load, and 65 markets is not context — it is the same wall
- *  of prices Polymarket already shows, with our styling on it. Anyone who wants
- *  the board is one click away; everyone else gets the fixture. */
-function AllMarkets({ groups }: { groups: MarketGroup[] }) {
+function Disclosure({ data }: { data: GameData }) {
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
-
-  const filtered = query.trim()
-    ? groups.filter((g) => g.question.toLowerCase().includes(query.trim().toLowerCase()))
-    : groups
-
-  const byGroup = filtered.reduce<Record<string, MarketGroup[]>>((acc, g) => {
-    ;(acc[g.group] ??= []).push(g)
-    return acc
-  }, {})
-
-  if (!groups.length) return null
 
   return (
     <section className="gc-section">
-      <button className="gc-board-toggle" onClick={() => setOpen((v) => !v)}>
-        <span>{open ? '▾' : '▸'} ALL MARKETS</span>
-        <span className="gc-group-count">{groups.length}</span>
-      </button>
-
-      {open && (
-        <>
-          <input
-            className="gc-search gc-search-wide"
-            placeholder="filter markets…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          {Object.entries(byGroup).map(([name, list]) => {
-            const isOpen = openGroups[name] ?? name === Object.keys(byGroup)[0]
-            return (
-              <div key={name} className="gc-group">
-                <button
-                  className="gc-group-head"
-                  onClick={() => setOpenGroups((s) => ({ ...s, [name]: !isOpen }))}
-                >
-                  <span>{isOpen ? '▾' : '▸'} {name}</span>
-                  <span className="gc-group-count">{list.length}</span>
-                </button>
-                {isOpen && list.map((g, i) => <MarketBlock key={i} g={g} />)}
-              </div>
-            )
-          })}
-          {filtered.length === 0 && (
-            <div className="scan-no-edge">No markets match “{query}”.</div>
-          )}
-        </>
-      )}
-    </section>
-  )
-}
-
-// ── Kalshi + caveats ─────────────────────────────────────────────────────────
-
-function KalshiSection({ data }: { data: GameData }) {
-  if (!data.kalshi) return null
-  const k = data.kalshi
-  return (
-    <section className="gc-section">
-      <h3 className="scan-group-title">ALSO ON KALSHI</h3>
-      <div className="gc-kalshi">
-        {k.sides.map((s, i) => (
-          <div key={i} className="gc-kalshi-side">
-            <span className="gc-outcome-name">{s.name}</span>
-            <span className="gc-outcome-price">
-              <b>{odds(s.ask)}</b>
-              <span className="gc-outcome-pct">{pct(s.ask)}</span>
-            </span>
-          </div>
-        ))}
-      </div>
-      {k.bestNetPp != null && (
-        <p className="gc-note">
-          Best price difference across the two venues, after both taker fees:{' '}
-          <b className={k.bestNetPp > 0 ? 'c-green' : 'c-red'}>
-            {k.bestNetPp > 0 ? '+' : ''}{k.bestNetPp.toFixed(2)}pp
-          </b>
-          . Kalshi&apos;s taker fee is 40% higher than Polymarket&apos;s, and across 57
-          fixtures quoted on both venues we found <b>zero</b> net arbitrages — the gross
-          ceiling is one tick against a ~3pp fee bar. This is a price comparison, not a trade.
-        </p>
-      )}
-    </section>
-  )
-}
-
-function Caveats({ data }: { data: GameData }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <section className="gc-section">
-      <button className="gc-board-toggle" onClick={() => setOpen((v) => !v)}>
-        <span>{open ? '▾' : '▸'} WHAT THIS PAGE CANNOT TELL YOU</span>
+      <button className="gc-more" onClick={() => setOpen((v) => !v)}>
+        {open ? 'hide' : 'what this page cannot tell you'}
       </button>
       {open && (
         <ul className="gc-notes">
-          {data.notes.map((n, i) => <li key={i}>{n}</li>)}
           <li>
-            No sportsbook column: our sharp benchmark is Pinnacle and Betfair, and that feed is
-            out of quota. Prices here are Polymarket&apos;s and Kalshi&apos;s own.
+            <strong>This is not a tip.</strong> Every number here is either a price Polymarket
+            is quoting right now or a rate measured on historical matches. Nothing on this page
+            is a prediction, and a measured rate is not a guarantee about this match.
           </li>
           <li>
-            No model edge is shown anywhere. On 6 of 6 outcome groups Polymarket&apos;s price beat
-            our model on Brier score, so a &quot;model says X is cheap&quot; badge would be selling
-            something we measured as not working. Every fair value on this page is a counted
-            frequency, not a prediction.
+            <strong>No model output, deliberately.</strong> On 6 of 6 outcome groups Polymarket&apos;s
+            price beat our own model on Brier score, so a &quot;the model likes this&quot; badge would be
+            selling the one thing we measured as not working.
           </li>
           <li>
-            Pre-match, Polymarket&apos;s football price is fair at the bid — the round trip costs
-            1.2-2.5pp and beats every entry signal we have tested. Edge has to come from
-            settlement or from in-play moves much larger than the spread.
+            <strong>Prices are asks, not mids.</strong> The mid is the number that made a paper
+            strategy book +141% where the same 15 decisions returned +3.4% live.
           </li>
+          <li>
+            <strong>Edges are shown after Polymarket&apos;s taker fee</strong> — shares × 0.05 × p ×
+            (1−p), verified to 0.0001% on 87,000 real fills. It peaks at 1.25pp around even money.
+          </li>
+          {data.board.evidence && (
+            <li>
+              <strong>Score source:</strong> {data.live ? 'api-football live feed' : data.board.evidence}.
+            </li>
+          )}
+          {data.notes.map((n, i) => (
+            <li key={i}>{n}</li>
+          ))}
         </ul>
       )}
     </section>
@@ -617,11 +453,12 @@ export default function GamePage({ params }: { params: { slug: string } }) {
 
   // Refresh while the match is live. 30s matches how long the live feed is
   // cached server-side, so a faster poll would only re-serve the same numbers.
+  const isLive = data?.board.phase === 'live'
   useEffect(() => {
-    if (!data?.live) return
+    if (!isLive) return
     const id = setInterval(load, 30000)
     return () => clearInterval(id)
-  }, [data?.live, load])
+  }, [isLive, load])
 
   useEffect(() => {
     try {
@@ -651,17 +488,20 @@ export default function GamePage({ params }: { params: { slug: string } }) {
     <div className="scanner-page">
       <Nav section="home" setSection={navigateHome} />
 
-      <main className="scanner-main">
-        {loading && <div className="gc-loading"><span className="scan-spinner" /> loading fixture…</div>}
+      <main className="scanner-main gc-main">
+        {loading && (
+          <div className="gc-loading">
+            <span className="scan-spinner" /> loading fixture…
+          </div>
+        )}
         {error && <div className="scan-error">Error: {error}</div>}
 
         {data && (
           <>
-            <GameHeader data={data} />
-            <ContextStrip movers={data.movers} phase={data.board.phase} />
-            <PressureBar data={data} />
-            <WatchBlock w={data.watch} />
-            <Headlines items={data.headlines} />
+            <StateBar data={data} />
+            <Looks data={data} />
+            <Pulse pulse={data.pulse ?? []} stats={data.live?.stats ?? null} />
+            <Board groups={data.groups} />
 
             <div className="gc-actions">
               <button className="gc-action" onClick={toggleWatch}>
@@ -677,10 +517,7 @@ export default function GamePage({ params }: { params: { slug: string } }) {
               )}
             </div>
 
-            <Movement data={data} />
-            <AllMarkets groups={data.groups} />
-            <KalshiSection data={data} />
-            <Caveats data={data} />
+            <Disclosure data={data} />
           </>
         )}
       </main>

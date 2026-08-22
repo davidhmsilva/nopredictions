@@ -21,6 +21,7 @@ import {
   type MarketGroup,
   type PricePoint,
 } from '../../lib/gamecenter'
+import { buildLooks, buildPulse } from '../../lib/looks'
 
 // Top-of-book is fetched for the most-traded markets only. Every extra token is
 // a CLOB round trip, and a fixture board runs to 85 markets — pulling books for
@@ -29,6 +30,9 @@ const BOOKS_FOR_TOP = 12
 // Price history is one more round trip per token, and only the busiest markets
 // have enough flow for 24h of it to mean anything.
 const HISTORY_FOR_TOP = 6
+// The pulse re-fetches at 1-minute fidelity, so it stays on the few markets a
+// bettor would actually watch move.
+const PULSE_FOR_TOP = 8
 
 /** Polymarket's Over 2.5 as it stood BEFORE kick-off.
  *
@@ -196,6 +200,18 @@ export async function GET(request: Request) {
 
     const movers = buildMovers(histories)
 
+    // A second, finer pass over the busiest markets. The 5-minute buckets that
+    // describe a fixture are too coarse to describe the game you are watching:
+    // a goal and the repricing that follows it land inside one bucket.
+    const pulseSource = await Promise.all(
+      wanted.slice(0, PULSE_FOR_TOP).map(async (t) => ({
+        question: t.g.question,
+        outcome: t.o.name,
+        points: await fetchHistory(t.o.tokenId!, 1, 1),
+      }))
+    )
+    const pulse = buildPulse(pulseSource)
+
     const total25History = histories.find((h) => h.tokenId === total25?.o.tokenId)
 
     // What the board itself says about whether this fixture has kicked off —
@@ -220,6 +236,7 @@ export async function GET(request: Request) {
     const pressure = buildPressure(groups, board, nextRung?.points ?? [], preOver25)
 
     const headlines = buildHeadlines(groups, teams.home, teams.away)
+    const looks = buildLooks(groups, live, board, preOver25, competition)
     const watch = buildWatch(groups, live, board, competition, preOver25, movers)
 
     // The sparkline follows whatever the watch card is about, so the chart and
@@ -248,6 +265,8 @@ export async function GET(request: Request) {
       board,
       pressure,
       watch,
+      looks,
+      pulse,
       headlines,
       movers: movers.slice(0, 3),
       groups,

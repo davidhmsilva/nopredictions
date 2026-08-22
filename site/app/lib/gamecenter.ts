@@ -135,6 +135,8 @@ export interface Headline {
   isMid: boolean             // true when there is no book and this is a Gamma mid
 }
 
+import type { Look, Pulse } from './looks'
+
 export interface GameData {
   slug: string
   title: string
@@ -147,6 +149,10 @@ export interface GameData {
   board: BoardState
   pressure: Pressure | null
   watch: WatchCard
+  /** The ranked shortlist — the reason the page exists. */
+  looks: Look[]
+  /** What the prices did in the last twenty minutes. */
+  pulse: Pulse[]
   headlines: Headline[]
   movers: Mover[]
   groups: MarketGroup[]
@@ -266,11 +272,16 @@ export async function fetchBook(tokenId: string): Promise<BookSide | null> {
 
 /** Polymarket's own price history — free, native, and the reason the dead
  *  pm_ticks recorder is not needed for a sparkline. */
-export async function fetchHistory(tokenId: string, hours = 24): Promise<PricePoint[]> {
+export async function fetchHistory(
+  tokenId: string,
+  hours = 24,
+  fidelity = 5
+): Promise<PricePoint[]> {
   try {
     const startTs = Math.floor(Date.now() / 1000) - hours * 3600
     const data = (await getJson(
-      `${CLOB_API}/prices-history?market=${encodeURIComponent(tokenId)}&startTs=${startTs}&fidelity=5`
+      `${CLOB_API}/prices-history?market=${encodeURIComponent(tokenId)}` +
+        `&startTs=${startTs}&fidelity=${fidelity}`
     )) as { history?: Array<{ t: number; p: number }> }
     return (data.history ?? []).map((h) => ({ t: h.t, p: h.p }))
   } catch {
