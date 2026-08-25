@@ -13,6 +13,7 @@ distinction, or the budget that stops us hitting the wall in the first place.
 
 import os
 import sys
+import time
 
 import pytest
 
@@ -122,10 +123,42 @@ def test_quota_error_is_not_reported_as_no_coverage(tracker, monkeypatch):
     _install(monkeypatch, 10, quota, calls)
     tracker.poll()
     statuses = set(tracker.enrich_status.values())
-    assert "quota" in statuses
+    assert lt.DAILY_EXHAUSTED in statuses
     assert "empty" not in statuses
     # and it must stop asking once told the day is spent
     assert len(calls) == 1
+
+
+def test_per_minute_limit_is_not_reported_as_a_spent_day(tracker, monkeypatch):
+    """The two refusals used to share one label, and they mean opposite things.
+
+    On 2026-08-20 the daily allowance was 3% used (2,147 of 75,000) while 176
+    recorded rows claimed it was spent — so the label was pointing at the wrong
+    constraint, and the backoff it implies is an hour instead of a minute.
+    """
+    calls = []
+    burst = FakeResp({"errors": {"rateLimit": "Too many requests"}, "response": []})
+    _install(monkeypatch, 10, burst, calls)
+    tracker.poll()
+
+    statuses = set(tracker.enrich_status.values())
+    assert lt.RATE_LIMITED in statuses
+    assert lt.DAILY_EXHAUSTED not in statuses
+    # A per-minute blip must not silence the tracker for an hour.
+    assert tracker._quota_spent_until - time.time() <= 120
+
+
+def test_the_latch_labels_rows_with_the_reason_that_armed_it(tracker, monkeypatch):
+    """Rows skipped by the latch are labelled from an event that happened to a
+    DIFFERENT fixture — no call is made for them at all. That amplification is
+    fine, but it must not relabel a per-minute blip as a spent day."""
+    calls = []
+    burst = FakeResp({"errors": {"rateLimit": "Too many requests"}, "response": []})
+    _install(monkeypatch, 10, burst, calls)
+    tracker.poll()
+    assert len(calls) == 1, "the latch must stop further calls this cycle"
+    # Every fixture after the first is labelled by the latch, not by a call.
+    assert set(tracker.enrich_status.values()) == {lt.RATE_LIMITED}
 
 
 def test_empty_response_is_real_no_coverage(tracker, monkeypatch):
@@ -143,6 +176,167 @@ def test_uncovered_league_stops_being_retried(tracker, monkeypatch):
     # all four fixtures share one league, already struck out three times
     _install(monkeypatch, 4, FakeResp({"response": []}), calls, league="Dead League")
     tracker._empty_leagues["Dead League"] = {1, 2, 3}
+    tracker._empty_league_at["Dead League"] = time.time()
     tracker.poll()
     assert calls == [], "a league proven uncovered must not be paid for again"
     assert tracker.last_enrich_report.get("league uncovered") == 4
+
+
+def test_a_struck_out_league_gets_another_chance_eventually(tracker, monkeypatch):
+    """The strikes used to be permanent and the dict was never cleared, so one
+    bad hour blacklisted a competition for the life of a process that runs for
+    weeks. On 2026-08-20 that had MLS marked uncovered while api-football was
+    serving its statistics — a restart was the only cure."""
+    calls = []
+    _install(monkeypatch, 4, FakeResp(_stats_payload()), calls, league="Dead League")
+    tracker._empty_leagues["Dead League"] = {1, 2, 3}
+    tracker._empty_league_at["Dead League"] = time.time() - lt.EMPTY_LEAGUE_TTL_S - 1
+    tracker.poll()
+    assert calls, "an expired blacklist must be retried"
+
+
+def test_a_league_the_api_confirms_is_covered_is_never_blacklisted(tracker, monkeypatch):
+    """An empty response from a covered league means 'not published yet' — it is
+    minute 8 of a small fixture — not 'this competition has no statistics'."""
+    calls = []
+    _install(monkeypatch, 4, FakeResp({"response": []}), calls, league="Real League")
+    tracker._league_stats_coverage[0] = True      # every fake fixture shares league id
+    monkeypatch.setattr(tracker, "league_has_stats", lambda lid: True)
+    tracker.poll()
+    assert len(calls) == 4                        # asked, got nothing, fine
+    assert tracker._empty_leagues == {}, "a covered league must never be struck"
+
+
+def test_a_league_the_api_says_is_uncovered_is_never_paid_for(tracker, monkeypatch):
+    """The API will answer this directly, so there is no reason to burn three
+    fixtures guessing at it."""
+    calls = []
+    _install(monkeypatch, 4, FakeResp(_stats_payload()), calls, league="No Stats League")
+    monkeypatch.setattr(tracker, "league_has_stats", lambda lid: False)
+    tracker.poll()
+    assert calls == []
+    assert tracker.last_enrich_report.get("league uncovered (api)") == 4
+
+
+# ── stats have to survive a poll that did not re-fetch them ──────────────────
+# The TTL exists so we do not pay for the same fixture every 60 seconds. But
+# every poll builds a NEW snapshot, and for two polls out of three nothing used
+# to fill it: a match measured at minute 15 reported shots 0-0 and no pressure at
+# all at 16' and 17', then measured again at 18'. Both first-half agents take
+# their entry decision inside a ten-minute window, so this alone was enough to
+# produce zero entries in a day. Found live on 2026-08-20.
+
+def test_stats_survive_a_ttl_skipped_poll(tracker, monkeypatch):
+    calls = []
+    _install(monkeypatch, 1, FakeResp(_stats_payload()), calls)
+
+    tracker.poll()                       # minute 80: pays for the stats
+    assert len(calls) == 1
+    first = tracker.snapshots[1000][-1]
+    assert first.home_shots_total == 7
+
+    tracker.poll()                       # inside the TTL: no second call
+    assert len(calls) == 1
+    second = tracker.snapshots[1000][-1]
+    assert second is not first
+    assert second.home_shots_total == 7, "the last known stats must carry forward"
+    assert tracker.get_signals(1000).has_stats
+
+
+def test_a_carried_snapshot_says_how_old_its_numbers_are(tracker, monkeypatch):
+    """Carrying stale numbers silently would be its own bug: anything turning
+    totals into a per-minute rate has to divide by the minute they were true."""
+    calls = []
+    _install(monkeypatch, 1, FakeResp(_stats_payload()), calls)
+    tracker.poll()
+
+    # the same fixture, three minutes later, still inside the TTL
+    monkeypatch.setattr(lt.requests, "get", lambda url, **kw: (
+        calls.append(kw["params"]["fixture"]) or FakeResp(_stats_payload())
+    ) if "statistics" in url else FakeResp(_live_payload(1, minute=83)))
+    tracker.poll()
+
+    sig = tracker.get_signals(1000)
+    assert sig.minute == 83
+    assert sig.stats_minute == 80          # not 83 — the numbers are three minutes old
+
+
+def test_goals_are_never_carried_forward(tracker, monkeypatch):
+    """Only the stat block is stale-able. The score comes from the live feed on
+    every poll and carrying it would freeze a match that had just scored."""
+    calls = []
+    _install(monkeypatch, 1, FakeResp(_stats_payload()), calls)
+    tracker.poll()
+
+    payload = _live_payload(1)
+    payload["response"][0]["goals"] = {"home": 1, "away": 0}
+    monkeypatch.setattr(lt.requests, "get",
+                        lambda url, **kw: FakeResp(payload) if "statistics" not in url
+                        else FakeResp(_stats_payload()))
+    tracker.poll()
+    assert tracker.snapshots[1000][-1].home_goals == 1
+
+
+def test_a_carried_stat_block_never_counts_as_this_poll_s_stats(tracker, monkeypatch):
+    """The regression that killed strategy 16 between 2026-08-20 and 08-25.
+
+    The enrichment gate read `latest.home_shots_total` to decide the live feed
+    had already supplied stats inline. Once _carry_stats_forward landed, that
+    field held the carried copy of an earlier fetch, so the gate skipped the
+    fixture forever: one paid call per match, then frozen totals for the rest of
+    it. The TTL is supposed to be what throttles refetching, and it must stay
+    that way — after the TTL expires the fixture has to be paid for again.
+    """
+    calls = []
+    _install(monkeypatch, 1, FakeResp(_stats_payload()), calls)
+
+    tracker.poll()
+    assert calls == [1000]
+
+    # Past the TTL. Nothing about the snapshot holding carried stats may stop
+    # this fixture being refetched.
+    tracker._enrich_at[1000] = time.time() - lt.ENRICH_TTL_S - 1
+    tracker.poll()
+    assert calls == [1000, 1000], "a carried stat block suppressed the refetch"
+
+
+def test_inline_stats_still_skip_the_paid_call(tracker, monkeypatch):
+    """The gate's real job, which the fix must not throw away: when the live
+    feed carries statistics itself, no /fixtures/statistics call is worth
+    paying for."""
+    calls = []
+    payload = _live_payload(1)
+    payload["response"][0]["statistics"] = [
+        {"team": {"name": "Home0"}, "statistics": [{"type": "Total Shots", "value": 9}]},
+        {"team": {"name": "Away0"}, "statistics": [{"type": "Total Shots", "value": 2}]},
+    ]
+    monkeypatch.setattr(lt.requests, "get", lambda url, **kw: (
+        calls.append(kw["params"]["fixture"]) or FakeResp(_stats_payload())
+    ) if "statistics" in url else FakeResp(payload))
+
+    tracker.poll()
+    assert calls == [], "paid for stats the live feed had already given us"
+    assert tracker.snapshots[1000][-1].home_shots_total == 9
+
+
+def test_a_window_differencing_one_fetch_against_itself_is_not_a_measurement(tracker):
+    """Frozen totals made every window delta 0, which the danger index scored as
+    its possession term alone — exactly 5.0 out of 100 — and both has_stats and
+    has_window went on reporting True. The row then read as a measured dead
+    match instead of an unmeasured one, and against MIN_PRESSURE it could never
+    enter. A baseline sharing the latest snapshot's fetch is no baseline.
+    """
+    fetched = time.time()
+    for minute in range(60, 81):
+        tracker.snapshots[1000].append(lt.StatSnapshot(
+            minute=minute, timestamp=fetched, home_shots_total=5, away_shots_total=3,
+            home_shots_on=1, home_corners=2, stats_minute=60, stats_fetched_at=fetched))
+    tracker.fixture_info[1000] = {"home": "Home0", "away": "Away0", "league": "L"}
+
+    sig = tracker.get_signals(1000)
+    assert sig.has_stats                      # there IS a stat block
+    assert sig.stats_frozen
+    assert not sig.has_window
+    # and no fabricated surge from the scaled-totals fallback either
+    assert sig.home_shots_on_window == 0
+    assert sig.home_corners_window == 0

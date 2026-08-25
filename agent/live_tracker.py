@@ -121,6 +121,12 @@ class StatSnapshot:
     away_gk_saves: int = 0
     home_dangerous_attacks: int = 0
     away_dangerous_attacks: int = 0
+    # When the stat block below was actually true. A poll that does not re-fetch
+    # carries the previous values forward (see _carry_stats_forward), so these
+    # say how old they are — without them a 16th-minute row and the 13th-minute
+    # numbers inside it are indistinguishable.
+    stats_minute: int | None = None
+    stats_fetched_at: float | None = None
 
 
 @dataclass
@@ -135,6 +141,11 @@ class PressureSignals:
     # answer "which competitions are we actually measuring" — which is the first
     # question anyone asks of a coverage problem.
     league: str | None = None
+    # The minute the stat block was actually true, which is not `minute` on a
+    # poll that reused the previous fetch (ENRICH_TTL_S). Anything turning totals
+    # into a per-minute rate must divide by THIS, or a 16th-minute reading of
+    # 13th-minute numbers reads 20% quieter than the match was.
+    stats_minute: int | None = None
     # Raw deltas over the window
     home_shots_on_window: int = 0
     away_shots_on_window: int = 0
@@ -173,6 +184,12 @@ class PressureSignals:
     # pressure MUST check this first, or a no-coverage fixture enters the record
     # as strong evidence that low pressure precedes no goal.
     has_stats: bool = False
+    # True when the window baseline and the latest snapshot hold the SAME fetch,
+    # so every delta below is structurally zero regardless of how the match is
+    # being played. Distinct from has_stats (there IS a stat block) and from
+    # has_window (a baseline was found): this says the two carry one measurement
+    # between them, which is no measurement of a window at all.
+    stats_frozen: bool = False
     # Composite scores (0–100)
     home_danger_index: float = 0.0
     away_danger_index: float = 0.0
@@ -233,6 +250,69 @@ ENRICH_BUDGET_PER_CYCLE = 40
 ENRICH_TTL_S = 180              # in-game stats do not move fast enough to beat this
 NO_COVERAGE_STRIKES = 3         # distinct fixtures returning EMPTY before we blacklist
 
+# The two ways api-football says no, kept apart because they mean opposite
+# things about whether more budget would help. Per-minute is a burst we caused
+# and recover from within a cycle; daily means the allowance is gone and no
+# amount of ranking or budget changes anything until midnight.
+RATE_LIMITED = 'rate limited (per-minute)'
+DAILY_EXHAUSTED = 'daily quota exhausted'
+# How long a league stays blacklisted by the strike heuristic. It used to be
+# forever — the dict was never cleared — and this process runs for weeks. On
+# 2026-08-20 that had MLS blacklisted as "uncovered" while api-football was
+# serving 5 shots to 8 for the very fixtures we refused to ask about; the agent
+# recorded "no api-football stats coverage" for hours, and the restart alone
+# fixed it. A heuristic that cannot recover is not a heuristic, it is a latch.
+EMPTY_LEAGUE_TTL_S = 2 * 3600
+
+
+# Everything the statistics endpoint fills in. Goals, minute and cards are NOT
+# here: those come fresh from the live feed on every poll and must never be
+# carried forward.
+_STAT_FIELDS = (
+    'home_shots_on', 'away_shots_on', 'home_shots_total', 'away_shots_total',
+    'home_shots_inside', 'away_shots_inside', 'home_corners', 'away_corners',
+    'home_possession', 'away_possession', 'home_xg', 'away_xg',
+    'home_gk_saves', 'away_gk_saves',
+    'home_dangerous_attacks', 'away_dangerous_attacks',
+)
+
+
+def snapshot_has_stats(snap: 'StatSnapshot') -> bool:
+    """Any non-zero counter proves the stat block was filled.
+
+    Possession is excluded on purpose: it defaults to 50.0, so testing it would
+    call every empty snapshot populated.
+    """
+    return any((snap.home_shots_total, snap.away_shots_total, snap.home_shots_on,
+                snap.away_shots_on, snap.home_corners, snap.away_corners,
+                snap.home_xg, snap.away_xg))
+
+
+def _carry_stats_forward(snap: 'StatSnapshot', prev: 'StatSnapshot | None') -> None:
+    """Keep the last known stats on a poll that did not re-fetch them.
+
+    Every poll builds a NEW snapshot, and only the fixtures that win a paid call
+    get theirs filled. With ENRICH_TTL_S at 180s against a 60s cycle that is one
+    poll in three — so two polls out of three used to report a live match as
+    having no statistics at all: shots 0-0, no pressure, no measurement, on a
+    fixture we had measured sixty seconds earlier.
+
+    Traced on 2026-08-20 across every fixture in the first-half agents' entry
+    window; it is why they made zero entries. The rolling-window deltas in the
+    full-match arm were hit too — max(0, 0 - 5) is 0, so its danger index
+    collapsed on the same two thirds of cycles.
+
+    A snapshot is the last known state of the match, not a record of what we
+    happened to fetch this second. The age is carried with it so a consumer can
+    tell the difference.
+    """
+    if snapshot_has_stats(snap) or prev is None or not snapshot_has_stats(prev):
+        return
+    for field in _STAT_FIELDS:
+        setattr(snap, field, getattr(prev, field))
+    snap.stats_minute = prev.stats_minute
+    snap.stats_fetched_at = prev.stats_fetched_at
+
 
 class LiveMatchTracker:
     def __init__(self, window_minutes: int = PRESSURE_WINDOW_MIN):
@@ -245,7 +325,25 @@ class LiveMatchTracker:
         # enrichment bookkeeping
         self._enrich_at: dict[int, float] = {}          # fid -> last attempt
         self._empty_leagues: dict[str, set] = defaultdict(set)  # league -> fids seen empty
-        self._quota_spent_until: float = 0               # epoch; set when API says "day spent"
+        self._empty_league_at: dict[str, float] = {}     # league -> first strike, for expiry
+        # league id -> does api-football publish match statistics for it?
+        # This is a FACT the API will tell us (/leagues -> coverage.fixtures.
+        # statistics_fixtures), not something to infer from empty responses.
+        self._league_stats_coverage: dict[int, bool | None] = {}
+        # Set when the API refuses on a limit. Two very different refusals arm
+        # it — a per-minute burst (seconds of backoff) and a spent daily
+        # allowance (the rest of the day) — so the REASON is carried alongside
+        # the deadline. Recording one label for both is what made the 176 rows
+        # marked "api quota spent" undiagnosable: the daily allowance was 3%
+        # used at the time, so every one of them was almost certainly a
+        # per-minute blip, but nothing in the record could prove it.
+        self._quota_spent_until: float = 0                # epoch
+        # Whether the last poll failed before it could reach api-football at all.
+        # A caller running forever needs this: the handler below logs and
+        # swallows, so a transport fault that never clears is indistinguishable
+        # from a quiet afternoon with no live football.
+        self.last_poll_failed: bool = False
+        self._quota_reason: str = RATE_LIMITED            # which limit armed it
         # Why each fixture has no stats this cycle. The agent records this
         # verbatim, so a row can never again claim "no coverage" when the real
         # answer was "we did not ask".
@@ -275,6 +373,10 @@ class LiveMatchTracker:
                 headers={'x-apisports-key': self.api_key},
                 timeout=10,
             )
+            # The socket itself worked. Cleared on the response and not at the
+            # end of the poll, so an HTTP error — which restarting cannot fix —
+            # is never mistaken for the transport being gone.
+            self.last_poll_failed = False
             if resp.status_code != 200:
                 log.warning(f'[tracker] api-football HTTP {resp.status_code}')
                 return {}
@@ -283,6 +385,12 @@ class LiveMatchTracker:
             log.info(f'[tracker] {len(fixtures)} live fixtures')
 
             fixture_ids_with_stats = []
+            # Fixtures whose stats came from THIS poll's feed. The enrichment
+            # gate below must key on that and never on the snapshot's contents:
+            # _carry_stats_forward fills those in from the previous poll, so a
+            # snapshot holding stats proves nothing about whether we just saw
+            # them. See the gate for what that cost.
+            inline_stats: set[int] = set()
 
             for f in fixtures:
                 fid = f['fixture']['id']
@@ -292,10 +400,12 @@ class LiveMatchTracker:
                 goals_h = f['goals'].get('home', 0) or 0
                 goals_a = f['goals'].get('away', 0) or 0
                 league = f.get('league', {}).get('name', '?')
+                league_id = f.get('league', {}).get('id')
 
                 self.fixture_info[fid] = {
                     'home': home, 'away': away,
                     'league': league,
+                    'league_id': league_id,
                     'fixture_id': fid,
                 }
 
@@ -327,6 +437,13 @@ class LiveMatchTracker:
                     is_home = team_stats.get('team', {}).get('name') == home
                     self._parse_stats(snap, team_stats.get('statistics', []), is_home)
 
+                if snapshot_has_stats(snap):
+                    # Inline statistics arrived with the live feed itself.
+                    snap.stats_minute, snap.stats_fetched_at = snap.minute, now
+                    inline_stats.add(fid)
+                else:
+                    _carry_stats_forward(
+                        snap, self.snapshots[fid][-1] if self.snapshots[fid] else None)
                 self.snapshots[fid].append(snap)
                 fixture_ids_with_stats.append(fid)
 
@@ -339,13 +456,33 @@ class LiveMatchTracker:
             candidates = []
             for fid in fixture_ids_with_stats:
                 latest = self.snapshots[fid][-1]
-                if latest.home_shots_total or latest.away_shots_total:
+                if fid in inline_stats:
                     continue                                  # inline stats were enough
+                # NOT `if latest.home_shots_total`: from 2026-08-20 to 08-25 that
+                # is what stood here, and once _carry_stats_forward landed it read
+                # the carried copy of an earlier fetch as proof that this poll had
+                # stats. One fetch per fixture was all any match ever got: totals
+                # froze, and fifteen minutes later the rolling window was
+                # differencing a carry against its own source, so every delta went
+                # to exactly 0 and the danger index locked at its possession term
+                # (5.0) for the rest of the match. has_stats and has_window both
+                # said True throughout, so the rows read as measurements of a dead
+                # game rather than as the absence of a measurement. Strategy 16
+                # made 1 entry in four days against a gate of 45.
                 if latest.minute <= 5:
                     report['too early'] += 1
                     continue
-                league = (self.fixture_info.get(fid, {}) or {}).get('league', '')
-                if len(self._empty_leagues.get(league, ())) >= NO_COVERAGE_STRIKES:
+                info = self.fixture_info.get(fid, {}) or {}
+                league, league_id = info.get('league', ''), info.get('league_id')
+                covered = self.league_has_stats(league_id)
+                if covered is False:
+                    self.enrich_status[fid] = 'league has no stats coverage (api)'
+                    report['league uncovered (api)'] += 1
+                    continue
+                # Only guess when the API would not say. A league it CONFIRMS is
+                # covered is never blacklisted on empty responses — those are far
+                # more often "not published yet" than "never will be".
+                if covered is None and self._league_blacklisted(league):
                     self.enrich_status[fid] = 'league proven uncovered'
                     report['league uncovered'] += 1
                     continue
@@ -362,9 +499,13 @@ class LiveMatchTracker:
 
             candidates.sort(key=lambda t: -t[0])
             for rank, fid, latest in candidates[:ENRICH_BUDGET_PER_CYCLE]:
+                # No call is made here — the latch is still holding from an
+                # earlier refusal, so this fixture is being labelled on the
+                # strength of something that happened to a DIFFERENT fixture.
+                # That is how one refusal became a whole cycle of rows.
                 if now < self._quota_spent_until:
-                    self.enrich_status[fid] = 'api quota spent'
-                    report['quota'] += 1
+                    self.enrich_status[fid] = self._quota_reason
+                    report[self._quota_reason] += 1
                     continue
                 self._enrich_at[fid] = now
                 status = self._enrich_fixture(fid, latest)
@@ -393,8 +534,56 @@ class LiveMatchTracker:
                     if fid in live_now}
 
         except Exception as e:
+            self.last_poll_failed = True
             log.error(f'[tracker] Poll error: {e}')
             return {}
+
+    def league_has_stats(self, league_id: int | None) -> bool | None:
+        """Does api-football publish match statistics for this competition?
+
+        True / False from the API's own `coverage.fixtures.statistics_fixtures`,
+        None when we could not find out. One call per competition per process —
+        coverage does not change mid-season — against a heuristic that had to
+        burn three fixtures to guess, could be wrong, and never recovered.
+        """
+        if not league_id:
+            return None
+        if league_id in self._league_stats_coverage:
+            return self._league_stats_coverage[league_id]
+
+        answer = None
+        try:
+            resp = requests.get(
+                'https://v3.football.api-sports.io/leagues',
+                params={'id': league_id},
+                headers={'x-apisports-key': self.api_key},
+                timeout=8,
+            )
+            if resp.status_code == 200 and not (resp.json().get('errors') or {}):
+                for entry in resp.json().get('response', []):
+                    seasons = [x for x in entry.get('seasons', []) if x.get('current')]
+                    if not seasons:
+                        continue
+                    cov = (seasons[0].get('coverage') or {}).get('fixtures') or {}
+                    answer = bool(cov.get('statistics_fixtures'))
+        except Exception:
+            answer = None
+
+        # A failed lookup is cached as None and retried on the next process, not
+        # hammered every cycle; an answer is cached for good.
+        self._league_stats_coverage[league_id] = answer
+        return answer
+
+    def _league_blacklisted(self, league: str) -> bool:
+        """The strike heuristic, now with an expiry — and only ever consulted
+        when the API could not answer for itself."""
+        if len(self._empty_leagues.get(league, ())) < NO_COVERAGE_STRIKES:
+            return False
+        if time.time() - self._empty_league_at.get(league, 0) > EMPTY_LEAGUE_TTL_S:
+            self._empty_leagues.pop(league, None)
+            self._empty_league_at.pop(league, None)
+            return False
+        return True
 
     def _prune(self, live_now: set[int]) -> None:
         """Forget fixtures that have dropped off the live feed.
@@ -418,8 +607,10 @@ class LiveMatchTracker:
 
         Returns WHY it went the way it did, never a bare bool. The distinction
         that matters is 'empty' (this competition really has no stats) versus
-        'quota'/'http'/'error' (we failed to ask). Collapsing those into False
-        is what produced tens of thousands of rows mislabelled as uncovered.
+        RATE_LIMITED / DAILY_EXHAUSTED / 'http' / 'error' (we failed to ask).
+        Collapsing those into False is what produced tens of thousands of rows
+        mislabelled as uncovered; collapsing the first two into each other is
+        what made the remainder undiagnosable.
         """
         try:
             resp = requests.get(
@@ -429,8 +620,12 @@ class LiveMatchTracker:
                 timeout=8,
             )
             if resp.status_code == 429:
+                log.warning(
+                    f'[tracker] 429 on /fixtures/statistics fixture={fid} — '
+                    f'backing off 300s. body={resp.text[:200]!r}')
                 self._quota_spent_until = time.time() + 300
-                return 'quota'
+                self._quota_reason = RATE_LIMITED
+                return RATE_LIMITED
             if resp.status_code != 200:
                 return f'http {resp.status_code}'
 
@@ -443,16 +638,33 @@ class LiveMatchTracker:
                 blob = str(errors).lower()
                 if 'limit' in blob or 'rate' in blob:
                     # Day is spent: stop asking. Per-minute: back off briefly.
-                    self._quota_spent_until = time.time() + (
-                        3600 if 'day' in blob else 60)
-                    return 'quota'
+                    # The blob is LOGGED because it is the only evidence of
+                    # which one this was, and the branch below turns it into an
+                    # hour of silence or a minute of it.
+                    daily = 'day' in blob
+                    self._quota_spent_until = time.time() + (3600 if daily else 60)
+                    self._quota_reason = DAILY_EXHAUSTED if daily else RATE_LIMITED
+                    log.warning(
+                        f'[tracker] api-football refused on a limit '
+                        f'(fixture={fid}): {str(errors)[:200]} -> '
+                        f'{self._quota_reason}, backing off '
+                        f'{3600 if daily else 60}s')
+                    return self._quota_reason
+                log.warning(f'[tracker] api-football errors (fixture={fid}): '
+                            f'{str(errors)[:200]}')
                 return 'error'
 
             stats = body.get('response', [])
             if not stats:
-                league = (self.fixture_info.get(fid, {}) or {}).get('league', '')
-                if league:
+                info = self.fixture_info.get(fid, {}) or {}
+                league, league_id = info.get('league', ''), info.get('league_id')
+                # An empty answer from a league the API says it covers means the
+                # stats are not published YET (it is minute 8 of a small fixture),
+                # not that the competition is uncovered. Striking it would latch a
+                # covered league off for the life of the process.
+                if league and self.league_has_stats(league_id) is not True:
                     self._empty_leagues[league].add(fid)
+                    self._empty_league_at.setdefault(league, time.time())
                 return 'empty'
 
             info = self.fixture_info.get(fid, {})
@@ -462,6 +674,7 @@ class LiveMatchTracker:
                 is_home = team_stats.get('team', {}).get('name') == home
                 self._parse_stats(snap, team_stats.get('statistics', []), is_home)
 
+            snap.stats_minute, snap.stats_fetched_at = snap.minute, time.time()
             return 'ok'
         except Exception as exc:
             return f'error {type(exc).__name__}'
@@ -539,6 +752,7 @@ class LiveMatchTracker:
             home=info.get('home', '?'),
             away=info.get('away', '?'),
             league=info.get('league'),
+            stats_minute=latest.stats_minute,
             minute=latest.minute,
             score=f'{latest.home_goals}-{latest.away_goals}',
             home_xg_total=latest.home_xg,
@@ -570,8 +784,18 @@ class LiveMatchTracker:
 
         # Window deltas
         window_start = self._find_window_start(snaps, latest.minute)
-        signals.has_window = window_start is not None
-        if window_start:
+        # A baseline carrying the same fetch as `latest` is not a baseline. Every
+        # counter differences to 0, which reads as a dead match rather than as an
+        # unmeasured one — and the scaled-totals fallback must not step in either,
+        # because scaling a frozen stat block reports steady play as a surge. So
+        # take neither path: leave the deltas at zero and mark the row.
+        signals.stats_frozen = bool(
+            window_start is not None
+            and latest.stats_fetched_at is not None
+            and window_start.stats_fetched_at == latest.stats_fetched_at
+        )
+        signals.has_window = window_start is not None and not signals.stats_frozen
+        if signals.has_window:
             signals.home_shots_on_window = max(0, latest.home_shots_on - window_start.home_shots_on)
             signals.away_shots_on_window = max(0, latest.away_shots_on - window_start.away_shots_on)
             signals.home_shots_inside_window = max(0, latest.home_shots_inside - window_start.home_shots_inside)
@@ -580,7 +804,7 @@ class LiveMatchTracker:
             signals.away_xg_window = max(0.0, latest.away_xg - window_start.away_xg)
             signals.home_corners_window = max(0, latest.home_corners - window_start.home_corners)
             signals.away_corners_window = max(0, latest.away_corners - window_start.away_corners)
-        else:
+        elif not signals.stats_frozen:
             # No window baseline — use full-match stats scaled to window
             if latest.minute > 0:
                 scale = min(1.0, self.window_minutes / latest.minute)

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import fav_pressure_agent as fa  # noqa: E402
 import favourite_ht_table as fvt  # noqa: E402
+import live_tracker as lt  # noqa: E402
 from live_tracker import PressureSignals  # noqa: E402
 
 HOME, AWAY = "CD Tolima", "Independiente del Valle"
@@ -303,7 +304,7 @@ def test_a_goal_ends_it(board):
 
 def test_no_stats_never_enters(board):
     rows = fa.observe({1: _sig(has_stats=False)}, fvt.load(), board, fa.FavState(),
-                      enrich_status={1: "quota"})
+                      enrich_status={1: lt.RATE_LIMITED})
     assert not rows[0]["would_enter"]
-    assert "quota" in rows[0]["skip_reason"]
+    assert "rate limited" in rows[0]["skip_reason"]
     assert rows[0]["opening_fav_pressure"] is None

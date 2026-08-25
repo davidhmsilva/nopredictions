@@ -121,14 +121,23 @@ ENTRY_MAX_MINUTE = 25
 MIN_FAV_PROB = 0.50
 
 # Both thresholds are calibrated to FREQUENCY on 165 real fixtures that already
-# carry a 15-18' stats row, recomputing this exact index:
-#   per-side danger  — p50 11, p75 19, p90 29, p95 35
-#   |gap| between sides — p50 12, p75 18, p90 28
-# 25 and 15 put the pair at roughly the top decile of "one side is pressing" and
-# the top quartile of "and clearly more than the other". Neither has ever been
-# fitted to an outcome; that is what the observation table is for.
-MIN_FAV_PRESSURE = 25.0         # the favourite is pressing in absolute terms
-MIN_DOMINANCE = 15.0            # ...and out-pressing the underdog
+# carry a 15-18' stats row, recomputing this exact index WITH the xG
+# renormalisation (see live_tracker.danger_index):
+#   per-side danger     — p50 15, p75 24, p90 32, p95 40
+#   |gap| between sides — p50 14, p75 23, p90 31
+# MIN_FAV_PRESSURE LOWERED 30 -> 19 on 2026-08-20, by the user's decision and not
+# by any fit. Measured percentiles are above; 19 sits at about p62 per side.
+#
+# ⚠️ At 19 this threshold barely binds any more and the dominance term decides
+# almost everything: a side scoring 19 with a gap of 20 is arithmetically
+# impossible — the underdog would need a negative index — so every entry still
+# needs a side of at least 20, whatever this constant says. The pair moves the
+# candidate rate from 19.3% of fixtures to 34.8%, which is real loosening, but it
+# comes from retiring the side term rather than from a considered view of how
+# dominant a favourite has to look. Dropping MIN_DOMINANCE to 14 (the gap's own
+# median) would take it to 47.0%; that was not asked for and is left alone.
+MIN_FAV_PRESSURE = 19.0         # the favourite is pressing in absolute terms
+MIN_DOMINANCE = 20.0            # ...and out-pressing the underdog (now the real gate)
 
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
 MIN_DEPTH_USD = 25.0            # half-time markets are thin; see ht_pressure_agent

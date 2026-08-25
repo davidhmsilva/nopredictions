@@ -9,11 +9,13 @@ paper trades for months.
 import os
 import sys
 
+import psycopg2
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import pressure_agent as pa  # noqa: E402
+import live_tracker as lt  # noqa: E402
 from live_tracker import PressureSignals  # noqa: E402
 
 
@@ -241,9 +243,19 @@ def test_observe_records_why_the_stats_are_missing(monkeypatch):
     sig = _sig(fixture_id=1, home="Manchester City", away="Liverpool",
                minute=80, has_stats=False)
     rows = pa.observe({1: sig}, lgt.load(lgt.WIDE_TABLE_PATH), board, {},
-                      enrich_status={1: "quota"})
-    assert "quota" in rows[0]["skip_reason"]
+                      enrich_status={1: lt.DAILY_EXHAUSTED})
+    assert "daily quota exhausted" in rows[0]["skip_reason"]
     assert rows[0]["pressure_index"] is None      # never a made-up measurement
+
+
+def test_rate_limited_is_not_recorded_as_a_spent_day():
+    """One label for both refusals pointed at the wrong constraint: the daily
+    allowance was 3% used while 176 rows claimed it was gone."""
+    assert pa._no_stats_reason(lt.RATE_LIMITED) == \
+        "stats unavailable: rate limited (per-minute)"
+    assert pa._no_stats_reason(lt.DAILY_EXHAUSTED) == \
+        "stats unavailable: daily quota exhausted"
+    assert pa._no_stats_reason(lt.RATE_LIMITED) != pa._no_stats_reason(lt.DAILY_EXHAUSTED)
 
 
 # ── the fair value is a property of the STATE, not of the book ───────────────
@@ -308,3 +320,177 @@ def test_recentring_did_not_steepen_the_response():
     pressure bites, disguised as a fix to where it is centred."""
     slope = pa.PRESSURE_GAIN / pa.PRESSURE_NEUTRAL
     assert slope == pytest.approx(0.50 / 35.0, rel=0.02)
+
+
+# ── surviving a connection dropped under us ──────────────────────────────────
+
+class _FakeCursor:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, *a):
+        if self.exc:
+            raise self.exc
+
+
+class _FakeConn:
+    """Just enough connection to drive the health check."""
+
+    def __init__(self, exc=None, closed=0):
+        self.exc = exc
+        self.closed = closed
+        self.close_calls = 0
+
+    def cursor(self):
+        return _FakeCursor(self.exc)
+
+    def close(self):
+        self.close_calls += 1
+
+
+def test_db_alive_reports_a_dropped_socket():
+    """A sleep kills the socket; the agent must notice before it writes.
+
+    psycopg2 raises OperationalError or InterfaceError depending on where the
+    connection died, and the daemon used to die with it — four times on
+    2026-08-21, each restart costing hours because the Mac was asleep.
+    """
+    assert pa._db_alive(_FakeConn()) is True
+    assert pa._db_alive(None) is False
+    assert pa._db_alive(_FakeConn(closed=1)) is False
+    for exc in (psycopg2.OperationalError("server closed the connection"),
+                psycopg2.InterfaceError("connection already closed")):
+        assert pa._db_alive(_FakeConn(exc=exc)) is False
+        assert isinstance(exc, pa._DB_DROPPED)
+
+
+def test_reconnect_closes_the_corpse_and_returns_a_new_connection(monkeypatch):
+    fresh = _FakeConn()
+    dead = _FakeConn(exc=psycopg2.OperationalError("gone"))
+    monkeypatch.setattr(pa, "_conn", lambda: fresh)
+    assert pa._reconnect(dead) is fresh
+    assert dead.close_calls == 1
+
+
+def test_reconnect_returns_none_when_the_db_is_still_unreachable(monkeypatch):
+    """No network yet after the wake — skip the cycle, never crash the loop."""
+    def boom():
+        raise psycopg2.OperationalError("could not translate host name")
+
+    monkeypatch.setattr(pa, "_conn", boom)
+    assert pa._reconnect(_FakeConn()) is None
+
+
+def test_a_transport_fault_that_never_clears_ends_the_process(monkeypatch):
+    """The forever-loop caught every network error and carried on, so on
+    2026-08-25 the agent spent seven and a half hours reporting an empty live
+    board while its sockets were dead. Only an EXIT reaches the wrapper's
+    restart, so a fault that persists has to become one.
+    """
+    import live_tracker as lt
+
+    polls = []
+
+    class DeadTracker:
+        window_minutes = 15
+        enrich_status: dict = {}
+        last_poll_failed = True
+
+        def poll(self, priority=None):
+            polls.append(1)
+            # A cap, so that removing the watchdog fails this test instead of
+            # hanging the suite forever.
+            assert len(polls) <= pa.DEAD_POLLS_BEFORE_EXIT, "the loop never gave up"
+            return {}
+
+    monkeypatch.setattr(pa, "LiveMatchTracker", DeadTracker)
+    monkeypatch.setattr(pa, "_fetch_events", lambda *a, **k: [])
+    monkeypatch.setattr(pa.time, "sleep", lambda *a, **k: None)
+
+    pa.run(once=False, dry_run=True, interval=0)
+
+    assert len(polls) == pa.DEAD_POLLS_BEFORE_EXIT, (
+        f"gave up after {len(polls)} polls, expected {pa.DEAD_POLLS_BEFORE_EXIT}")
+
+
+def test_a_recovering_connection_does_not_end_the_process(monkeypatch):
+    """The counter is CONSECUTIVE failures. A blip must not accumulate towards a
+    restart across an otherwise healthy afternoon."""
+    import itertools
+
+    outcomes = itertools.cycle([True] * (pa.DEAD_POLLS_BEFORE_EXIT - 1) + [False])
+    polls = []
+
+    class FlakyTracker:
+        window_minutes = 15
+        enrich_status: dict = {}
+        last_poll_failed = False
+
+        def poll(self, priority=None):
+            polls.append(1)
+            self.last_poll_failed = next(outcomes)
+            if len(polls) > pa.DEAD_POLLS_BEFORE_EXIT * 4:
+                raise SystemExit  # survived far past the threshold — that is the point
+            return {}
+
+    monkeypatch.setattr(pa, "LiveMatchTracker", FlakyTracker)
+    monkeypatch.setattr(pa, "_fetch_events", lambda *a, **k: [])
+    monkeypatch.setattr(pa.time, "sleep", lambda *a, **k: None)
+
+    with pytest.raises(SystemExit):
+        pa.run(once=False, dry_run=True, interval=0)
+
+
+def test_a_frozen_window_is_recorded_as_unmeasured_not_as_a_dead_match(monkeypatch):
+    """The row the 2026-08-20 defect produced 17,390 times: a stat block, a
+    baseline carrying the same fetch, every delta zero, and a danger index of
+    exactly 5.0 that read as a measurement of a quiet game. It must carry no
+    pressure at all, and must say why."""
+    import late_goals_table as lgt
+
+    board = _board(monkeypatch)
+    sig = _sig(fixture_id=1, home="Manchester City", away="Liverpool", minute=80,
+               has_stats=True, stats_frozen=True, has_window=False,
+               home_danger_index=5.0, away_danger_index=5.0)
+    row = pa.observe({1: sig}, lgt.load(lgt.WIDE_TABLE_PATH), board, {},
+                     enrich_status={})[0]
+
+    assert row["pressure_index"] is None
+    assert row["home_danger"] is None and row["away_danger"] is None
+    assert row["stats_frozen"] is True
+    assert row["skip_reason"] == "stats frozen: window baseline is the same fetch"
+
+
+def test_stats_frozen_is_null_when_there_was_no_reading_to_judge(monkeypatch):
+    """NULL and False are different facts — the distinction db/035 had to be
+    written to restore once already."""
+    import late_goals_table as lgt
+
+    board = _board(monkeypatch)
+    sig = _sig(fixture_id=1, home="Manchester City", away="Liverpool",
+               minute=80, has_stats=False)
+    row = pa.observe({1: sig}, lgt.load(lgt.WIDE_TABLE_PATH), board, {},
+                     enrich_status={})[0]
+
+    assert row["stats_frozen"] is None
+    assert row["pressure_index"] is None
+
+
+def test_every_written_column_exists_on_the_row(monkeypatch):
+    """_COLS drives the INSERT by name; a column added to one and not the other
+    writes NULL silently for as long as nobody looks."""
+    import late_goals_table as lgt
+
+    board = _board(monkeypatch)
+    sig = _sig(fixture_id=1, home="Manchester City", away="Liverpool",
+               minute=80, has_stats=True)
+    row = pa.observe({1: sig}, lgt.load(lgt.WIDE_TABLE_PATH), board, {},
+                     enrich_status={})[0]
+    missing = [c for c in pa._COLS if c not in row]
+    assert not missing, f"_COLS names columns _base_row never sets: {missing}"

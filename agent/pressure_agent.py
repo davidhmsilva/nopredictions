@@ -82,7 +82,9 @@ from late_goals_observer import (                                   # noqa: E402
     pm_over25,
 )
 from live_tracker import (                                          # noqa: E402
+    DAILY_EXHAUSTED,
     PRESSURE_WINDOW_MIN,
+    RATE_LIMITED,
     LiveMatchTracker,
     PressureSignals,
 )
@@ -155,6 +157,11 @@ MIN_MINUTE = 20                 # below this the stat window is not informative
 MAX_MINUTE = 88                 # past this there is no time for a goal to arrive
 ENTRY_MIN_MINUTE = 75           # v2: only predict a goal in the closing stretch
 MIN_PRESSURE = 45.0             # do not trade "a goal might happen eventually"
+# Consecutive transport failures before the forever-loop gives up and lets the
+# wrapper restart it. Ten cycles is ten minutes at the default interval: long
+# enough that a flapping connection does not churn the process, short enough
+# that a fault which never clears costs one kickoff window and not a weekend.
+DEAD_POLLS_BEFORE_EXIT = 10
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
 STAKE_UNITS = 1.0
 SETTLE_HORIZON_MIN = 10         # the "goal is coming" horizon
@@ -162,6 +169,39 @@ SETTLE_HORIZON_MIN = 10         # the "goal is coming" horizon
 
 def _conn():
     return psycopg2.connect(DATABASE_URL)
+
+
+# A dropped socket is not an error here, it is the normal cost of this Mac
+# sleeping: the connection to Supabase dies while the process is frozen and the
+# first write after the wake raises. That used to kill the daemon four times a
+# day (2026-08-21), and each restart only happened once the machine was awake
+# again, so a 30s wrapper delay turned into hours of lost polls.
+_DB_DROPPED = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
+def _db_alive(conn) -> bool:
+    if conn is None or conn.closed:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        return True
+    except psycopg2.Error:
+        return False
+
+
+def _reconnect(conn):
+    """Return a fresh connection, or None if the DB is still unreachable."""
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    try:
+        return _conn()
+    except psycopg2.Error as exc:
+        log.warning(f"db reconnect failed: {exc.__class__.__name__}: {exc}")
+        return None
 
 
 # ── pricing ──────────────────────────────────────────────────────────────────
@@ -288,8 +328,14 @@ def _no_stats_reason(status: str) -> str:
     """Say which of the two very different failures actually happened."""
     if status in ("empty", "league proven uncovered"):
         return "no api-football stats coverage"
-    if status in ("quota", "api quota spent"):
-        return "stats unavailable: api quota spent"
+    # Two refusals that used to share one label, and mean opposite things about
+    # whether more budget would help. On 2026-08-20 the daily allowance was 3%
+    # used (2,147 of 75,000) while 176 rows claimed it was spent, so the old
+    # label was not merely coarse — it pointed at the wrong constraint.
+    if status in (RATE_LIMITED, "quota"):
+        return "stats unavailable: rate limited (per-minute)"
+    if status in (DAILY_EXHAUSTED, "api quota spent"):
+        return "stats unavailable: daily quota exhausted"
     if status == "over cycle budget":
         return "stats not fetched: over cycle budget"
     if status == "not worth a call this cycle":
@@ -325,11 +371,19 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         # No stats coverage means no pressure measurement, and a row claiming
         # pressure 5/100 for a match nobody measured is worse than no row: it
         # would enter the regression as evidence.
-        if not sig.has_stats:
+        #
+        # `stats_frozen` is the same failure wearing a stat block. The window
+        # baseline and the latest snapshot hold one fetch between them, so every
+        # delta is 0 and the index sits at its possession term — 5.0, the exact
+        # number this comment was written about. It has to be nulled here too,
+        # for the same reason and not as a special case.
+        if not sig.has_stats or sig.stats_frozen:
             row["pressure_index"] = None
             row["home_danger"] = row["away_danger"] = None
-            row["skip_reason"] = _no_stats_reason(
-                (enrich_status or {}).get(sig.fixture_id, ""))
+            row["skip_reason"] = (
+                "stats frozen: window baseline is the same fetch"
+                if sig.has_stats
+                else _no_stats_reason((enrich_status or {}).get(sig.fixture_id, "")))
             rows.append(row)
             continue
 
@@ -497,6 +551,12 @@ def _base_row(sig: PressureSignals, window_min: int) -> dict:
         "home_corners_window": sig.home_corners_window,
         "away_corners_window": sig.away_corners_window,
         "has_window": sig.has_window,
+        # True when the window baseline carried the same fetch as this row, so
+        # every delta above is structurally zero and the index below would be
+        # an artefact rather than a reading. Retracted rows from the
+        # 2026-08-20..08-25 defect carry it too (db/036); NULL means there was
+        # no pressure reading to judge.
+        "stats_frozen": sig.stats_frozen if sig.has_stats else None,
         # xG is 40% of the index and api-football serves it on about half the
         # fixtures it covers, so a match with no xG reads far quieter than it
         # played and effectively cannot clear MIN_PRESSURE. None, not False,
@@ -529,6 +589,7 @@ _COLS = [
     "window_min", "home_xg_window", "away_xg_window", "home_shots_on_window",
     "away_shots_on_window", "home_shots_inside_window", "away_shots_inside_window",
     "home_corners_window", "away_corners_window", "has_window", "has_xg",
+    "stats_frozen",
     "home_danger", "away_danger", "pressure_index", "pressure_factor",
     "pre_over25", "target_line", "best_bid", "best_ask", "bid_depth_usd",
     "ask_depth_usd", "fair_base", "fair_pressure", "fair_n", "fee_pp",
@@ -901,6 +962,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     fav_state = fav.FavState()
     pm_fixtures: list[dict] = []
     last_markets = 0.0
+    dead_polls = 0
 
     while True:
         t0 = time.time()
@@ -910,6 +972,22 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
             log.info(f"PM universe -> {len(pm_fixtures)} football fixtures")
 
         signals = tracker.poll(priority=_enrich_priority(tracker, pm_fixtures))
+
+        # On 2026-08-25 at 05:39 this process lost the ability to open a socket
+        # — every request raised PermissionError(1, 'Operation not permitted'),
+        # a per-process fault that a fresh interpreter does not have. It ran for
+        # seven and a half hours logging "live=0" once a minute, which is what a
+        # quiet morning looks like, and recorded nothing. The wrapper restarts
+        # this agent when it EXITS, so an error we catch and carry on from is an
+        # error the wrapper cannot help with. Hand it back the only thing it
+        # knows how to fix.
+        dead_polls = dead_polls + 1 if tracker.last_poll_failed else 0
+        if dead_polls >= DEAD_POLLS_BEFORE_EXIT:
+            log.error(f"{dead_polls} consecutive polls could not reach api-football "
+                      f"— exiting so the wrapper restarts on a fresh process")
+            if conn is not None:
+                conn.close()
+            return
         rows = observe(signals, table, pm_fixtures, pre_cache,
                        tracker.window_minutes, tracker.enrich_status)
         ht_rows = ht.observe(signals, ht_table, pm_fixtures, ht_state,
@@ -917,15 +995,35 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
         fav_rows = fav.observe(signals, fav_table, pm_fixtures, fav_state,
                                tracker.enrich_status)
 
+        # Check the socket before writing, not after it throws: a wake costs one
+        # extra round trip here instead of a whole cycle of observations.
+        if not dry_run and not _db_alive(conn):
+            log.warning("db connection is dead (sleep/wake?) — reconnecting")
+            conn = _reconnect(conn)
+            if conn is None:
+                log.warning("no db connection — this cycle is observed but not stored")
+
+        db_dropped = False
+
         opened = 0
         if rows and conn is not None:
-            opened = open_trades(conn, strategy_id, rows)
-            _write(conn, rows)
+            try:
+                opened = open_trades(conn, strategy_id, rows)
+                _write(conn, rows)
+            except _DB_DROPPED as exc:
+                log.warning(f"db dropped mid-write ({exc.__class__.__name__}) — "
+                            f"{len(rows)} rows lost, next poll is {interval}s away")
+                db_dropped, opened, rows = True, 0, []
 
         ht_opened = 0
-        if ht_rows and conn is not None:
-            ht_opened = ht.open_trades(conn, ht_strategy_id, ht_rows)
-            ht.write(conn, ht_rows)
+        if ht_rows and conn is not None and not db_dropped:
+            try:
+                ht_opened = ht.open_trades(conn, ht_strategy_id, ht_rows)
+                ht.write(conn, ht_rows)
+            except _DB_DROPPED as exc:
+                log.warning(f"db dropped mid-write [HT] ({exc.__class__.__name__}) — "
+                            f"{len(ht_rows)} rows lost")
+                db_dropped, ht_opened, ht_rows = True, 0, []
         for r in ht_rows:
             if r["entered"]:
                 log.info(
@@ -936,9 +1034,14 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                 )
 
         fav_opened = 0
-        if fav_rows and conn is not None:
-            fav_opened = fav.open_trades(conn, fav_strategy_id, fav_rows)
-            fav.write(conn, fav_rows)
+        if fav_rows and conn is not None and not db_dropped:
+            try:
+                fav_opened = fav.open_trades(conn, fav_strategy_id, fav_rows)
+                fav.write(conn, fav_rows)
+            except _DB_DROPPED as exc:
+                log.warning(f"db dropped mid-write [FAV] ({exc.__class__.__name__}) — "
+                            f"{len(fav_rows)} rows lost")
+                db_dropped, fav_opened, fav_rows = True, 0, []
         for r in fav_rows:
             if r["entered"]:
                 log.info(
@@ -963,6 +1066,9 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                  f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} "
                  f"| FAV rows={len(fav_rows):3d} entered={fav_opened:2d} "
                  f"| {time.time() - t0:.1f}s")
+
+        if db_dropped:
+            conn = _reconnect(conn)
 
         if once:
             break

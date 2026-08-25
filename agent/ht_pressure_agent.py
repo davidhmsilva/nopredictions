@@ -135,19 +135,24 @@ ENTRY_MIN_MINUTE = 15           # the rule, as specified
 # Past 25' the fair value has fallen by a third and the bet stops being the one
 # the first-15 reading was about.
 ENTRY_MAX_MINUTE = 25
-# CALIBRATED, not guessed — but calibrated to FREQUENCY, not to profitability.
-# Recomputing this exact index on 165 real fixtures that already have a 15-18'
-# stats row in pressure_observations gives: median 11, p75 16, p90 23, p95 26,
-# p99 43. The sibling's 45 would fire on 0.6% of openings — about once a month,
-# which is not a strategy, it is a rounding error. 25 is roughly the top decile
-# of openings, which is what "high pressure" has to mean if it is to mean
-# anything at this stage of a match.
+# LOWERED 25 -> 19 on 2026-08-20, by the user's decision and not by any fit.
+# Percentiles of this exact index on 181 real openings, xG renormalised (see
+# live_tracker.danger_index): median 15, p73 19, p89 25, p95 29. The bar moved
+# from the top decile to the top quartile — 11.0% of fixtures cleared 25, 26.5%
+# clear 19 — which is roughly 2.4x the entries and the difference between
+# reaching the n>=200 verdict gate in months rather than years.
 #
-# Note the axis is shared with the sibling agent but the distributions are not:
-# a 15-minute window late in a stretched match accumulates far more than the
+# Be honest about the cost: "high pressure" now means "busier than three fixtures
+# in four", not "one of the liveliest openings of the day", and the hypothesis
+# pre-registered in db/033 is written about the strong claim. opening_pressure is
+# stored on every row precisely so "does it separate at 25 but not at 19" stays a
+# question the data can answer later, rather than one guessed at now.
+#
+# The axis is shared with the sibling agent but the distributions are not: a
+# 15-minute window late in a stretched match accumulates far more than the
 # opening quarter of an hour of a 0-0. Neither threshold has ever been fitted to
 # an outcome — that is what this table is being recorded to make possible.
-MIN_PRESSURE = 25.0
+MIN_PRESSURE = 19.0
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
 # The sibling asks for $50. This book is an order of magnitude thinner (see the
 # header), and 1u of paper stands in for a $1-2.50 real order, so $25 across the
@@ -220,7 +225,11 @@ def opening_pressure(sig: PressureSignals) -> tuple[float, float, float]:
     minutes". Later it is an average intensity, which is NOT the same signal —
     hence only the reading taken inside the FIRST15 window is ever traded on.
     """
-    scale = 15.0 / max(sig.minute, 1)
+    # Divided by the minute the STATS were true, not the minute of this poll:
+    # with a 180s TTL against a 60s cycle the two differ by up to three minutes,
+    # and using the poll's minute would deflate the index by up to 20% on exactly
+    # the fixtures that were measured least recently.
+    scale = 15.0 / max(sig.stats_minute or sig.minute, 1)
     # xG coverage is a property of the FEED for this fixture, so the flag is read
     # across both sides: one team having created nothing is not the same as
     # api-football publishing no xG for the competition.
