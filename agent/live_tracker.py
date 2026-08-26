@@ -829,29 +829,45 @@ class LiveMatchTracker:
             signals.shot_dominance_home = signals.home_shots_on_window / total_shots_window
             signals.shot_dominance_away = signals.away_shots_on_window / total_shots_window
 
-        # Composite danger index (0–100)
+        # Composite danger index (0–100). xG coverage is a property of the FEED
+        # for this fixture, so it is read off the TOTALS and across both sides:
+        # a window with no xG in it is a quiet ten minutes, which is exactly what
+        # the index should score low — a competition api-football publishes no xG
+        # for is not a measurement at all.
+        has_xg = bool(latest.home_xg or latest.away_xg)
         signals.home_danger_index = self._danger_index(
             signals.home_shots_on_window, signals.home_shots_inside_window,
             signals.home_xg_window, signals.home_corners_window,
-            signals.home_possession, latest.minute)
+            signals.home_possession, latest.minute, has_xg=has_xg)
         signals.away_danger_index = self._danger_index(
             signals.away_shots_on_window, signals.away_shots_inside_window,
             signals.away_xg_window, signals.away_corners_window,
-            signals.away_possession, latest.minute)
+            signals.away_possession, latest.minute, has_xg=has_xg)
 
         return signals
 
     def _danger_index(self, shots_on: int, shots_inside: int,
                       xg: float, corners: int, possession: float,
-                      minute: int) -> float:
+                      minute: int, has_xg: bool = True) -> float:
         """Composite danger score 0–100 over the rolling window.
 
-        Deliberately does NOT pass has_xg: Live Pressure Overs has 78 settled
-        entries and 154k rows recorded against the un-renormalised score, and
-        moving the axis under an open record mixes two populations in one yield.
-        Revisit when that arm next bumps its obs_version.
+        This used to drop has_xg on purpose, to protect the record Live Pressure
+        Overs had already accumulated against the un-renormalised score. The
+        price of that turned out to be the arm itself: measured on tradeable
+        rows at minute 75+ over the seven days to 2026-08-26, fixtures whose feed
+        carries no xG peaked at **29.4** against a MIN_PRESSURE of 45 — 0 of 372
+        rows could ever have entered, excluding 32 of 53 fixtures (60%) by
+        construction rather than because they were played quietly. The gate was
+        therefore not "pressure >= 45" but "has xG AND pressure >= 45", which is
+        not the hypothesis registered in db/031.
+
+        Renormalised from obs_version 3 (2026-08-26). v2 and v3 rows are two
+        different measurements and must never be pooled into one yield; the
+        agent's --report already splits on obs_version, and has_xg is on every
+        row so the fit can control for it.
         """
-        return danger_index(shots_on, shots_inside, xg, corners, possession)
+        return danger_index(shots_on, shots_inside, xg, corners, possession,
+                            has_xg=has_xg)
 
     def get_all_signals(self) -> dict[int, PressureSignals]:
         """Get pressure signals for all tracked fixtures."""

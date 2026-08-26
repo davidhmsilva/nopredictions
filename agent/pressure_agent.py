@@ -99,7 +99,7 @@ log = logging.getLogger("pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure Overs"
-OBS_VERSION = 2
+OBS_VERSION = 3
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300         # PM universe re-pull
@@ -151,6 +151,27 @@ K_MIN, K_MAX = 0.70, 1.60
 #
 # Do not mix obs_version 1 and 2 entries in one yield: v1 required edge >= 2pp
 # AND pressure >= 45, so it selected a different population.
+#
+# obs_version 3 (2026-08-26): the AXIS moved, not the rule. The danger index now
+# renormalises its remaining weights when the feed carries no xG, as the other
+# two arms already did. Until now this arm dropped that flag to protect the
+# record built against the un-renormalised score — and the measured cost of that
+# protection was the arm: on tradeable rows at minute 75+ over the preceding
+# seven days, fixtures without xG peaked at 29.4 against this MIN_PRESSURE of
+# 45, so 0 of 372 rows could ever enter and 32 of 53 fixtures (60%) were
+# excluded by which competition publishes xG rather than by how they played.
+# MIN_PRESSURE is deliberately UNCHANGED at 45: the point is to let the fixtures
+# that were never measurable reach the same bar, not to lower it.
+#
+# v2 and v3 are two different measurements of the same quantity. Never pool
+# them; --report already splits on obs_version, and has_xg is on every row.
+#
+# ⚠️ PRESSURE_NEUTRAL = 22.0 was measured as the mean index on the OLD axis, and
+# renormalising lifts every no-xG fixture, so the true mean is now higher. That
+# biases k upward on those rows — but k gates nothing since v2, and fair_base
+# and pressure_index are both stored raw, so every fair_pressure stays
+# recomputable. Re-measuring the centre is a separate calibration decision and
+# is not made here.
 MIN_EDGE_PP = 2.0               # recorded only — NOT a gate since v2
 MIN_DEPTH_USD = 50.0
 MIN_MINUTE = 20                 # below this the stat window is not informative
@@ -258,26 +279,60 @@ def match_pm_fixture(sig: PressureSignals, pm_fixtures: list[dict]) -> dict | No
 # ── one cycle ────────────────────────────────────────────────────────────────
 
 _LISTED_CACHE: dict[int, bool] = {}
+_LISTED_MISS_GEN: dict[int, int] = {}
+_PM_UNIVERSE_GEN = 0
+
+
+def _pm_universe_refreshed() -> None:
+    """A new PM universe was pulled, so every cached "not listed" is stale.
+
+    PM opens a live board when it feels like it, not at kick-off. The universe
+    is re-pulled every REFRESH_MARKETS_S; a miss is only ever valid against the
+    pull it was computed on.
+    """
+    global _PM_UNIVERSE_GEN
+    _PM_UNIVERSE_GEN += 1
 
 
 def _pm_listed(tracker: LiveMatchTracker, fid: int, pm_fixtures: list[dict]) -> bool:
     """Does PM have a board for this fixture at all?
 
     A fixture PM does not list can never be traded no matter how well we measure
-    it, so it must never win a paid stats call. Cached per fixture: the answer
-    cannot change while the match is running, and the token matcher is not free.
+    it, so it must never win a paid stats call.
+
+    A HIT is cached for good. A MISS is cached only against the PM universe that
+    produced it, because "the answer cannot change while the match is running"
+    was wrong: PM lists many live boards after kick-off, and this runs long before
+    the first re-pull. A permanently cached miss sent the fixture down the
+    unlisted branch of _enrich_priority, which returns -1 past
+    ht.OBSERVE_MAX_MINUTE — so it never won another paid stats call, its stat
+    block was carried forward until the rolling window differenced one fetch
+    against itself, and get_signals set stats_frozen with no pressure index at
+    all. The pricing path meanwhile re-read the universe every 300s, found the
+    board and recorded best_ask, so the row looked tradeable and could never be
+    traded. Over the seven days to 2026-08-26 that cost 177 of the 230 fixtures
+    (77%) that had a PM book at minute 75+, and Elche-Barcelona finished with
+    one shot on record.
     """
-    if fid not in _LISTED_CACHE:
-        info = tracker.fixture_info.get(fid) or {}
-        home, away = info.get("home", ""), info.get("away", "")
-        hit = False
-        for fx in pm_fixtures:
-            split = split_title(fx["title"])
-            if split and pair_score(split[0], split[1], home, away) > 0:
-                hit = True
-                break
-        _LISTED_CACHE[fid] = hit
-    return _LISTED_CACHE[fid]
+    if _LISTED_CACHE.get(fid) is True:
+        return True
+    if fid in _LISTED_CACHE and _LISTED_MISS_GEN.get(fid) == _PM_UNIVERSE_GEN:
+        return False
+
+    info = tracker.fixture_info.get(fid) or {}
+    home, away = info.get("home", ""), info.get("away", "")
+    hit = False
+    for fx in pm_fixtures:
+        split = split_title(fx["title"])
+        if split and pair_score(split[0], split[1], home, away) > 0:
+            hit = True
+            break
+    _LISTED_CACHE[fid] = hit
+    if hit:
+        _LISTED_MISS_GEN.pop(fid, None)
+    else:
+        _LISTED_MISS_GEN[fid] = _PM_UNIVERSE_GEN
+    return hit
 
 
 def _enrich_priority(tracker: LiveMatchTracker, pm_fixtures: list[dict]):
@@ -969,6 +1024,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
         if t0 - last_markets > REFRESH_MARKETS_S or not pm_fixtures:
             pm_fixtures = _fetch_events()
             last_markets = t0
+            _pm_universe_refreshed()
             log.info(f"PM universe -> {len(pm_fixtures)} football fixtures")
 
         signals = tracker.poll(priority=_enrich_priority(tracker, pm_fixtures))

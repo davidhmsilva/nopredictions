@@ -494,3 +494,148 @@ def test_every_written_column_exists_on_the_row(monkeypatch):
                      enrich_status={})[0]
     missing = [c for c in pa._COLS if c not in row]
     assert not missing, f"_COLS names columns _base_row never sets: {missing}"
+
+
+# ── the PM-listed cache and the paid stats budget ────────────────────────────
+
+def _tracker_with(fid, home, away):
+    tr = lt.LiveMatchTracker()
+    tr.fixture_info[fid] = {"home": home, "away": away,
+                            "league": "La Liga", "league_id": 140}
+    return tr
+
+
+def _reset_listed_cache():
+    pa._LISTED_CACHE.clear()
+    pa._LISTED_MISS_GEN.clear()
+
+
+def test_a_board_that_opens_after_kickoff_is_picked_up():
+    """PM opens live boards after kick-off, so a miss must not be permanent.
+
+    This is the defect that emptied the arm: the first poll of a match ran
+    before PM listed it, the miss was cached for the life of the process, and
+    _enrich_priority then returned -1 for every minute past OBSERVE_MAX_MINUTE.
+    The fixture never won another paid stats call, its stat block was carried
+    forward until the rolling window differenced one fetch against itself, and
+    the row went out with stats_frozen and no pressure index — while the
+    pricing path, which re-reads the universe, happily recorded a best_ask.
+    """
+    _reset_listed_cache()
+    tr = _tracker_with(999, "Elche", "Barcelona")
+    board = [{"title": "Elche vs. Barcelona"}]
+    snap = lt.StatSnapshot(minute=76, timestamp=0.0)
+
+    assert pa._pm_listed(tr, 999, []) is False
+    assert pa._enrich_priority(tr, [])(999, snap) < 0
+
+    pa._pm_universe_refreshed()
+
+    assert pa._pm_listed(tr, 999, board) is True
+    assert pa._enrich_priority(tr, board)(999, snap) > 0
+
+
+def test_a_genuinely_unlisted_fixture_still_never_wins_a_call():
+    """The budget guard has to survive the fix — 87% of live fixtures are
+    unlisted and must not start costing paid calls in the entry window."""
+    _reset_listed_cache()
+    tr = _tracker_with(888, "Some Amateur XI", "Another Amateur XI")
+    board = [{"title": "Elche vs. Barcelona"}]
+    snap = lt.StatSnapshot(minute=76, timestamp=0.0)
+
+    pa._pm_universe_refreshed()
+    assert pa._pm_listed(tr, 888, board) is False
+    assert pa._enrich_priority(tr, board)(888, snap) < 0
+
+
+def test_a_hit_is_not_re_examined_when_the_universe_churns():
+    """A board that has been matched stays matched: a transient empty pull must
+    not demote a fixture we are already measuring."""
+    _reset_listed_cache()
+    tr = _tracker_with(999, "Elche", "Barcelona")
+    board = [{"title": "Elche vs. Barcelona"}]
+
+    assert pa._pm_listed(tr, 999, board) is True
+    pa._pm_universe_refreshed()
+    assert pa._pm_listed(tr, 999, []) is True
+
+
+def test_a_miss_is_not_recomputed_within_one_universe():
+    """The matcher is not free — a miss is cached until the next re-pull."""
+    _reset_listed_cache()
+    tr = _tracker_with(777, "Elche", "Barcelona")
+    calls = []
+
+    class _Board(list):
+        def __iter__(self):
+            calls.append(1)
+            return super().__iter__()
+
+    board = _Board()
+    assert pa._pm_listed(tr, 777, board) is False
+    assert pa._pm_listed(tr, 777, board) is False
+    assert len(calls) == 1
+
+
+# ── obs_version 3: the index is renormalised when the feed has no xG ─────────
+
+def _snap(minute, **kw):
+    s = lt.StatSnapshot(minute=minute, timestamp=0.0)
+    for k, v in kw.items():
+        setattr(s, k, v)
+    return s
+
+
+def _tracker_with_window(has_xg):
+    """Two snapshots 15 minutes apart, identical play, xG published or not."""
+    tr = lt.LiveMatchTracker()
+    tr.fixture_info[1] = {"home": "H", "away": "A", "league": "L", "league_id": 1}
+    base = dict(home_shots_on=0, home_shots_inside=0, home_corners=0,
+                home_possession=50.0, away_possession=50.0)
+    old = _snap(60, **base)
+    old.stats_minute, old.stats_fetched_at = 60, 1000.0
+    new = _snap(75, home_shots_on=4, home_shots_inside=5, home_corners=3,
+                home_possession=50.0, away_possession=50.0)
+    if has_xg:
+        new.home_xg = 0.5
+    new.stats_minute, new.stats_fetched_at = 75, 2000.0
+    tr.snapshots[1] = [old, new]
+    return tr
+
+
+def test_a_feed_without_xg_is_no_longer_scored_out_of_sixty():
+    """The defect obs_version 3 closes.
+
+    xG carries 40% of the weight, so a fixture whose competition publishes none
+    could only ever score 60/100 — against a MIN_PRESSURE of 45 that excluded it
+    outright, not merely penalised it. Measured on tradeable rows at minute 75+,
+    no-xG fixtures peaked at 29.4 and 0 of 372 could enter.
+    """
+    sig = _tracker_with_window(has_xg=False).get_signals(1)
+    raw = lt.danger_index(4, 5, 0.0, 3, 50.0, has_xg=True)
+    assert sig.home_danger_index == pytest.approx(raw / (1.0 - lt._W_XG))
+    assert sig.home_danger_index > raw
+
+
+def test_renormalising_does_not_touch_a_feed_that_has_xg():
+    sig = _tracker_with_window(has_xg=True).get_signals(1)
+    assert sig.home_danger_index == pytest.approx(
+        lt.danger_index(4, 5, 0.5, 3, 50.0, has_xg=True))
+
+
+def test_xg_coverage_is_read_off_the_totals_not_the_window():
+    """A quiet window in a competition that DOES publish xG must still be scored
+    out of 100 — otherwise every goalless ten minutes gets silently inflated."""
+    tr = _tracker_with_window(has_xg=True)
+    tr.snapshots[1][-1].home_xg = 0.0
+    tr.snapshots[1][-1].away_xg = 0.7          # the feed publishes xG
+    tr.snapshots[1][-1].home_xg_window = 0.0
+    sig = tr.get_signals(1)
+    assert sig.home_danger_index == pytest.approx(
+        lt.danger_index(4, 5, 0.0, 3, 50.0, has_xg=True))
+
+
+def test_obs_version_was_bumped_with_the_axis():
+    """v2 and v3 measure the same quantity differently — the split has to exist
+    in the data or the two populations pool into one meaningless yield."""
+    assert pa.OBS_VERSION == 3
