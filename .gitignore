@@ -57,3 +57,7 @@ ingest/add_pm_key.sh
 .vercel
 # cron_guard.sh cadence state — machine-local, never shared
 agent/.cron_guard/
+
+# pressure_daemon.sh liveness stamp (D6) — proves the wrapper can still
+# write this directory. Local runtime state, never committed.
+agent/.pressure_heartbeat
