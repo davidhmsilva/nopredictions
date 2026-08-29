@@ -9,32 +9,34 @@
   ~/Documents was gone. A cron job inherits its permissions from whatever launched
   it; a LaunchAgent has its OWN TCC identity, which is the point of moving here.
 
-  🛑 NOT LOADED YET, AND IT WILL NOT RUN UNTIL A GRANT IS GIVEN BY HAND.
-  Bootstrapping this on 2026-08-29 reproduced the outage on demand:
+  ✅ LOADED AND RUNNING SINCE 2026-08-29, WITH NO TCC GRANT OF ANY KIND.
+  That is only true because the repo moved out of ~/Documents on the same day.
+
+  The first attempt, with the repo still at ~/Documents/agente, reproduced the
+  outage on demand in four seconds:
 
       shell-init: getcwd: cannot access parent directories: Operation not permitted
       /bin/bash: .../pressure_daemon.sh: Operation not permitted     (exit 126)
 
-  A LaunchAgent starts with NO TCC grants at all — it could not even read the
-  script. That is the same EPERM as the three outages, which confirms the
-  diagnosis but means the migration is blocked on:
-      System Settings → Privacy & Security → Full Disk Access → add /bin/bash
-  ⚠️ That grant is broad: FDA on /bin/bash gives Full Disk Access to every shell
-  script this user ever runs.
+  A LaunchAgent starts with NO TCC grants — it could not even read the script.
+  launchd removes the inheritance from the launching terminal, which was the
+  hypothesis, but it does not hand you ~/Documents. A probe LaunchAgent with zero
+  grants then measured what IS reachable:
 
-  MEASURED ALTERNATIVE, no grant needed. A probe LaunchAgent with zero grants
-  (2026-08-29) reached:
       /private/tmp                      OK
       ~ (plain dir in the home root)    OK   read AND write
       ~/Documents                       DENIED
       ~/Documents/agente/...            DENIED
-  TCC protects ~/Documents; it does not protect a plain folder in the home root.
-  So moving the repo to ~/agente removes this entire failure class instead of
-  buying an exemption from it — and then this agent works with no grant at all.
 
-  KeepAlive is what earns the migration on its own: when pressure_health.py
-  --recover kills a wedged holder, launchd restarts it in ~30s with a freshly
-  derived permission set, instead of waiting for the next */10 cron tick.
+  TCC protects ~/Documents; it does not protect a plain folder in the home root.
+  So the repo's LOCATION was the root cause of all three outages, not the
+  supervisor. Moving to ~/agente removed the failure class instead of buying an
+  exemption from it — Full Disk Access on /bin/bash would have worked too, but it
+  grants FDA to every shell script this user ever runs.
+
+  ⚠️ DO NOT MOVE THIS REPO BACK UNDER ~/Documents, ~/Desktop or ~/Downloads.
+  All three are TCC-protected and this job will silently stop being able to read
+  its own code.
 
   ⚠️ THE `*/10 pressure_daemon.sh` CRON LINE MUST STAY REMOVED while this is
   loaded. Keeping it as a "fallback" looks harmless — the wrapper is a singleton,
@@ -58,11 +60,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/davidsilva/Documents/agente/agent/pressure_daemon.sh</string>
+        <string>/Users/davidsilva/agente/agent/pressure_daemon.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/davidsilva/Documents/agente/agent</string>
+    <string>/Users/davidsilva/agente/agent</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -82,8 +84,8 @@
          agent, the wrapper and the --settle cron, and a fresh mtime on it is
          exactly what hid two outages. This one is launchd's voice only. -->
     <key>StandardOutPath</key>
-    <string>/Users/davidsilva/Documents/agente/agent/pressure_launchd.log</string>
+    <string>/Users/davidsilva/agente/agent/pressure_launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/davidsilva/Documents/agente/agent/pressure_launchd.log</string>
+    <string>/Users/davidsilva/agente/agent/pressure_launchd.log</string>
 </dict>
 </plist>

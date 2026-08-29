@@ -42,7 +42,7 @@ riding the AI + prediction-markets wave simultaneously.
 ## Project structure
 
 ```
-~/Documents/agente/
+~/agente/
 ├── CLAUDE.md                          ← you are here
 ├── .gitignore                         ← git ignore rules
 ├── site_prototype.html                ← static HTML prototype (legacy)

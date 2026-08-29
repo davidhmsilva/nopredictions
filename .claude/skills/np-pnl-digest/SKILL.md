@@ -14,7 +14,7 @@ report losses plainly, never dress circular model-CLV up as real CLV.
 
 1. **Generate the digest** (bundled script → markdown):
    ```bash
-   cd /Users/davidsilva/Documents/agente && ingest/.venv/bin/python \
+   cd /Users/davidsilva/agente && ingest/.venv/bin/python \
      .claude/skills/np-pnl-digest/pnl_digest.py --days 7
    ```
    Output: settled record, net P&L split into live (real money) vs paper, a

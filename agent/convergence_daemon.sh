@@ -9,9 +9,9 @@
 set -euo pipefail
 
 LOCKFILE="/tmp/nopredictions_convergence.lock"
-LOGFILE="/Users/davidsilva/Documents/agente/agent/convergence_daemon.log"
-PYTHON="/Users/davidsilva/Documents/agente/ingest/.venv/bin/python"
-WORKDIR="/Users/davidsilva/Documents/agente"
+LOGFILE="/Users/davidsilva/agente/agent/convergence_daemon.log"
+PYTHON="/Users/davidsilva/agente/ingest/.venv/bin/python"
+WORKDIR="/Users/davidsilva/agente"
 
 if [ -f "$LOCKFILE" ] && kill -0 "$(cat "$LOCKFILE")" 2>/dev/null; then
     echo "$(date -u '+%Y-%m-%d %H:%M UTC') — convergence daemon already running (pid $(cat "$LOCKFILE")), skipping" \

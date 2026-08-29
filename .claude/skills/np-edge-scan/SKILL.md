@@ -25,7 +25,7 @@ while the model "found" 61 fake +20–45pp edges — all correctly killed by the
 
 2. **Run the scan** (bundled script, resolves the repo + venv itself):
    ```bash
-   cd /Users/davidsilva/Documents/agente && ingest/.venv/bin/python \
+   cd /Users/davidsilva/agente && ingest/.venv/bin/python \
      .claude/skills/np-edge-scan/edge_scan.py --pm-tag epl --odds-sport soccer_epl
    ```
    Default (no args) scans the World Cup. Pass `--odds-sport ""` to skip sharp and

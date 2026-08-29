@@ -15,7 +15,7 @@ mis-estimated edge is the fastest path to ruin.
 
 1. **Size a single bet:**
    ```bash
-   cd /Users/davidsilva/Documents/agente && ingest/.venv/bin/python \
+   cd /Users/davidsilva/agente && ingest/.venv/bin/python \
      .claude/skills/np-risk/risk_calc.py --fair 0.55 --price 0.45 --bankroll 20
    ```
    Reports full Kelly, the recommended quarter-Kelly (hard-capped at 5% of
@@ -23,7 +23,7 @@ mis-estimated edge is the fastest path to ruin.
 
 2. **Check live exposure vs bankroll:**
    ```bash
-   cd /Users/davidsilva/Documents/agente && ingest/.venv/bin/python \
+   cd /Users/davidsilva/agente && ingest/.venv/bin/python \
      .claude/skills/np-risk/risk_calc.py --exposure
    ```
 

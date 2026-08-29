@@ -8,9 +8,9 @@
 set -euo pipefail
 
 LOCKFILE="/tmp/nopredictions_inplay.lock"
-LOGFILE="/Users/davidsilva/Documents/agente/agent/inplay_daemon.log"
-PYTHON="/Users/davidsilva/Documents/agente/ingest/.venv/bin/python"
-WORKDIR="/Users/davidsilva/Documents/agente"
+LOGFILE="/Users/davidsilva/agente/agent/inplay_daemon.log"
+PYTHON="/Users/davidsilva/agente/ingest/.venv/bin/python"
+WORKDIR="/Users/davidsilva/agente"
 
 if [ -f "$LOCKFILE" ] && kill -0 "$(cat "$LOCKFILE")" 2>/dev/null; then
     echo "$(date -u '+%Y-%m-%d %H:%M UTC') — daemon already running (pid $(cat "$LOCKFILE")), skipping" \
