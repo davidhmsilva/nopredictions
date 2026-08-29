@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.nopredictions.pressure — run pressure_daemon.sh under launchd instead of cron.
+
+  WHY THIS EXISTS. Three outages in three weeks (08-20, 08-27, 08-28) all had the
+  same shape: a long-lived process that macOS stripped of its permissions mid-run.
+  On 08-28 pid 37045 could still write /tmp every 30s while it could not read
+  pressure_agent.py or append one line to pressure_agent.log — the TCC grant on
+  ~/Documents was gone. A cron job inherits its permissions from whatever launched
+  it; a LaunchAgent has its OWN TCC identity, which is the point of moving here.
+
+  🛑 NOT LOADED YET, AND IT WILL NOT RUN UNTIL A GRANT IS GIVEN BY HAND.
+  Bootstrapping this on 2026-08-29 reproduced the outage on demand:
+
+      shell-init: getcwd: cannot access parent directories: Operation not permitted
+      /bin/bash: .../pressure_daemon.sh: Operation not permitted     (exit 126)
+
+  A LaunchAgent starts with NO TCC grants at all — it could not even read the
+  script. That is the same EPERM as the three outages, which confirms the
+  diagnosis but means the migration is blocked on:
+      System Settings → Privacy & Security → Full Disk Access → add /bin/bash
+  ⚠️ That grant is broad: FDA on /bin/bash gives Full Disk Access to every shell
+  script this user ever runs.
+
+  MEASURED ALTERNATIVE, no grant needed. A probe LaunchAgent with zero grants
+  (2026-08-29) reached:
+      /private/tmp                      OK
+      ~ (plain dir in the home root)    OK   read AND write
+      ~/Documents                       DENIED
+      ~/Documents/agente/...            DENIED
+  TCC protects ~/Documents; it does not protect a plain folder in the home root.
+  So moving the repo to ~/agente removes this entire failure class instead of
+  buying an exemption from it — and then this agent works with no grant at all.
+
+  KeepAlive is what earns the migration on its own: when pressure_health.py
+  --recover kills a wedged holder, launchd restarts it in ~30s with a freshly
+  derived permission set, instead of waiting for the next */10 cron tick.
+
+  ⚠️ THE `*/10 pressure_daemon.sh` CRON LINE MUST STAY REMOVED while this is
+  loaded. Keeping it as a "fallback" looks harmless — the wrapper is a singleton,
+  so a cron tick against a healthy holder just exits 0 — but it deadlocks with
+  KeepAlive: if a cron-started wrapper ever wins the lock, launchd's copy exits 0
+  on every start and KeepAlive respawns it every 30s forever. One supervisor.
+  To roll back, bootout this agent and restore the line from
+  reports/crontab_backup_2026-08-29.txt.
+
+  Install / inspect / remove:
+      cp agent/launchd/com.nopredictions.pressure.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nopredictions.pressure.plist
+      launchctl print gui/$(id -u)/com.nopredictions.pressure
+      launchctl bootout gui/$(id -u)/com.nopredictions.pressure
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nopredictions.pressure</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/davidsilva/Documents/agente/agent/pressure_daemon.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidsilva/Documents/agente/agent</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- launchd supervises the wrapper; the wrapper supervises the agent. The
+         redundancy is intentional: the wrapper's restart loop carries the orphan
+         reaping and the singleton lock, which launchd knows nothing about. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- The wrapper already sleeps 30s between agent restarts. Matching that
+         here stops launchd's own throttle log spam from a fast-failing start. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- Kept OUT of pressure_agent.log on purpose. That file already carries the
+         agent, the wrapper and the --settle cron, and a fresh mtime on it is
+         exactly what hid two outages. This one is launchd's voice only. -->
+    <key>StandardOutPath</key>
+    <string>/Users/davidsilva/Documents/agente/agent/pressure_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/davidsilva/Documents/agente/agent/pressure_launchd.log</string>
+</dict>
+</plist>

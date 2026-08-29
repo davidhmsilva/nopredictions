@@ -210,7 +210,7 @@ def check(recover: bool = False, quiet: bool = False) -> int:
                 subprocess.run(["kill", sig] + pids,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print(f"    recover: signalled wedged holder {holder} (+{len(pids)-1} children); "
-                  f"the */10 cron tick will take the lock")
+                  f"launchd KeepAlive restarts the wrapper in ~30s")
 
     return 1 if alarm else 0
 
