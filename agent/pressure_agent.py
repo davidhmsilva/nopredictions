@@ -99,7 +99,7 @@ log = logging.getLogger("pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure Overs"
-OBS_VERSION = 3
+OBS_VERSION = 4
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300         # PM universe re-pull
@@ -173,7 +173,48 @@ K_MIN, K_MAX = 0.70, 1.60
 # recomputable. Re-measuring the centre is a separate calibration decision and
 # is not made here.
 MIN_EDGE_PP = 2.0               # recorded only — NOT a gate since v2
-MIN_DEPTH_USD = 50.0
+
+# ── book quality ─────────────────────────────────────────────────────────────
+# obs_version 4 (2026-08-30): the entry rule gains two gates, both about the
+# BOOK and neither about the match. Nothing else moved — same axis, same
+# pressure gate, same minute window — so v3 and v4 differ only in which fills
+# were reachable.
+#
+# Measured on 6,449 deduped observations (one row per fixture/minute/score) over
+# 494 fixtures at minute 70-89, obs_version >= 2, CIs clustered by fixture.
+# `real − ask` is the realised P(>=1 more goal) minus the price we would have
+# paid:
+#
+#   spread  0-3pp    +3.64pp        depth    $0-200     -4.72pp
+#   spread  3-6pp    +0.92pp        depth  $200-1000    -0.49pp
+#   spread 6-10pp    -4.26pp        depth $1000-5000    +3.63pp
+#   spread 10-20pp   -6.33pp  CI[-12.1, -0.6]
+#   spread 20pp+    -38.38pp  CI[-44.3,-32.5]   (depth column: after spread<=6pp)
+#
+# The 20pp+ bucket is not a market at all: 430 rows over 221 fixtures quoting an
+# ask around 0.90 that resolves at 0.529, with spreads of 0.34, 0.40, 0.72 — a
+# lone sell order parked far from anyone's bid. MAX_ASK cannot catch those,
+# because the defect is the empty ladder and not the level of the price.
+#
+# What this actually buys: the apparent "PM's late over is expensive" reading
+# (real - ask of -5.1pp at 81-83', -6.0pp at 84-86', both CIs clear of zero) is
+# ENTIRELY an artefact of those books. On a clean book the ask is fair to
+# slightly cheap at every minute in the window — +2.1 / +2.9 / +4.7 / +3.0 /
+# +3.9pp across 70-74 / 75-78 / 79-82 / 83-86 / 87-89 — so the gate removes a
+# measured bleed rather than discovering an edge, and every one of those
+# positive numbers still has a CI crossing zero.
+#
+# ⚠️ Confound, stated because it is not controlled: deep, tight books belong to
+# the larger competitions, so part of the improvement is competition mix and
+# not book quality as such. The defensible claim is the negative one.
+#
+# Cost: 56 of the 85 v2+v3 entries survive both gates (74 the spread, 59 the
+# depth). Those 56 hit 48.2% against an ask of 45.8%, where all 85 hit 45.9%
+# against 46.3%. Entries were already running a handful a day, so expect this to
+# push the verdict gate further out — which is an argument for widening the
+# pressure gate (measured to select nothing), not for keeping cheap fills.
+MIN_DEPTH_USD = 1000.0          # was 50.0 — see the depth column above
+MAX_SPREAD = 0.06               # ask - bid; above this the quote is not a price
 MIN_MINUTE = 20                 # below this the stat window is not informative
 MAX_MINUTE = 88                 # past this there is no time for a goal to arrive
 ENTRY_MIN_MINUTE = 75           # v2: only predict a goal in the closing stretch
@@ -551,6 +592,11 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             # PM asks above 0.85 resolve at 0.66 (n=382). Nothing up there is
             # priced to be bought.
             and book["best_ask"] <= MAX_ASK
+            # v4: the book has to be a book. A missing bid or a wide spread
+            # means the ask is one parked order, not a price — those quote 0.90
+            # and resolve at 0.53.
+            and book["best_bid"] is not None
+            and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
             and (book["ask_depth_usd"] or 0) >= MIN_DEPTH_USD
             # A score we cannot pin makes the fair value meaningless: it is a
             # lookup keyed on the score.
@@ -572,6 +618,10 @@ def _why_not(row: dict, book: dict, sig: PressureSignals) -> str:
         return "no window baseline yet"
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
+    if book["best_bid"] is None:
+        return "one-sided book: no bid"
+    if (book["best_ask"] - book["best_bid"]) > MAX_SPREAD:
+        return f"spread {100 * (book['best_ask'] - book['best_bid']):.0f}pp > {100 * MAX_SPREAD:.0f}pp"
     if (book["ask_depth_usd"] or 0) < MIN_DEPTH_USD:
         return f"depth ${book['ask_depth_usd']:.0f} < ${MIN_DEPTH_USD:.0f}"
     if row["score_agrees"] is False:
@@ -769,16 +819,62 @@ def _goal_minute_api(fixture_id: int, after_minute: int) -> int | None:
         return None
 
 
+def _final_goals_api(fixture_ids: list[int]) -> dict[int, int]:
+    """True full-time goal total per fixture, straight from api-football.
+
+    Only finished fixtures are returned, so a missing key means "not settleable
+    from the API" and never "0 goals". Batched 20 ids per call, which makes a
+    whole settle run a handful of requests against a 75k/day budget.
+
+    This exists because `max()` over our own tape is NOT a final score. The
+    score feed flaps — Aberdeen 0-1 Rangers (2026-08-30) read 1-1 for three
+    polls at 83-85' and back to 0-1 after — and a flap can only ever push the
+    max UP, so every tape error lands as a fabricated WIN on an over. That
+    booked pt#5827 (Over 1.5, 4.35) as won on a match that finished 0-1.
+    """
+    key = os.getenv("FOOTBALL_API_KEY", "")
+    if not key or not fixture_ids:
+        return {}
+    out: dict[int, int] = {}
+    for i in range(0, len(fixture_ids), 20):
+        batch = fixture_ids[i:i + 20]
+        try:
+            resp = requests.get(
+                "https://v3.football.api-sports.io/fixtures",
+                params={"ids": "-".join(str(f) for f in batch)},
+                headers={"x-apisports-key": key},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                continue
+            body = resp.json()
+            if body.get("errors"):
+                continue                     # quota/rate — fall back to the tape
+            for f in body.get("response", []):
+                if (f.get("fixture", {}).get("status", {}).get("short")
+                        not in ("FT", "AET", "PEN")):
+                    continue
+                ft = (f.get("score") or {}).get("fulltime") or {}
+                if ft.get("home") is None or ft.get("away") is None:
+                    continue
+                out[f["fixture"]["id"]] = ft["home"] + ft["away"]
+        except Exception:
+            continue
+    return out
+
+
 def settle(conn) -> int:
     """Fill in both horizons for rows whose fixture has moved on.
 
     goal_next_10 is read off our own later observations of the same fixture —
-    the score at minute+10 is a row we recorded. goal_before_ft needs the final
-    score, which only arrives once the fixture is over.
+    the score at minute+10 is a row we recorded. goal_before_ft needs the FINAL
+    score, and that comes from api-football, never from our own tape: see
+    `_final_goals_api` for the flap that made the tape maximum unsafe.
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            """SELECT id, fixture_id, minute, goals_total, paper_trade_id, entered
+            """SELECT id, fixture_id, minute, goals_total, target_line,
+                      paper_trade_id, entered
                  FROM pressure_observations
                 WHERE settled_at IS NULL
                   AND observed_at < now() - interval '15 minutes'
@@ -802,6 +898,9 @@ def settle(conn) -> int:
         for fid, minute, goals in cur.fetchall():
             series.setdefault(fid, []).append((minute, goals))
 
+    # The truth, for every pending fixture the API will speak about.
+    api_final = _final_goals_api(sorted({r["fixture_id"] for r in pending}))
+
     settled = 0
     with conn.cursor() as cur:
         for r in pending:
@@ -809,18 +908,30 @@ def settle(conn) -> int:
             later = [(m, g) for m, g in obs if m >= r["minute"] + SETTLE_HORIZON_MIN]
             last_minute = max((m for m, _ in obs), default=r["minute"])
 
+            true_final = api_final.get(r["fixture_id"])
+
             at_plus_10 = goal_next_10 = None
             if later:
                 at_plus_10 = min(later, key=lambda x: x[0])[1]
                 goal_next_10 = at_plus_10 > r["goals_total"]
+                # A tape that claims more goals than the match ever had is
+                # lying at this minute too. Refuse the row rather than record
+                # a fabricated positive into the calibration arm.
+                if true_final is not None and at_plus_10 > true_final:
+                    at_plus_10 = goal_next_10 = None
 
-            # The tape has to have run past 88' before "no goal before full
-            # time" means anything. A fixture we stopped watching at 70'
-            # because the Mac went to sleep is not a settled no-goal — calling
-            # it one would bias every result toward the null.
+            # The API is the only settlement source. The tape is a fallback for
+            # fixtures it will not answer for, and only once our own polls ran
+            # past 88' — a fixture we stopped watching at 70' because the Mac
+            # went to sleep is not a settled no-goal, and calling it one would
+            # bias every result toward the null.
             final_goals = goal_before_ft = None
-            if last_minute >= MAX_MINUTE:
-                final_goals = max(g for _, g in obs)
+            final_src = None
+            if true_final is not None:
+                final_goals, final_src = true_final, "api"
+            elif last_minute >= MAX_MINUTE:
+                final_goals, final_src = max(g for _, g in obs), "poll"
+            if final_goals is not None:
                 goal_before_ft = final_goals > r["goals_total"]
 
             if goal_next_10 is None and goal_before_ft is None:
@@ -845,11 +956,12 @@ def settle(conn) -> int:
                 """UPDATE pressure_observations
                       SET goals_at_plus_10 = %s, goal_next_10 = %s,
                           final_goals = %s, goal_before_ft = %s,
+                          final_goals_source = %s,
                           goal_minute = %s, goal_minute_source = %s,
                           settled_at = now()
                     WHERE id = %s""",
                 (at_plus_10, goal_next_10, final_goals, goal_before_ft,
-                 goal_minute, goal_src, r["id"]),
+                 final_src, goal_minute, goal_src, r["id"]),
             )
             settled += 1
 
@@ -857,7 +969,14 @@ def settle(conn) -> int:
             # won = stake * entry_odds. Booking it net is the bug that had to be
             # repaired across 38 rows on 2026-05-27 and recurred once since, so
             # the odds are read back from the trade rather than recomputed here.
-            if goal_before_ft is not None and r["paper_trade_id"]:
+            # The TRADE settles on the line it was bought on, not on whether
+            # the score moved off what we happened to read at entry. If the
+            # tape was wrong at entry the line is wrong too, and comparing the
+            # final total against the line is the only reading that matches
+            # what the token actually pays.
+            if final_goals is not None and r["paper_trade_id"]:
+                won = (final_goals > float(r["target_line"])
+                       if r["target_line"] is not None else goal_before_ft)
                 cur.execute(
                     """UPDATE paper_trades
                           SET result = %s,
@@ -866,8 +985,7 @@ def settle(conn) -> int:
                                                   ELSE 0 END,
                               resolved_at = now()
                         WHERE id = %s AND result IS NULL""",
-                    ("won" if goal_before_ft else "lost", goal_before_ft,
-                     r["paper_trade_id"]),
+                    ("won" if won else "lost", won, r["paper_trade_id"]),
                 )
     conn.commit()
     return settled
