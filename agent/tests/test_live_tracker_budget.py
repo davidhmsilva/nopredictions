@@ -340,3 +340,69 @@ def test_a_window_differencing_one_fetch_against_itself_is_not_a_measurement(tra
     # and no fabricated surge from the scaled-totals fallback either
     assert sig.home_shots_on_window == 0
     assert sig.home_corners_window == 0
+
+
+# ── a refused live poll is not a quiet evening ───────────────────────────────
+
+def test_refused_live_poll_is_not_reported_as_zero_fixtures():
+    """api-football answers a refusal with HTTP 200 and an empty `response`.
+
+    For three evenings (2026-08-31 / 09-01 / 09-02) that read as "0 live
+    fixtures" once a minute while the agent recorded nothing at all. The one
+    call every cycle depends on was the one call with no error handling.
+    """
+    import live_tracker as lt
+
+    class _Resp:
+        status_code = 200
+        headers = {"x-ratelimit-requests-limit": "75000",
+                   "x-ratelimit-requests-remaining": "74999"}
+
+        @staticmethod
+        def json():
+            return {"errors": {"requests": "You have reached the request limit "
+                                           "for the day"},
+                    "results": 0, "response": []}
+
+    tracker = lt.LiveMatchTracker()
+    tracker.api_key = "test-key"
+    original = lt.requests.get
+    lt.requests.get = lambda *a, **k: _Resp()
+    try:
+        out = tracker.poll()
+    finally:
+        lt.requests.get = original
+
+    assert out == {}
+    # the refusal has to leave a mark the next cycle can act on, or the agent
+    # spends the outage hammering an API that is saying no
+    assert tracker._quota_spent_until > time.time() + 1800
+    assert tracker._quota_reason == lt.DAILY_EXHAUSTED
+    # ...and it is NOT a transport failure: restarting the process cannot help,
+    # so DEAD_POLLS_BEFORE_EXIT must not be armed by it
+    assert tracker.last_poll_failed is False
+
+
+def test_a_genuinely_quiet_feed_still_reads_as_zero():
+    """The counterpart: no football on is a real answer, not an outage."""
+    import live_tracker as lt
+
+    class _Resp:
+        status_code = 200
+        headers = {}
+
+        @staticmethod
+        def json():
+            return {"errors": [], "results": 0, "response": []}
+
+    tracker = lt.LiveMatchTracker()
+    tracker.api_key = "test-key"
+    original = lt.requests.get
+    lt.requests.get = lambda *a, **k: _Resp()
+    try:
+        out = tracker.poll()
+    finally:
+        lt.requests.get = original
+
+    assert out == {}
+    assert tracker._quota_spent_until == 0      # nothing armed

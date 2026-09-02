@@ -381,7 +381,39 @@ class LiveMatchTracker:
                 log.warning(f'[tracker] api-football HTTP {resp.status_code}')
                 return {}
 
-            fixtures = resp.json().get('response', [])
+            body = resp.json()
+            # A REFUSAL ARRIVES AS HTTP 200 WITH AN EMPTY `response`.
+            #
+            # Without this branch it read as "0 live fixtures" — a perfectly
+            # healthy-looking line, printed once a minute, for three evenings
+            # running (2026-08-31 dark from 23:40, 09-01 from 21:14, 09-02 from
+            # 20:42). The agent recorded nothing, the log said nothing was
+            # wrong, and only pressure_health.py's STALE line — which nobody
+            # reads — showed it. `_enrich_fixture` twenty lines below has
+            # checked `errors` on its own calls all along; the live poll never
+            # did, so the one call every cycle depends on was the one call with
+            # no error handling.
+            #
+            # The response headers are logged with it because api-football
+            # contradicts itself here: on 2026-09-02 it refused every endpoint
+            # with "request limit for the day" while reporting
+            # x-ratelimit-requests-remaining: 74999 of 75000, against ~2,300
+            # calls actually made. Neither number is evidence on its own.
+            errors = body.get('errors') or {}
+            if errors:
+                blob = str(errors).lower()
+                daily = 'day' in blob
+                self._quota_spent_until = time.time() + (3600 if daily else 60)
+                self._quota_reason = DAILY_EXHAUSTED if daily else RATE_LIMITED
+                quota = {k: v for k, v in resp.headers.items()
+                         if 'ratelimit' in k.lower()}
+                log.error(
+                    f'[tracker] api-football REFUSED the live poll: '
+                    f'{str(errors)[:200]} | headers {quota} -> '
+                    f'{self._quota_reason}, no fixtures this cycle')
+                return {}
+
+            fixtures = body.get('response', [])
             log.info(f'[tracker] {len(fixtures)} live fixtures')
 
             fixture_ids_with_stats = []
