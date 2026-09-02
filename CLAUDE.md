@@ -757,6 +757,70 @@ claims more goals than the match ever had; and the paper trade now settles on
 rather than "the score moved off what we read at entry", because where the tape
 was wrong at entry the LINE is wrong too. `final_goals_source` on every row.
 
+## Settled-market sweep — observation phase (no money, 2026-09-02)
+
+Thesis, taken from a wallet rather than a model: a PM football market whose
+outcome the SCORE has already decided is sometimes still quoted with a live ask
+well below 1. Wallet `0xec5723df…560fa7` (**GSX-**) made **+$85,423 in 105 days
+on a book that never exceeded $29k**, 100% in-play, zero pre-match, median hold
+**1.6 minutes** — and **half of it in the 20 minutes after the final whistle**.
+Full analysis in `reports/wallet_gsx_2026-09-02.md`.
+
+The decomposition that makes it buildable, on GSX-'s own post-whistle cheap buys:
+
+| | n | cost | P&L |
+|---|---|---|---|
+| bought the eventual **WINNER** | 323 | $3,565 | **+$27,931 (+783%)** |
+| bought the eventual LOSER | 2,631 | $19,030 | −$690 (−4%) |
+
+The whole return is the winner leg, and identifying it needs no model. 🔑 And
+blind hold-vs-flip on the same lots was **+158% vs +124%**, so **exit speed does
+not matter** — this is buy-and-redeem, not scalping, which is what puts it inside
+reach of a 30-second Python loop.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python settled_sweep_observer.py --once --dry-run   # one cycle, no writes
+python settled_sweep_observer.py                    # forever, 30s
+python settled_sweep_observer.py --settle           # backfill PM resolutions
+python settled_sweep_observer.py --report
+```
+
+Strategy: none yet (observation only). Hypothesis **H-SETTLED-SWEEP** (id 31),
+table `settled_market_observations` (db/039), wrapper `settled_sweep_daemon.sh`.
+
+**Three windows, in rising order of frequency.** Measured on one real board:
+**40 markets are already decided at full time and 24 at minute 70.**
+- `post_whistle` — the match is over, the board has not resolved. GSX-'s window.
+- `halftime` — every 1st-half market settles at the break with the fixture still
+  live. **This happens in EVERY match**, so it should be the more frequent window.
+- `in_match` — an Over passes its line, BTTS gets its second goal, an exact score
+  dies. Settled the instant the ball crosses.
+
+⚠️ **The risk is our settlement code, not the market.** There is no model risk and
+no price risk here; a wrong rule means buying at 6 cents something worth 0 while
+believing it is a 16x. So `rule_correct` — our verdict checked back against PM's
+own resolution — is the PRIMARY measurement, ahead of any yield. The rules live
+in `settled_markets.py`, apart from the network and the DB, with 38 tests, and
+**everything fails closed**: an unparsed question, an ambiguous team, a missing
+half-time score and an unrecognised status all return "we do not know".
+
+⚠️ **Knockouts are excluded outright** (`AET/PEN/ET/BT/P`), and so is anything
+interrupted. This is measured, not theoretical: GSX- bought "Will Portugal vs.
+Croatia end in a draw?" at 0.003 after the whistle and **the market resolved NO**.
+Extra time and penalties change what these questions pay, and that error inverts
+the position instead of blunting it.
+
+⚠️ **Ask-only books are kept.** A determined token routinely loses its bid side —
+`ladder_of` already notes that makers pull the book once a line is decided — and
+the shared `_fetch_book` helper returns None for exactly those. `book_missing` is
+recorded as a finding, not skipped as an error. Whether the quote exists at all
+is one of the two things this observer is for.
+
+Verdict gate: n >= 200 `would_enter` rows, `rule_correct` >= 0.99, and a yield CI
+clear of zero after the taker fee. 🔑 The fee is why the cheap end works at all:
+`0.05·p·(1−p)` is 1.25pp at p=0.50 and **0.05pp at p=0.01**.
+
 ## Live stats coverage — measured 2026-08-19
 
 "More leagues" turned out not to be a stats problem. Over three days of
