@@ -93,6 +93,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── sim_demo.py                    ← sim engine demo + calibration check ✅ NEW
 │   ├── sim_scanner.py                 ← Strategy 6: Sim Model Pre-Match ✅ NEW
 │   ├── inplay_sim_scanner.py          ← Strategy 7: Sim Model In-Play ✅ NEW
+│   ├── wallet_analyzer.py            ← Polymarket wallet analyser (FIFO + written reading) ✅ NEW
 │   ├── late_goals_table.py            ← empirical late-goal fair value (no model) ✅
 │   ├── late_goals_observer.py         ← Over Late Goals — paper observation only ✅
 │   ├── resolver.py                    ← resolves trades + calculates CLV ✅
@@ -106,6 +107,9 @@ riding the AI + prediction-markets wave simultaneously.
 │       └── tools/runner.py
 └── site/                              ← Next.js public dashboard ✅ LIVE
     ├── app/
+    │   ├── wallet/                    ← /wallet analyser — hidden route, noindex ✅ NEW
+    │   ├── api/wallet/route.ts        ← on-demand wallet analysis (TS port) ✅ NEW
+    │   ├── lib/wallet.ts              ← the port; kept in step by --verify-site ✅ NEW
     │   ├── layout.tsx                 ← root layout + SEO metadata
     │   ├── page.tsx                   ← main SPA (1372 lines — needs decomposition)
     │   ├── globals.css                ← dark theme + responsive styles
@@ -828,6 +832,65 @@ is one of the two things this observer is for.
 Verdict gate: n >= 200 `would_enter` rows, `rule_correct` >= 0.99, and a yield CI
 clear of zero after the taker fee. 🔑 The fee is why the cheap end works at all:
 `0.05·p·(1−p)` is 1.25pp at p=0.50 and **0.05pp at p=0.01**.
+
+## Wallet analyser — the GSX- method, codified (2026-09-05)
+
+The [wallet study](reports/wallet_gsx_2026-09-02.md) that produced
+H-SETTLED-SWEEP was done by hand and survived only as markdown. It is now a
+tool, with a page.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python wallet_analyzer.py 0xec5723df1ef786d95b05b2941c89b45dcb560fa7
+python wallet_analyzer.py <addr> --report              # reports/wallet_<name>_<date>.md
+python wallet_analyzer.py <addr> --since 2026-07-01 --json out.json
+python wallet_analyzer.py <addr> --verify-site https://nopredictions.com
+```
+
+Given an address it rebuilds every fill into FIFO round trips and reports the
+numbers **and a written reading**: the archetype it matches and why, which leg
+of the book actually carries the profit, how the behaviour changed month by
+month (including a named regime change), whether the edge survives a bootstrap
+clustered by event, and what is not established. Every sentence is a threshold
+on a number that appears in the profile.
+
+`site/app/lib/wallet.ts` + `/api/wallet` + `/wallet/[address]` are the same
+analysis running inside a serverless request — **a hidden, `noindex` route**, so
+the method is something you are given rather than something you find.
+
+🔑 **Two implementations of a FIFO reconstruction WILL drift**, and a page that
+quietly disagrees with the research it came from is worse than no page. So
+`--verify-site` compares 17 numbers **and every generated paragraph**. On GSX-
+they agree to the last decimal, bootstrap CI included (the PRNG is a mulberry32
+ported both ways, with its stream pinned in the tests).
+
+Validated against the hand-written report: median ticket $10.01 vs $10.01, cash
+floor −$577 vs −$577, sweeps 786 lots / 58% / 0.8% vs 807 / 55% / 0.9%, whistle
+window +34.6% vs +35.4%, same sweep examples.
+
+**The traps it exists to avoid** — all of them produce a plausible wallet rather
+than an obvious failure:
+
+| | |
+|---|---|
+| `/activity?offset=` | refuses past **5000**. A naive pager returns 5,000 rows and looks complete; GSX- has 16,157. Page by time cursor. |
+| a fill's `price` | is **rounded to the displayed tick** and disagrees with the cash on 2,771 of 15,810 fills (30 shares at "0.04" cost $1.1412). Use `usdcSize / size`. |
+| REDEEM rows | carry **no `asset`** — map `(conditionId, outcomeIndex)` → token or the payout lands on the other side of the market. |
+| shares sold, never bought | are neg-risk conversions (`type=CONVERSION` returns empty). Booked **FLAT, never free** — free is an error that can only run one way, the shape of db/038. The report brackets the two bounds and PM's own figure has to fall inside. |
+| MERGE | **is a real exit and the feed publishes it** (RN1: 2,845). Unmodelled it showed **−$14.2M of "expired worthless"** that never happened. SPLIT stays unmodelled on purpose — its per-leg cost is unknowable and any convention would distort the entry-price bands. |
+| `Math.max(...xs)` | **overflows the stack** on a 190k-fill history, and fails as a server error rather than a size limit. |
+| the 110–130′ window | is a **football** fact. 110 minutes into a tennis match is the middle of it — RN1 (13% football) was being handed a "post-whistle settlement buyer" verdict off nothing. |
+
+Every report carries a `trust` field — `ok` / `partial` (the walk never reached
+the start of the account) / `unreconciled` (PM's own profit falls outside our
+bracket). When it is not `ok` the warning opens the headline and the page,
+because a caveat at the bottom of a long page is a caveat nobody reads.
+
+⚠️ Gamma is used for market metadata, not the CLOB: 1,214 markets in **2.2s**
+against ~30s and 712 rate-limit refusals. Verified equal to the CLOB on
+`gameStartTime` (1,114/1,114) and winner (1,108/1,108). **Its own trap is
+`closed`** — without `closed=true` it returns zero rows for a settled market,
+which reads as "no metadata" rather than an error, so both states are swept.
 
 ## Unfreezing the reading — obs_version 3 (2026-09-05)
 
