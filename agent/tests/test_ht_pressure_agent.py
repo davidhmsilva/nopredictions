@@ -129,22 +129,29 @@ def test_both_ends_count():
 # ── entry gates ──────────────────────────────────────────────────────────────
 
 def _row(**kw) -> dict:
-    row = {"opening_pressure": 60.0, "score_agrees": True, "ladder_goals": 0}
+    # opening_pressure is the frozen control from obs_version 3 on; pressure_now
+    # is what the gate reads.
+    row = {"opening_pressure": 60.0, "pressure_now": 60.0,
+           "pressure_source": "opening", "score_agrees": True, "ladder_goals": 0}
     row.update(kw)
     return row
 
 
-def _book(ask=0.60, depth=200.0) -> dict:
-    return {"best_ask": ask, "ask_depth_usd": depth}
+def _book(ask=0.60, depth=200.0, bid=None) -> dict:
+    # best_bid has been part of the gate since obs_version 2 added MAX_SPREAD;
+    # the default sits one tick inside it so a test that is about something
+    # else is not silently blocked by the spread.
+    return {"best_ask": ask, "best_bid": ask - 0.01 if bid is None else bid,
+            "ask_depth_usd": depth}
 
 
 def test_why_not_names_the_binding_gate():
     ok = _sig(minute=18)
     assert "0-0" in ht._why_not(_row(), _book(), _sig(home_goals=1, minute=18))
     assert "minute" in ht._why_not(_row(), _book(), _sig(minute=12))
-    assert "minute" in ht._why_not(_row(), _book(), _sig(minute=40))
-    assert "first-15" in ht._why_not(_row(opening_pressure=None), _book(), ok)
-    assert "pressure" in ht._why_not(_row(opening_pressure=10.0), _book(), ok)
+    assert "minute" in ht._why_not(_row(), _book(), _sig(minute=44))
+    assert "window" in ht._why_not(_row(pressure_now=None), _book(), ok)
+    assert "pressure" in ht._why_not(_row(pressure_now=10.0), _book(), ok)
     assert "ask" in ht._why_not(_row(), _book(ask=0.95), ok)
     assert "depth" in ht._why_not(_row(), _book(depth=1.0), ok)
     assert "score" in ht._why_not(_row(score_agrees=False, ladder_goals=1), _book(), ok)
@@ -255,12 +262,54 @@ def test_a_fixture_picked_up_late_never_gets_an_opening_reading(board):
     row saying so is worth more than a plausible number that was never measured.
 
     Minute 22 is inside the entry window on purpose: the missing measurement has
-    to be what stops the trade, not the clock."""
+    to be what stops the trade, not the clock. Past 18' the live reading needs a
+    rolling window, and this fixture has no baseline to take one against."""
     state = ht.HTState()
     rows = ht.observe({1: _pressing(22)}, fht.load(), board, state)
     assert rows[0]["opening_pressure"] is None
+    assert rows[0]["pressure_now"] is None
     assert not rows[0]["would_enter"]
-    assert "first-15" in rows[0]["skip_reason"]
+    assert "window" in rows[0]["skip_reason"]
+
+
+def test_up_to_18_the_live_reading_is_the_opening_one(board):
+    """The two versions have to be continuous where they overlap: an entry at
+    15-18' under obs_version 3 must be the same number obs_version 2 traded."""
+    state = ht.HTState()
+    rows = ht.observe({1: _pressing(17)}, fht.load(), board, state)
+    assert rows[0]["pressure_source"] == "opening"
+    assert rows[0]["pressure_now"] == rows[0]["opening_pressure"]
+
+
+def test_pressure_arriving_late_can_still_enter(board):
+    """The whole point of obs_version 3. A quiet opening followed by a surge at
+    30' was unenterable when the 15-18' reading was the gate."""
+    state = ht.HTState()
+    quiet = _sig(minute=16, home_possession=50.0, away_possession=50.0)
+    ht.observe({1: quiet}, fht.load(), board, state)
+    assert state.first15[1]["pressure"] < ht.MIN_PRESSURE
+
+    surge = _sig(minute=30, has_window=True,
+                 home_shots_on_window=3, home_shots_inside_window=4,
+                 home_xg_window=0.7, home_corners_window=3,
+                 home_possession=62.0, away_possession=38.0,
+                 home_xg_total=0.7)
+    rows = ht.observe({1: surge}, fht.load(), board, state)
+    assert rows[0]["pressure_source"] == "window"
+    assert rows[0]["pressure_now"] >= ht.MIN_PRESSURE
+    assert rows[0]["opening_pressure"] < ht.MIN_PRESSURE   # the control disagrees
+    assert rows[0]["would_enter"]
+
+
+def test_a_dead_window_is_not_a_reading(board):
+    """has_window is false when the baseline and the latest snapshot carry the
+    same paid fetch. Differencing a stat block against itself reads as a dead
+    match; scaling it reads as a surge. Neither is allowed to enter."""
+    state = ht.HTState()
+    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+    rows = ht.observe({1: _pressing(30, has_window=False)}, fht.load(), board, state)
+    assert rows[0]["pressure_now"] is None
+    assert not rows[0]["would_enter"]
 
 
 def test_a_goal_ends_it(board):

@@ -348,8 +348,8 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Strategy 7 — Sim Model In-Play | ✅ NEW — same MC sim from in-play state |
 | Over Late Goals — observation | 🔬 Paper only, no orders. Fair value known, PM side unmeasured |
 | Live Pressure Overs (strategy 16) | 🔬 Paper only — the only agent still running. **obs_version 4** (book gates, db/037) |
-| Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 2** (book gates) |
-| Live Pressure Favourite HT (strategy 18) | 🔬 Paper only, favourite ahead at HT. **obs_version 2** (book gates) |
+| Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 3** (rolling reading, entry to 40') |
+| Live Pressure Favourite HT (strategy 18) | 🔬 Paper only, favourite ahead at HT. **obs_version 3** (rolling reading, entry to 40') |
 | Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
 | InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
 | Resolver | ✅ Settles trades + calculates CLV |
@@ -466,11 +466,14 @@ What is measured, and what is a guess:
   never comes from `goal_events`. Clean universe (count(goal_events) == final
   score), n ≈ 1,400-4,800 per cell. The pre-match total survives into the 0-0
   state: **at 15', lo bucket 49.6% (2.02) vs hi bucket 64.5% (1.55)**.
-- **Pressure** — the cumulative danger index scaled to a 15-minute rate, so it
-  lands on the same 0-100 axis as the sibling's rolling window
-  (`live_tracker.danger_index`, now a shared module-level function). Taken at the
-  first poll in **15-18'** and then **frozen**: a fixture picked up at 30' has no
-  first-15 reading and never gets one, exactly like the sibling's `has_window`.
+- **Pressure** — the danger index on the shared 0-100 axis
+  (`live_tracker.danger_index`, a module-level function). Since **obs_version 3**
+  it is re-read at EVERY poll rather than frozen at 15-18': cumulative-scaled up
+  to 18', the **rolling 15-minute window** after that
+  (`ht_pressure_agent.current_pressure`, shared by both first-half arms). A
+  fixture with no window baseline still gets no reading and no entry. The frozen
+  15-18' number is still written to `opening_pressure` on every row as the
+  CONTROL — see [Unfreezing the reading](#unfreezing-the-reading--obs_version-3-2026-09-05).
 - **MIN_PRESSURE = 25** — calibrated to FREQUENCY, not profitability. Recomputing
   this index on 165 real fixtures that already have a 15-18' stats row gives
   median 11, p75 16, p90 23, p95 26, p99 43. The sibling's 45 would fire on
@@ -498,6 +501,8 @@ non-monotone on this book. Never pool v1 and v2 entries. And the aggregation
 question this arm's mean raises is now closed: no combination of the two danger
 indices beats minute + pre-match total (db/037, `H-PRESSURE-1H-AGG`). See
 [The 100-game review](#the-100-game-review--book-quality-not-pressure-2026-08-3031).
+⚠️ **`obs_version 3` since 2026-09-05** — the reading is no longer frozen and the
+entry window runs to 40'. Same thresholds, same book gates.
 
 ---
 
@@ -508,9 +513,10 @@ shown it is living up to the price. Strategy id **18**, hypothesis
 `H-PRESSURE-FAV`, table `fav_ht_observations` (db/034), view `v_fav_ht_trades`.
 
 The rule: clear pre-match favourite (de-vigged PM 1X2 **>= 0.50**, captured
-**before kickoff**), still **0-0**, minute **15-25**, and over the opening 15 the
-favourite both **pressed hard** (own index >= 25) and **out-pressed the underdog**
-(gap >= 15). Then buy PM's `"<Favourite> leading at halftime?"`, 1u, paper.
+**before kickoff**), still **0-0**, minute **15-40**, and over the last 15
+minutes of play the favourite both **pressed hard** (own index >= 19) and
+**out-pressed the underdog** (gap >= 20). Then buy PM's
+`"<Favourite> leading at halftime?"`, 1u, paper.
 
 ```bash
 cd agent && source ../ingest/.venv/bin/activate
@@ -562,6 +568,8 @@ zero after the fee, AND the dominance arm beating the plain-favourite arm.
 ⚠️ **`obs_version 2` since 2026-08-31** — adds `MAX_SPREAD = 0.03` (this book
 breaks at 3pp, NOT the 6pp used on the sibling arms) and a two-sided-book
 requirement; the $25 depth floor is unchanged. Never pool v1 and v2 entries.
+⚠️ **`obs_version 3` since 2026-09-05** — the reading is no longer frozen and the
+entry window runs to 40'. Same thresholds, same book gates.
 ⚠️ And the number no gate fixes: across 635 fixtures this market's ask sits
 **8.49pp above the realised rate, CI[−11.94,−5.04]**. See
 [The 100-game review](#the-100-game-review--book-quality-not-pressure-2026-08-3031).
@@ -820,6 +828,56 @@ is one of the two things this observer is for.
 Verdict gate: n >= 200 `would_enter` rows, `rule_correct` >= 0.99, and a yield CI
 clear of zero after the taker fee. 🔑 The fee is why the cheap end works at all:
 `0.05·p·(1−p)` is 1.25pp at p=0.50 and **0.05pp at p=0.01**.
+
+## Unfreezing the reading — obs_version 3 (2026-09-05)
+
+Both first-half arms measured pressure ONCE, at the first poll landing in 15-18',
+and then froze it. A match that woke up later could never be entered however hard
+it pressed. **Manchester City vs Coventry** is the case that changed it: at 15'
+City had **85% possession and zero shots**, giving dominance **+16.7 against a
+gate of 20**; by 22' the same index read **+32**, with the reading frozen and the
+entry window closing at 25'. It scored at 26'.
+
+From obs_version 3 the gate is re-applied at every poll, out to minute **40**:
+
+| minute | reading |
+|---|---|
+| <= 18 | cumulative totals scaled to a 15-minute rate — literally the old opening number, so entries at 15-18' are unchanged |
+| > 18 | the **rolling 15-minute window** (`live_tracker` deltas), the same measure the full-match arm has always used |
+| no window baseline | no reading, no entry — never back-filled from a longer average |
+
+One shared function, `ht_pressure_agent.current_pressure`, so "pressing now"
+cannot come to mean two different things in two files. The frozen 15-18' reading
+is still recorded on every row (`opening_pressure` / `opening_dominance`) as the
+CONTROL arm, and `pressure_source` says which measurement fired each entry.
+
+**Thresholds did not move, and that was checked rather than assumed.** The
+rolling index reconstructed offline from the cumulative stats already on these
+tables (4,557 poll-rows, minutes 19-44, still 0-0) gives both-ends p50 13.3 /
+p75 18.8 / p90 24.4 and per-side p75 19.6, |gap| p75 18.8 — within a point of the
+opening-15 distribution the current gates were set on, and flat across the clock.
+So 19/19/20 still select about the top quartile. Nothing was refitted to an
+outcome.
+
+A usable window exists on **97% of PM-listed polls at 19-25', 86% at 26-33' and
+81% at 34-40'** (from `pressure_observations`, 21 days), so the late path fires
+in production rather than in principle.
+
+⚠️ **Longer odds are not a cheaper market.** `real − ask` on clean books, still
+0-0, clustered by fixture, is about equally negative at every minute:
+
+| | 15-19' | 20-24' | 25-29' | 30-34' | 35-40' |
+|---|---|---|---|---|---|
+| s17 | −3.39 | −4.90 | −3.14 | −2.32 | −5.43 |
+| s18 | −3.48 | −3.62 | −1.81 | −2.31 | −2.88 |
+
+Every CI crosses zero and none narrows with the clock. Entering at 32' buys
+leverage on whatever the pressure signal is worth — s17 fair value falls ~0.59 at
+15' to ~0.19 at 40', s18 ~0.29 to ~0.10 — not a better price. Replaying both
+gates over stored rows, the funnel goes **s17 60 → 102 fixtures** and **s18
+63 → 90** (some old-gate fixtures are lost: hot opening, quiet by the time the
+book was clean). Pre-registered as `H-PRESSURE-LATE` (db/040), forward-only,
+primary test on all observation rows carrying a book.
 
 ## Live stats coverage — measured 2026-08-19
 

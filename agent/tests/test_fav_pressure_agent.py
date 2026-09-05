@@ -176,14 +176,23 @@ def _pressing_home(minute: int = 16, **kw) -> PressureSignals:
 
 
 def _row(**kw) -> dict:
+    # The opening_* fields are the frozen control from obs_version 3 on; the
+    # *_now fields are what the gate reads.
     row = {"opening_fav_pressure": 40.0, "opening_dog_pressure": 5.0,
-           "opening_dominance": 35.0, "score_agrees": True, "ladder_goals": 0}
+           "opening_dominance": 35.0,
+           "fav_pressure_now": 40.0, "dog_pressure_now": 5.0,
+           "dominance_now": 35.0, "pressure_source": "opening",
+           "score_agrees": True, "ladder_goals": 0}
     row.update(kw)
     return row
 
 
-def _book(ask=0.30, depth=200.0) -> dict:
-    return {"best_ask": ask, "ask_depth_usd": depth}
+def _book(ask=0.30, depth=200.0, bid=None) -> dict:
+    # best_bid has been part of the gate since obs_version 2 added MAX_SPREAD;
+    # the default sits one tick inside it so a test that is about something
+    # else is not silently blocked by the spread.
+    return {"best_ask": ask, "best_bid": ask - 0.01 if bid is None else bid,
+            "ask_depth_usd": depth}
 
 
 def _fav(p=0.60, prematch=True) -> dict:
@@ -196,9 +205,9 @@ def test_why_not_names_the_binding_gate():
     assert "minute" in fa._why_not(_row(), _book(), _sig(minute=12), _fav())
     assert "kickoff" in fa._why_not(_row(), _book(), ok, _fav(prematch=False))
     assert "favourite" in fa._why_not(_row(), _book(), ok, _fav(p=0.42))
-    assert "first-15" in fa._why_not(_row(opening_fav_pressure=None), _book(), ok, _fav())
-    assert "pressing" in fa._why_not(_row(opening_fav_pressure=5.0), _book(), ok, _fav())
-    assert "on top" in fa._why_not(_row(opening_dominance=2.0), _book(), ok, _fav())
+    assert "window" in fa._why_not(_row(fav_pressure_now=None), _book(), ok, _fav())
+    assert "pressing" in fa._why_not(_row(fav_pressure_now=5.0), _book(), ok, _fav())
+    assert "on top" in fa._why_not(_row(dominance_now=2.0), _book(), ok, _fav())
     assert "ask" in fa._why_not(_row(), _book(ask=0.95), ok, _fav())
     assert "depth" in fa._why_not(_row(), _book(depth=1.0), ok, _fav())
 
@@ -206,8 +215,7 @@ def test_why_not_names_the_binding_gate():
 def test_a_dominant_underdog_is_not_a_signal():
     """The thesis is the FAVOURITE living up to its price. The same match with
     the roles reversed must not enter."""
-    row = _row(opening_fav_pressure=5.0, opening_dog_pressure=40.0,
-               opening_dominance=-35.0)
+    row = _row(fav_pressure_now=5.0, dog_pressure_now=40.0, dominance_now=-35.0)
     assert fa._why_not(row, _book(), _sig(minute=17), _fav()) != ""
 
 
@@ -251,6 +259,45 @@ def test_the_underdog_pressing_does_not_enter(board):
     rows = fa.observe({1: away_pressing}, fvt.load(), board, state)
     assert not rows[0]["would_enter"]
     assert rows[0]["opening_dominance"] < 0
+
+
+def test_a_favourite_that_takes_over_late_can_still_enter(board):
+    """The change obs_version 3 exists for: a favourite level and quiet at 15'
+    that starts dominating at 30' was unenterable while the gate read a frozen
+    opening. The frozen reading is still recorded, and still says no — that is
+    the control the late arm has to be compared against."""
+    state = fa.FavState()
+    quiet = _sig(minute=16, home_possession=50.0, away_possession=50.0)
+    fa.observe({1: quiet}, fvt.load(), board, state)
+
+    surge = _sig(minute=30, has_window=True,
+                 home_shots_on_window=3, home_shots_inside_window=4,
+                 home_xg_window=0.7, home_corners_window=3,
+                 home_possession=63.0, away_possession=37.0,
+                 home_xg_total=0.7)
+    rows = fa.observe({1: surge}, fvt.load(), board, state)
+    r = rows[0]
+    assert r["pressure_source"] == "window"
+    assert r["dominance_now"] >= fa.MIN_DOMINANCE
+    assert r["opening_dominance"] < fa.MIN_DOMINANCE      # the control disagrees
+    assert r["would_enter"], r["skip_reason"]
+
+
+def test_the_side_of_a_late_reading_is_still_the_favourite_s(board):
+    """Inversion is this agent's failure mode and the window path has its own
+    home/away split. An underdog surging at 30' must not be recorded as the
+    favourite pressing."""
+    state = fa.FavState()
+    fa.observe({1: _sig(minute=16)}, fvt.load(), board, state)
+    away_surge = _sig(minute=30, has_window=True,
+                      away_shots_on_window=3, away_shots_inside_window=4,
+                      away_xg_window=0.7, away_corners_window=3,
+                      home_possession=37.0, away_possession=63.0,
+                      away_xg_total=0.7)
+    rows = fa.observe({1: away_surge}, fvt.load(), board, state)
+    assert rows[0]["fav_side"] == "home"
+    assert rows[0]["dominance_now"] < 0
+    assert not rows[0]["would_enter"]
 
 
 def test_the_1x2_is_captured_once_and_not_re_read(board):

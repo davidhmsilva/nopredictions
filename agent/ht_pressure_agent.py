@@ -33,19 +33,33 @@ Two more things the earlier work established, both of which shape this file:
     is why this agent takes the ask at a decided minute instead of resting a
     price and waiting to be hit.
 
-WHAT "PRESSURE UP TO 15'" MEANS HERE
-------------------------------------
-The sibling measures a rolling 15-minute DELTA. In the first 15 minutes there is
-nothing to take a delta against — the match so far IS the window — so pressure is
-read off the cumulative totals, scaled to a 15-minute rate so the number lands on
-the same 0-100 axis (see live_tracker.danger_index).
+WHAT "PRESSING" MEANS HERE — obs_version 3, 2026-09-05
+------------------------------------------------------
+Up to and including minute 18 there is nothing to take a delta against — the
+match so far IS the window — so pressure is read off the cumulative totals,
+scaled to a 15-minute rate so the number lands on the same 0-100 axis (see
+live_tracker.danger_index). After 18' it is the ROLLING 15-minute window, the
+same measure the sibling full-match arm has always used.
 
-The measurement that matters is taken in the FIRST15 window and then frozen:
-a fixture we only picked up at 30' has no first-15 reading and can never get one,
-so it is recorded and skipped rather than back-filled from a longer average. That
-is the same discipline as the sibling's has_window flag, and for the same reason:
-a fallback that looks like the real measurement is how a strategy ends up being
-evaluated on a quantity it never actually traded.
+Until 2026-09-05 the 15-18' reading was frozen and was the only thing that could
+ever open a trade. That threw away every fixture whose pressure arrived late:
+Manchester City vs Coventry read +16.7 dominance at 15' (85% possession, zero
+shots) against a gate of 20, and +32 at 22' with the reading already frozen. Now
+the gate is re-applied at every poll out to minute 40, so a late surge enters at
+a longer price — the fair value has fallen with the clock and so has the ask.
+
+Two things that did NOT change, deliberately:
+
+  * a fixture with no window baseline still gets no reading and no entry. A
+    fallback that looks like the real measurement is how a strategy ends up
+    evaluated on a quantity it never traded — the same discipline as has_window.
+  * the frozen 15-18' reading is still recorded on every row (opening_pressure).
+    It is the control arm for "does the opening quarter of an hour carry
+    something a later window does not", pre-registered as H-PRESSURE-LATE.
+
+⚠️ Entering later buys longer odds, NOT a cheaper market: `real - ask` on clean
+books is about equally negative at every minute (-3.4pp at 15-19', -4.9 at 20-24',
+-3.1 at 25-29', -2.3 at 30-34', -5.4 at 35-40'; all CIs cross zero). See db/040.
 
 Usage:
     python ht_pressure_agent.py --once            # one cycle (own tracker poll)
@@ -108,17 +122,18 @@ log = logging.getLogger("ht_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure HT Over 0.5"
-OBS_VERSION = 1
+OBS_VERSION = 3
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
 
 # ── the measurement window ───────────────────────────────────────────────────
-# "Pressure up to 15 minutes" is read at the first poll landing in [15, 18] and
-# then frozen. The upper end is slack for a missed poll or a fixture that joins
-# the live feed a minute late, not a second chance to find a better number:
-# widening it turns "the first 15 minutes" into "the first quarter of an hour,
-# roughly", which is a different signal from the one being tested.
+# Up to FIRST15_MAX the reading is the cumulative one — the match so far scaled
+# to a 15-minute rate — and the first such reading is ALSO frozen into
+# opening_pressure, which is now the control arm rather than the gate. Past this
+# minute the live reading switches to the rolling 15-minute window; a genuine
+# baseline exists by then and a cumulative average would dilute a late surge into
+# a quiet opening, which is exactly the fixture this version exists to catch.
 FIRST15_MIN, FIRST15_MAX = 15, 18
 
 # ── observation window ───────────────────────────────────────────────────────
@@ -130,11 +145,16 @@ OBSERVE_MAX_MINUTE = 46
 
 # ── entry gates ──────────────────────────────────────────────────────────────
 ENTRY_MIN_MINUTE = 15           # the rule, as specified
-# Entries in practice land at 15-18' (that is when the measurement exists); the
-# extra minutes only cover a fixture whose book or depth was missing at 15'.
-# Past 25' the fair value has fallen by a third and the bet stops being the one
-# the first-15 reading was about.
-ENTRY_MAX_MINUTE = 25
+# RAISED 25 -> 40 on 2026-09-05 with the reading unfrozen (obs_version 3). While
+# the gate ran off a frozen first-15 number, minutes past 25' were only ever
+# cover for a missing book, and the note that used to sit here — "past 25' the
+# fair value has fallen by a third and the bet stops being the one the first-15
+# reading was about" — was correct. It is no longer the same bet BECAUSE the
+# reading is no longer the first-15 one: at 32' the gate is asking whether the
+# match is being pressed at 32'. The empirical table runs to 44' and the ask is
+# about equally rich at every minute out to 40 (db/040), so the ceiling is set by
+# where the table and the book still exist, not by a view about the clock.
+ENTRY_MAX_MINUTE = 40
 # LOWERED 25 -> 19 on 2026-08-20, by the user's decision and not by any fit.
 # Percentiles of this exact index on 181 real openings, xG renormalised (see
 # live_tracker.danger_index): median 15, p73 19, p89 25, p95 29. The bar moved
@@ -152,12 +172,42 @@ ENTRY_MAX_MINUTE = 25
 # 15-minute window late in a stretched match accumulates far more than the
 # opening quarter of an hour of a 0-0. Neither threshold has ever been fitted to
 # an outcome — that is what this table is being recorded to make possible.
+#
+# obs_version 3 applies this same number to the ROLLING reading, and it was
+# checked rather than assumed. The rolling index was reconstructed offline from
+# the cumulative stats already on this table (4,557 poll-rows, minutes 19-44,
+# still 0-0, deltas against the row nearest minute-15):
+#
+#   both ends   p25  8.3   p50 13.3   p75 18.8   p90 24.4   p95 27.7
+#
+# — within a point of the opening-15 distribution above (median 15, p73 19, p89
+# 25) and flat across the clock (p75 17.7 at 25-29' against 19.4 at 40-44'). So
+# 19 still means "busier than three fixtures in four" on the new axis: 23.2% of
+# rolling readings clear it. No threshold was refitted to an outcome.
 MIN_PRESSURE = 19.0
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
 # The sibling asks for $50. This book is an order of magnitude thinner (see the
 # header), and 1u of paper stands in for a $1-2.50 real order, so $25 across the
 # top five levels is the honest floor. Below it there is no fill to speak of.
 MIN_DEPTH_USD = 25.0
+# obs_version 2 (2026-08-31): a spread cap, ported from the sibling's v4 but with
+# the threshold MEASURED HERE rather than inherited — this book is not that book.
+# 3,420 rows / 552 fixtures, minute 15-25, still 0-0, `real - ask` clustered by
+# fixture:
+#
+#   spread  0-3pp    +0.41pp        spread 10-20pp    -7.67pp
+#   spread  3-6pp    -0.77pp        spread 20pp+     -38.93pp CI[-47.4,-30.4]
+#   spread 6-10pp    -6.01pp CI[-11.0, -1.0]
+#
+# The break is at 6pp, same as the sibling. Depth is NOT ported: here it comes
+# out non-monotone ($0-25 +2.19, $200-1000 -7.12, $1000+ +0.40), so there is no
+# measurement supporting a floor above the $25 argued for in the header.
+#
+# CA Mineiro vs EC Vitória (2026-08-29) is the case this exists for: at 15' this
+# market quoted bid 0.55 / ask 0.99 on $30k of depth, and traded at 0.56 two
+# minutes later. Depth was never the tell — an ask of 0.99 with $30k behind it
+# clears any depth floor. The spread is the tell.
+MAX_SPREAD = 0.06
 STAKE_UNITS = 1.0
 
 # ── PM market discovery ──────────────────────────────────────────────────────
@@ -246,6 +296,56 @@ def opening_pressure(sig: PressureSignals) -> tuple[float, float, float]:
     return (home + away) / 2.0, home, away
 
 
+def window_pressure(sig: PressureSignals) -> tuple[float, float, float] | None:
+    """(both ends, home, away) over the ROLLING 15-minute window, or None.
+
+    None when live_tracker found no baseline near (minute - 15), or when the
+    baseline and the latest snapshot carry the SAME paid fetch — differencing a
+    stat block against itself reports a dead match, and scaling a frozen one
+    reports steady play as a surge. Both cases are already folded into
+    has_window; this function does not second-guess it, it just refuses to
+    invent a number.
+
+    Possession is the one input that is not a delta: api-football publishes it as
+    a running match percentage, not a per-minute count, so the window carries the
+    match's possession to date. It is 10% of the index, and the alternative — a
+    possession delta computed from two running averages — is not a quantity.
+    """
+    if not sig.has_window:
+        return None
+    # The FEED's xG coverage, read off the totals: a window with no xG in it is a
+    # window where nothing was created, which is a real reading. A fixture whose
+    # competition publishes no xG at all is a different statement, and the one
+    # danger_index needs to renormalise for.
+    has_xg = bool(sig.home_xg_total or sig.away_xg_total)
+    home = danger_index(
+        sig.home_shots_on_window, sig.home_shots_inside_window,
+        sig.home_xg_window, sig.home_corners_window,
+        sig.home_possession, has_xg=has_xg)
+    away = danger_index(
+        sig.away_shots_on_window, sig.away_shots_inside_window,
+        sig.away_xg_window, sig.away_corners_window,
+        sig.away_possession, has_xg=has_xg)
+    return (home + away) / 2.0, home, away
+
+
+def current_pressure(sig: PressureSignals) -> tuple[float, float, float, str] | None:
+    """The reading the entry gate is applied to: (both ends, home, away, source).
+
+    One function, used by both first-half arms, so the two cannot drift apart on
+    what "pressure now" means. `source` goes onto the row because the two halves
+    are different measurements sharing an axis, and a later fit has to be able to
+    separate them.
+    """
+    if sig.minute <= FIRST15_MAX:
+        both, home, away = opening_pressure(sig)
+        return both, home, away, "opening"
+    win = window_pressure(sig)
+    if win is None:
+        return None
+    return win[0], win[1], win[2], "window"
+
+
 # ── cross-cycle state ────────────────────────────────────────────────────────
 
 @dataclass
@@ -319,6 +419,15 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         # sibling's record as evidence.
         if sig.has_stats:
             row["pressure_index"], row["home_danger"], row["away_danger"] = opening_pressure(sig)
+            # The live reading — cumulative to 18', rolling window after — and
+            # the minute the stats behind it were actually true at, which is up
+            # to three minutes behind this poll under the enrich TTL.
+            now = current_pressure(sig)
+            row["has_window"] = sig.has_window
+            if now is not None:
+                row["pressure_now"] = now[0]
+                row["pressure_source"] = now[3]
+                row["pressure_minute"] = sig.stats_minute or sig.minute
             # xG carries 40% of the index and api-football only supplies it on
             # about half the fixtures it covers with stats at all. Without it a
             # genuine shooting gallery reads ~40% quieter than it was, so a
@@ -397,7 +506,8 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             if fair_base is None:
                 row["skip_reason"] = row["skip_reason"] or f"minute {sig.minute} off the grid"
             else:
-                k = pressure_factor(row["opening_pressure"] or row["pressure_index"] or 0.0)
+                k = pressure_factor(row["pressure_now"] or row["opening_pressure"]
+                                    or row["pressure_index"] or 0.0)
                 fair_pressure = apply_pressure(fair_base, k)
                 fee = taker_fee_pp(book["best_ask"])
                 row.update(
@@ -410,11 +520,15 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         row["would_enter"] = bool(
             goals == 0
             and ENTRY_MIN_MINUTE <= sig.minute <= ENTRY_MAX_MINUTE
-            # The frozen first-15 reading, never the running average.
-            and row["opening_pressure"] is not None
-            and row["opening_pressure"] >= MIN_PRESSURE
+            # The reading as of THIS poll — cumulative to 18', rolling window
+            # after. Never the running average past 18': it dilutes a late surge
+            # into the quiet opening that preceded it.
+            and row["pressure_now"] is not None
+            and row["pressure_now"] >= MIN_PRESSURE
             and sig.has_stats
             and book["best_ask"] <= MAX_ASK
+            and book["best_bid"] is not None
+            and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
             and (book["ask_depth_usd"] or 0) >= MIN_DEPTH_USD
             # A score we cannot pin makes the whole setup meaningless — the bet
             # is defined by the match being 0-0.
@@ -435,12 +549,18 @@ def _why_not(row: dict, book: dict, sig: PressureSignals) -> str:
         return f"minute {sig.minute} < {ENTRY_MIN_MINUTE}"
     if sig.minute > ENTRY_MAX_MINUTE:
         return f"minute {sig.minute} > {ENTRY_MAX_MINUTE}"
-    if row["opening_pressure"] is None:
-        return f"no first-{FIRST15_MIN} measurement (fixture picked up late)"
-    if row["opening_pressure"] < MIN_PRESSURE:
-        return f"opening pressure {row['opening_pressure']:.0f} < {MIN_PRESSURE}"
+    if row["pressure_now"] is None:
+        return (f"no {FIRST15_MIN}-minute window at {sig.minute}' "
+                f"(fixture picked up late)")
+    if row["pressure_now"] < MIN_PRESSURE:
+        return (f"{row['pressure_source'] or 'pressure'} pressure "
+                f"{row['pressure_now']:.0f} < {MIN_PRESSURE}")
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
+    if book["best_bid"] is None:
+        return "one-sided book: no bid"
+    if (book["best_ask"] - book["best_bid"]) > MAX_SPREAD:
+        return f"spread {100 * (book['best_ask'] - book['best_bid']):.0f}pp > {100 * MAX_SPREAD:.0f}pp"
     if (book["ask_depth_usd"] or 0) < MIN_DEPTH_USD:
         return f"depth ${book['ask_depth_usd']:.0f} < ${MIN_DEPTH_USD:.0f}"
     if row["score_agrees"] is False:
@@ -470,8 +590,12 @@ def _base_row(sig: PressureSignals) -> dict:
         "has_stats": sig.has_stats, "has_xg": False,
         "home_danger": None, "away_danger": None,
         "pressure_index": None,          # cumulative, scaled to 15 min, this poll
-        "opening_pressure": None,        # the frozen first-15 reading
+        "opening_pressure": None,        # the frozen first-15 reading — CONTROL
         "opening_minute": None,
+        "pressure_now": None,            # what the gate reads — obs_version 3
+        "pressure_source": None,         # 'opening' | 'window'
+        "pressure_minute": None,
+        "has_window": False,
         "pressure_factor": None,
         "pre_over25": None, "pre_is_prematch": False,
         "best_bid": None, "best_ask": None,
@@ -494,7 +618,8 @@ _COLS = [
     "home_possession", "away_possession", "home_reds", "away_reds",
     "has_stats", "has_xg",
     "home_danger", "away_danger", "pressure_index", "opening_pressure",
-    "opening_minute", "pressure_factor", "pre_over25", "pre_is_prematch",
+    "opening_minute", "pressure_now", "pressure_source", "pressure_minute",
+    "has_window", "pressure_factor", "pre_over25", "pre_is_prematch",
     "best_bid", "best_ask", "bid_depth_usd", "ask_depth_usd",
     "fair_base", "fair_pressure", "fair_n", "fee_pp",
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
@@ -551,14 +676,17 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
                 f"i.e. {r['edge_pressure_pp']:+.1f}pp after {r['fee_pp']:.2f}pp fee"
                 if r["fair_base"] else "no fair value on the grid for this state"
             )
+            span = (f"the first {r['pressure_minute']} minutes"
+                    if r["pressure_source"] == "opening"
+                    else f"the 15 minutes to {r['pressure_minute']}'")
             reasoning = (
                 f"{r['home']} 0-0 {r['away']} {r['minute']}' — Over 0.5 first half "
                 f"at {r['best_ask']:.3f} ({1 / r['best_ask']:.2f}). "
-                f"Opening pressure {r['opening_pressure']:.0f}/100 measured at "
-                f"{r['opening_minute']}' (danger H={r['home_danger']:.0f} "
-                f"A={r['away_danger']:.0f}). PREDICTION: a goalless first quarter "
-                f"of an hour played at this intensity is more likely to produce a "
-                f"goal before the break than the market is paying for. Bought on "
+                f"Pressure {r['pressure_now']:.0f}/100 over {span} "
+                f"(danger H={r['home_danger']:.0f} A={r['away_danger']:.0f}). "
+                f"PREDICTION: a goalless match being played at this intensity is "
+                f"more likely to produce a goal before the break than the market "
+                f"is paying for. Bought on "
                 f"that call alone, not on a price comparison. For the record, "
                 f"{fair_txt} — recorded as the null, NOT a gate. "
                 f"PAPER — and note PM's price on this market has historically sat "
@@ -770,6 +898,53 @@ def report(conn) -> None:
             for r in rows:
                 odds = f"  ({1 / r['p']:.2f})" if r["p"] else ""
                 print(f"  {r['lo']:5.0f}-{r['hi']:5.0f}  n={r['n']:5d}  {r['p']:.3f}{odds}")
+
+        # The same test on what obs_version 3 actually gates: the HIGHEST live
+        # reading the fixture reached inside the entry window, which is what
+        # decides whether it ever fires. One row per fixture for the same reason
+        # as above.
+        cur.execute(
+            """SELECT width_bucket(peak, 0, 100, 5) AS b,
+                      count(*) AS n,
+                      avg(goal_before_ht::int)::float8 AS p,
+                      min(peak) AS lo, max(peak) AS hi
+                 FROM (SELECT fixture_id, max(pressure_now) AS peak,
+                              bool_or(goal_before_ht) AS goal_before_ht
+                         FROM ht_pressure_observations
+                        WHERE pressure_now IS NOT NULL
+                          AND goal_before_ht IS NOT NULL
+                          AND minute BETWEEN %s AND %s
+                        GROUP BY fixture_id) f
+                GROUP BY 1 ORDER BY 1""",
+            (ENTRY_MIN_MINUTE, ENTRY_MAX_MINUTE),
+        )
+        rows = cur.fetchall()
+        if rows:
+            print("\nP(goal before HT) by PEAK live reading in the entry window, "
+                  "one row per fixture:")
+            for r in rows:
+                odds = f"  ({1 / r['p']:.2f})" if r["p"] else ""
+                print(f"  {r['lo']:5.0f}-{r['hi']:5.0f}  n={r['n']:5d}  {r['p']:.3f}{odds}")
+
+        # Entries split by which measurement fired them — the H-PRESSURE-LATE
+        # comparison, as soon as there is anything in it.
+        cur.execute(
+            """SELECT pressure_source, count(*) AS n,
+                      avg(minute)::float8 AS mean_minute,
+                      avg(best_ask)::float8 AS mean_ask,
+                      avg(goal_before_ht::int)::float8 AS hit
+                 FROM ht_pressure_observations
+                WHERE entered AND pressure_source IS NOT NULL
+                GROUP BY 1 ORDER BY 1"""
+        )
+        rows = cur.fetchall()
+        if rows:
+            print("\nentries by measurement (H-PRESSURE-LATE):")
+            for r in rows:
+                hit = f"{r['hit']:.3f}" if r["hit"] is not None else "  -  "
+                print(f"  {r['pressure_source']:8s} n={r['n']:4d}  mean minute "
+                      f"{r['mean_minute']:4.1f}  mean ask {r['mean_ask']:.3f} "
+                      f"({1 / r['mean_ask']:.2f})  hit {hit}")
             print("  (n >= 200 per bucket before reading anything into this)")
 
         cur.execute(
@@ -825,7 +1000,8 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                 log.info(
                     f"  ENTER  {r['home'][:18]:18} 0-0 {r['away'][:18]:18} "
                     f"{r['minute']}'  HT O0.5 ask={r['best_ask']:.3f} "
-                    f"({1 / r['best_ask']:.2f})  opening={r['opening_pressure']:.0f}  "
+                    f"({1 / r['best_ask']:.2f})  press={r['pressure_now'] or r['opening_pressure']:.0f}"
+                    f"[{(r['pressure_source'] or 'opening')[:3]}]  "
                     f"#{r['paper_trade_id']}"
                 )
         log.info(f"first-half fixtures={len(rows):3d} entered={opened:2d} "

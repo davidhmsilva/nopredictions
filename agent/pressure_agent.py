@@ -383,9 +383,12 @@ def _enrich_priority(tracker: LiveMatchTracker, pm_fixtures: list[dict]):
     where it can still change a decision. There are now TWO decision windows on
     one budget:
 
-      * the first-half arm (ht_pressure_agent) measures at 15-18' and enters up
-        to 25'. Its measurement cannot be back-filled — miss the window and that
-        fixture is lost for the day — so it outranks everything else.
+      * the first-half arms measure from 15' and, since obs_version 3, enter any
+        time out to 40' off a rolling window. The 15-18' reading still cannot be
+        back-filled — miss it and that fixture has no opening control for the
+        day — so the first half outranks everything else. Widening the band to
+        40' widens what sits at the top of this ranking; measured usage is under
+        one stats call per cycle against a budget of 40, so it displaces nothing.
       * this arm predicts from ENTRY_MIN_MINUTE on, and needs a rolling-window
         baseline built shortly before that.
 
@@ -1204,7 +1207,8 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                     f"  ENTER  [HT] {r['home'][:16]:16} 0-0 {r['away'][:16]:16} "
                     f"{r['minute']}'  1H O0.5 ask={r['best_ask']:.3f} "
                     f"({1 / r['best_ask']:.2f})  opening="
-                    f"{r['opening_pressure']:.0f}  #{r['paper_trade_id']}"
+                    f"{r['pressure_now'] or r['opening_pressure']:.0f}"
+                    f"[{(r['pressure_source'] or 'opening')[:3]}]  #{r['paper_trade_id']}"
                 )
 
         fav_opened = 0
@@ -1221,8 +1225,9 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                 log.info(
                     f"  ENTER  [FAV] {r['fav_team'][:20]:20} lead@HT {r['minute']}'  "
                     f"ask={r['best_ask']:.3f} ({1 / r['best_ask']:.2f})  "
-                    f"fav={r['fav_prob']:.0%} press={r['opening_fav_pressure']:.0f} "
-                    f"dom={r['opening_dominance']:+.0f}  #{r['paper_trade_id']}"
+                    f"fav={r['fav_prob']:.0%} press={r['fav_pressure_now']:.0f} "
+                    f"dom={r['dominance_now']:+.0f}"
+                    f"[{(r['pressure_source'] or 'opening')[:3]}]  #{r['paper_trade_id']}"
                 )
 
         priced = [r for r in rows if r["fair_base"] is not None]

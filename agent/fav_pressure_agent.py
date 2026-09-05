@@ -75,7 +75,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../ingest/
 import favourite_ht_table as fvt                                   # noqa: E402
 from edge_engine import taker_fee_pp                               # noqa: E402
 from fixture_match import MIN_SIDE_SCORE, team_score               # noqa: E402
-from ht_pressure_agent import opening_pressure                     # noqa: E402
+from ht_pressure_agent import current_pressure, opening_pressure   # noqa: E402
 from late_goals_observer import (                                  # noqa: E402
     _fetch_book,
     _fetch_events,
@@ -102,17 +102,31 @@ log = logging.getLogger("fav_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure Favourite HT"
-OBS_VERSION = 1
+OBS_VERSION = 3
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
 
 # ── windows ──────────────────────────────────────────────────────────────────
-FIRST15_MIN, FIRST15_MAX = 15, 18       # where the opening reading is taken, then frozen
+# FIRST15_MAX is no longer the end of the measurement, only the point where it
+# switches from "the match so far" to the rolling 15-minute window — see
+# ht_pressure_agent.current_pressure, which both first-half arms share so that
+# "pressing now" cannot come to mean two different things. The frozen 15-18'
+# reading is still taken and still recorded; from obs_version 3 it is the
+# CONTROL, not the gate.
+FIRST15_MIN, FIRST15_MAX = 15, 18
 OBSERVE_MIN_MINUTE = 10
 OBSERVE_MAX_MINUTE = 46
 ENTRY_MIN_MINUTE = 15
-ENTRY_MAX_MINUTE = 25
+# RAISED 25 -> 40 on 2026-09-05, with the reading unfrozen. A favourite that only
+# starts turning the screw at 28' is exactly the fixture the frozen version could
+# not touch, and it is the cheaper end of the market: the table runs to 44' and
+# fair value for a favourite leading at HT falls from ~0.29 at 15' to ~0.10 at
+# 40', so the same bet is available at 3.5 instead of 2.2. ⚠️ Longer odds are not
+# a better price — the ask is about equally rich at every minute out to 40
+# (-3.5pp at 15-19', -1.8 at 25-29', -2.9 at 35-40', all CIs crossing zero, and
+# -8.49pp across the whole book unfiltered). See db/040.
+ENTRY_MAX_MINUTE = 40
 
 # ── entry gates ──────────────────────────────────────────────────────────────
 # A real favourite, not an arithmetic one. Under 0.50 in a three-way market the
@@ -136,11 +150,40 @@ MIN_FAV_PROB = 0.50
 # comes from retiring the side term rather than from a considered view of how
 # dominant a favourite has to look. Dropping MIN_DOMINANCE to 14 (the gap's own
 # median) would take it to 47.0%; that was not asked for and is left alone.
+#
+# obs_version 3 applies both numbers to the ROLLING reading as well, and the
+# transfer was checked rather than assumed. Reconstructed offline from the
+# cumulative stats already on this table (4,556 poll-rows, minutes 19-44, still
+# 0-0, deltas against the row nearest minute-15):
+#
+#   per side  p25  6.2  p50 11.7  p75 19.6  p90 30.4     (19 clears 26.3%)
+#   |gap|     p25  4.6  p50 10.0  p75 18.8  p90 28.8     (20 clears ~26%)
+#
+# — within a point or two of the opening-15 percentiles quoted above, and flat
+# across the clock. So the pair keeps selecting about the top quartile on the new
+# axis, which is what it was set to do. Nothing was refitted to an outcome.
 MIN_FAV_PRESSURE = 19.0         # the favourite is pressing in absolute terms
 MIN_DOMINANCE = 20.0            # ...and out-pressing the underdog (now the real gate)
 
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
 MIN_DEPTH_USD = 25.0            # half-time markets are thin; see ht_pressure_agent
+# obs_version 2 (2026-08-31): a spread cap. The sibling arms settled on 6pp; this
+# market breaks at 3pp and the number is NOT copied across. 4,654 rows / 635
+# fixtures, minute 15-25, still 0-0, `real - ask` clustered by fixture:
+#
+#   spread  0-3pp    -1.83pp CI[-5.62,+1.96]      spread 10-20pp   -11.22pp
+#   spread  3-6pp    -6.97pp CI[-11.27,-2.67]     spread 20pp+     -43.86pp
+#   spread 6-10pp    -7.88pp CI[-13.64,-2.12]
+#
+# 0-3pp is the only bucket whose CI still contains zero, so it is the only one
+# where the price is arguably fair. Depth is not ported (see ht_pressure_agent).
+#
+# ⚠️ This gate does not make the market cheap, and the number that matters is the
+# one it cannot fix: across ALL 635 fixtures the ask sits 8.49pp above the
+# realised rate, CI[-11.94,-5.04]. Even inside the tightest bucket it is -1.83pp.
+# A "<Favourite> leading at halftime?" bought at the ask starts behind, and the
+# dominance signal has to beat that before anything here is worth having.
+MAX_SPREAD = 0.03
 STAKE_UNITS = 1.0
 
 # ── PM market shapes (verified live 2026-08-19 across 6 fixtures, 12/12 each) ──
@@ -383,13 +426,23 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         row.update(fav_side=fav["side"], fav_team=fav["team"],
                    fav_prob=fav["p_fav"], fav_is_prematch=fav["prematch"])
 
-        # Pressure, per side, scaled to a 15-minute rate. Frozen the first time
-        # we are inside the window with stats — a fixture picked up at 30' has no
-        # opening reading and never gets one.
+        # Pressure, per side. Two readings are taken: the frozen 15-18' one (the
+        # control, unchanged) and the live one the gate now runs on — cumulative
+        # to 18', the rolling 15-minute window after. A fixture picked up at 30'
+        # with no window baseline gets neither, and is recorded and skipped.
         if sig.has_stats:
             _, home_danger, away_danger = opening_pressure(sig)
             row["home_danger"], row["away_danger"] = home_danger, away_danger
             row["has_xg"] = bool(sig.home_xg_total or sig.away_xg_total)
+            row["has_window"] = sig.has_window
+            now = current_pressure(sig)
+            if now is not None:
+                fav_now = now[1] if fav["side"] == "home" else now[2]
+                dog_now = now[2] if fav["side"] == "home" else now[1]
+                row.update(fav_pressure_now=fav_now, dog_pressure_now=dog_now,
+                           dominance_now=fav_now - dog_now,
+                           pressure_source=now[3],
+                           pressure_minute=sig.stats_minute or sig.minute)
             if (FIRST15_MIN <= sig.minute <= FIRST15_MAX
                     and sig.fixture_id not in state.opening):
                 state.opening[sig.fixture_id] = {
@@ -445,7 +498,8 @@ def observe(signals: dict[int, PressureSignals], table: dict,
                 # half time" is not a survival probability, so this is a
                 # deliberately crude monotone transform — recorded as the
                 # pressure arm of the comparison, never used to price anything.
-                k = pressure_factor(row["opening_fav_pressure"] or 0.0)
+                k = pressure_factor(row["fav_pressure_now"]
+                                    or row["opening_fav_pressure"] or 0.0)
                 fair_pressure = apply_pressure(fair_base, k)
                 fee = taker_fee_pp(book["best_ask"])
                 row.update(
@@ -461,10 +515,12 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             and fav["prematch"]
             and fav["p_fav"] >= MIN_FAV_PROB
             and sig.has_stats
-            and row["opening_fav_pressure"] is not None
-            and row["opening_fav_pressure"] >= MIN_FAV_PRESSURE
-            and row["opening_dominance"] >= MIN_DOMINANCE
+            and row["fav_pressure_now"] is not None
+            and row["fav_pressure_now"] >= MIN_FAV_PRESSURE
+            and row["dominance_now"] >= MIN_DOMINANCE
             and book["best_ask"] <= MAX_ASK
+            and book["best_bid"] is not None
+            and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
             and (book["ask_depth_usd"] or 0) >= MIN_DEPTH_USD
             and row["score_agrees"] is not False
         )
@@ -487,16 +543,21 @@ def _why_not(row: dict, book: dict, sig: PressureSignals, fav: dict) -> str:
         return "favourite read in play, not before kickoff"
     if fav["p_fav"] < MIN_FAV_PROB:
         return f"no clear favourite (p={fav['p_fav']:.2f} < {MIN_FAV_PROB})"
-    if row["opening_fav_pressure"] is None:
-        return f"no first-{FIRST15_MIN} measurement (fixture picked up late)"
-    if row["opening_fav_pressure"] < MIN_FAV_PRESSURE:
-        return (f"favourite not pressing ({row['opening_fav_pressure']:.0f} "
+    if row["fav_pressure_now"] is None:
+        return (f"no {FIRST15_MIN}-minute window at {sig.minute}' "
+                f"(fixture picked up late)")
+    if row["fav_pressure_now"] < MIN_FAV_PRESSURE:
+        return (f"favourite not pressing ({row['fav_pressure_now']:.0f} "
                 f"< {MIN_FAV_PRESSURE})")
-    if row["opening_dominance"] < MIN_DOMINANCE:
-        return (f"favourite not on top (dominance {row['opening_dominance']:+.0f} "
+    if row["dominance_now"] < MIN_DOMINANCE:
+        return (f"favourite not on top (dominance {row['dominance_now']:+.0f} "
                 f"< {MIN_DOMINANCE})")
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
+    if book["best_bid"] is None:
+        return "one-sided book: no bid"
+    if (book["best_ask"] - book["best_bid"]) > MAX_SPREAD:
+        return f"spread {100 * (book['best_ask'] - book['best_bid']):.0f}pp > {100 * MAX_SPREAD:.0f}pp"
     if (book["ask_depth_usd"] or 0) < MIN_DEPTH_USD:
         return f"depth ${book['ask_depth_usd']:.0f} < ${MIN_DEPTH_USD:.0f}"
     if row["score_agrees"] is False:
@@ -528,7 +589,10 @@ def _base_row(sig: PressureSignals) -> dict:
         "has_stats": sig.has_stats, "has_xg": False,
         "home_danger": None, "away_danger": None,
         "opening_fav_pressure": None, "opening_dog_pressure": None,
-        "opening_dominance": None, "opening_minute": None,
+        "opening_dominance": None, "opening_minute": None,   # frozen — CONTROL
+        "fav_pressure_now": None, "dog_pressure_now": None,  # what the gate reads
+        "dominance_now": None, "pressure_source": None,
+        "pressure_minute": None, "has_window": False,
         "pressure_factor": None,
         "pre_over25": None,
         "best_bid": None, "best_ask": None,
@@ -552,7 +616,10 @@ _COLS = [
     "home_corners", "away_corners", "home_possession", "away_possession",
     "home_reds", "away_reds", "has_stats", "has_xg",
     "home_danger", "away_danger", "opening_fav_pressure", "opening_dog_pressure",
-    "opening_dominance", "opening_minute", "pressure_factor", "pre_over25",
+    "opening_dominance", "opening_minute",
+    "fav_pressure_now", "dog_pressure_now", "dominance_now",
+    "pressure_source", "pressure_minute", "has_window",
+    "pressure_factor", "pre_over25",
     "best_bid", "best_ask", "bid_depth_usd", "ask_depth_usd",
     "fair_base", "fair_pressure", "fair_n", "fee_pp",
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
@@ -602,15 +669,18 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
                 f"after {r['fee_pp']:.2f}pp fee"
                 if r["fair_base"] else "no fair value on the grid for this state"
             )
+            span = (f"the first {r['pressure_minute']} minutes"
+                    if r["pressure_source"] == "opening"
+                    else f"the 15 minutes to {r['pressure_minute']}'")
             reasoning = (
                 f"{r['home']} 0-0 {r['away']} {r['minute']}' — "
                 f"{r['fav_team']} to lead at half time at {r['best_ask']:.3f} "
                 f"({1 / r['best_ask']:.2f}). Pre-match favourite at "
                 f"{r['fav_prob']:.0%} (de-vigged PM 1X2, captured before kickoff), "
-                f"and living up to it: opening pressure "
-                f"{r['opening_fav_pressure']:.0f} vs {r['opening_dog_pressure']:.0f} "
-                f"for the underdog (dominance {r['opening_dominance']:+.0f}), "
-                f"measured at {r['opening_minute']}'. PREDICTION: the side the "
+                f"and living up to it: pressure "
+                f"{r['fav_pressure_now']:.0f} vs {r['dog_pressure_now']:.0f} "
+                f"for the underdog (dominance {r['dominance_now']:+.0f}), over "
+                f"{span}. PREDICTION: the side the "
                 f"market already rated, visibly on top and still level, is more "
                 f"likely to be ahead at the break than the price pays for. "
                 f"Bought on that call alone, not on a price comparison. For the "
@@ -810,6 +880,51 @@ def report(conn) -> None:
                 print(f"  {r['lo']:+6.0f}..{r['hi']:+6.0f}  n={r['n']:5d}  {r['p']:.3f}{odds}")
             print("  (n >= 200 per bucket before reading anything into this)")
 
+        # The same test on what obs_version 3 actually gates: the HIGHEST live
+        # dominance the fixture reached inside the entry window, which is what
+        # decides whether it ever fires.
+        cur.execute(
+            """SELECT width_bucket(peak, -40, 60, 5) AS b,
+                      count(*) AS n,
+                      avg(fav_led_at_ht::int)::float8 AS p,
+                      min(peak) AS lo, max(peak) AS hi
+                 FROM (SELECT fixture_id, max(dominance_now) AS peak,
+                              bool_or(fav_led_at_ht) AS fav_led_at_ht
+                         FROM fav_ht_observations
+                        WHERE dominance_now IS NOT NULL
+                          AND fav_led_at_ht IS NOT NULL
+                          AND minute BETWEEN %s AND %s
+                        GROUP BY fixture_id) f
+                GROUP BY 1 ORDER BY 1""",
+            (ENTRY_MIN_MINUTE, ENTRY_MAX_MINUTE),
+        )
+        rows = cur.fetchall()
+        if rows:
+            print("\nP(favourite led at HT) by PEAK live dominance in the entry "
+                  "window, one row per fixture:")
+            for r in rows:
+                odds = f"  ({1 / r['p']:.2f})" if r["p"] else ""
+                print(f"  {r['lo']:+6.0f}..{r['hi']:+6.0f}  n={r['n']:5d}  {r['p']:.3f}{odds}")
+
+        # Entries split by which measurement fired them — H-PRESSURE-LATE.
+        cur.execute(
+            """SELECT pressure_source, count(*) AS n,
+                      avg(minute)::float8 AS mean_minute,
+                      avg(best_ask)::float8 AS mean_ask,
+                      avg(fav_led_at_ht::int)::float8 AS hit
+                 FROM fav_ht_observations
+                WHERE entered AND pressure_source IS NOT NULL
+                GROUP BY 1 ORDER BY 1"""
+        )
+        rows = cur.fetchall()
+        if rows:
+            print("\nentries by measurement (H-PRESSURE-LATE):")
+            for r in rows:
+                hit = f"{r['hit']:.3f}" if r["hit"] is not None else "  -  "
+                print(f"  {r['pressure_source']:8s} n={r['n']:4d}  mean minute "
+                      f"{r['mean_minute']:4.1f}  mean ask {r['mean_ask']:.3f} "
+                      f"({1 / r['mean_ask']:.2f})  hit {hit}")
+
         cur.execute(
             """SELECT count(*) AS n,
                       count(*) FILTER (WHERE pt.result = 'won') AS won,
@@ -879,8 +994,9 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                 log.info(
                     f"  ENTER  {r['fav_team'][:22]:22} lead@HT {r['minute']}'  "
                     f"ask={r['best_ask']:.3f} ({1 / r['best_ask']:.2f})  "
-                    f"fav={r['fav_prob']:.0%} press={r['opening_fav_pressure']:.0f} "
-                    f"dom={r['opening_dominance']:+.0f}  #{r['paper_trade_id']}"
+                    f"fav={r['fav_prob']:.0%} press={r['fav_pressure_now']:.0f} "
+                    f"dom={r['dominance_now']:+.0f}"
+                    f"[{(r['pressure_source'] or 'opening')[:3]}]  #{r['paper_trade_id']}"
                 )
         log.info(f"first-half fixtures={len(rows):3d} entered={opened:2d} "
                  f"{time.time() - t0:.1f}s")
