@@ -75,6 +75,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── dc_scanner.py                  ← Strategy 4: DC Model Pre-Match scanner ✅
 │   ├── elo_model.py                   ← Strategy 3: ELO+Poisson model ✅
 │   ├── nba_scanner.py                 ← Strategy 5: NBA Elo Pre-Match scanner ✅
+│   ├── espn_stats.py                  ← free live stats, no key — fallback ✅ NEW
 │   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
 │   ├── live_tracker.py                ← rolling-window pressure signals ✅
@@ -115,6 +116,7 @@ riding the AI + prediction-markets wave simultaneously.
     │   ├── api/scout/route.ts         ← the board  ·  api/pulse → the tape's 7 numbers
     │   ├── api/game · api/backtest · api/wallet
     │   ├── lib/scout.ts               ← Gamma sweep → fixtures + book grades
+    │   ├── lib/espn.ts                ← live clock fallback where PM has none
     │   ├── lib/scoutCache.ts          ← 45s TTL + in-flight coalescing, shared
     │   ├── lib/gamecenter.ts · lib/looks.ts · lib/wallet.ts · lib/backtest.ts
     │   ├── components/AppShell.tsx    ← tape · nav · tabs · account actions · footer
@@ -344,6 +346,9 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Stage C (v2) — ClubElo ratings | ✅ ELO histories loaded |
 | Stage D — The Odds API (sharp) | ✅ Live Pinnacle + Betfair odds |
 | Stage E — In-Play Monitor | ✅ Built (needs FOOTBALL_API_KEY) |
+| Live stats — api-football | ⚠️ Primary, but quota exhausts nightly and xG has been 0% since 09-02 |
+| Live stats — ESPN | ✅ Free fallback, no key (`agent/espn_stats.py`), auto-engages on refusal |
+| Live clock — Polymarket | ✅ `live`/`score`/`period`/`elapsed` on the event itself; Scout's primary |
 | Stage F — NBA pipeline | ✅ 15k games, Elo model, scanner |
 | Stage G — International results | ✅ 8,394 matches, 48 WC teams in DC model |
 | Stage I — Kalshi markets (read-only) | ✅ 930 markets / 310 fixtures / 29 competitions |
@@ -520,6 +525,17 @@ indices beats minute + pre-match total (db/037, `H-PRESSURE-1H-AGG`). See
 entry window runs to 40'. Same thresholds, same book gates.
 ⚠️ **`obs_version 4` since 2026-09-06** — `MIN_ODDS = 1.75`, with the pressure
 gate latched. See [The 1.75 floor](#the-175-floor--a-price-gate-that-is-mostly-a-clock-gate-2026-09-06).
+⚠️ **`obs_version 5` since 2026-09-06** — the pressure gate is **re-applied at
+the moment of entry**. v4 entered on `(pressing or armed)`, so a fixture that
+cleared the gate once could be bought minutes later purely because the price had
+walked out, with the match already quiet. Measured on v4's own 11 entries: 9
+were `live` (pressure 23.1 at entry) and **2 were `armed` with the reading
+collapsed below the gate** — Henan v Chengdu armed at 26' on 19.6 and entered at
+34' on **12.7**; Cracovia v Gornik armed at 15' on 21.3, in at 18' on **14.0**.
+Arming survives and still holds a fixture under watch while the book walks out;
+what it no longer does is stand in for a reading. An armed fixture whose price
+arrived but whose pressure has gone gets its own skip reason, so the population
+v5 gives up stays countable.
 
 ---
 
@@ -1148,6 +1164,107 @@ form above. Replace `notYet` in `AppShell.tsx` and nothing else changes.
 underpriced in Serie B" returns EDGE FOUND on +4.66% yield with CLV −0.07%,
 which rule 5 of this file calls luck. The results panel now says so when the
 two arms disagree; the verdict logic itself is untouched.
+
+## The evening the key ran out — ESPN as a second source (2026-09-06)
+
+api-football refused from 20:44 with **7,176 calls of our own recorded** against
+a supposed 75,000 (`agent/.af_calls_*.json`), and the user confirmed the
+dashboard showed the allowance spent. It had also served **0.0% xG since
+09-02** — the same figure on s16 and s17, which is what proves it is the feed
+and not our parsing. A refused poll used to `return {}`, so every arm went blind
+for the rest of the night. Fourth time in a week.
+
+🔑 **Our own spend is now the discriminating number this file said we never
+had.** 7,176 against a refusal is either a plan that is not what we think it is,
+or a key being spent elsewhere. It is not us running out of 75,000.
+
+### `agent/espn_stats.py` — free, no key, no quota
+
+```
+https://site.api.espn.com/apis/site/v2/sports/soccer/<code>/scoreboard
+```
+
+**One request per LEAGUE returns every live match's statistics.** api-football
+needs one for the live list plus one per fixture — 2,188 of that day's 3,691
+pressure calls were the per-fixture half. 28 leagues, 109 fixtures, 3.3s.
+Covers 18 of the 19 leagues where s16 had a PM book in the preceding three days.
+
+⚠️ **DO NOT SET A USER-AGENT.** Measured:
+
+| | |
+|---|---|
+| `curl/8.x` default | **200** |
+| `python-requests` / `fetch` default | **200** |
+| `Mozilla/5.0` (browser) | **403** |
+| `nopredictions/1.0 (+url)` | **403** |
+
+The edge rejects browser-shaped and custom agents and serves plain library
+defaults. The first version of the file set a polite self-identifying header and
+every league 403'd. The library default is also the honest string. A browser UA
+would work and is **not** used, because that is claiming to be something we are
+not — the same line that stopped us working around FotMob's signed header.
+
+**What it does not carry: team xG, and shots inside the box** — 55% of the index
+weight. `danger_index` gains `has_inside` beside `has_xg` and **drops** both
+rather than scoring them zero: zero says nobody got into the box, and the truth
+is nobody told us. Same match scores **58.50** on a full feed, **56.67** in
+ESPN's shape, and **43** if zeroed — under every threshold, which is the exact
+failure that once excluded every no-xG fixture from s16.
+
+### The fallback, and the three things it had to get right
+
+A refused live poll — or a missing key — now polls ESPN instead.
+
+1. **The fixture id is namespaced NEGATIVE.** ESPN's event ids are ~400M and
+   api-football's ~1.5M, so no collision today; a collision would splice two
+   matches' snapshot histories into one. Negative also makes the source visible
+   in any query with no join.
+2. **A source switch mid-match could buy the same game twice.** The "already
+   entered" guards keyed on `fixture_id` alone, which a re-namespaced id walks
+   straight past. All three arms now match on the **teams** as well, inside a
+   6-hour window.
+3. **It is a different measurement.** `db/043` puts `stats_source` and
+   `has_inside` on all three observation tables. ⚠️ `has_xg` alone cannot carry
+   this: an api-football fixture in a competition with no xG and an ESPN fixture
+   both read `has_xg=false`, and only one is also missing the inside-box term.
+   **Never pool the two in one yield.**
+
+Falling back does not clear the quota latch — the outage is still an outage.
+
+⚠️ **This is cost and reliability, not edge.** [[finding-live-reading-ceiling]]
+put the whole box-score apparatus at **+0.0008 pseudo-R²** over free state and
+[[finding-ask-move-no-signal]] at **−0.00042 CI[−0.00104,+0.00019]** — a zero.
+Swapping feeds removes a failure mode. It does not make the signal work.
+
+## Polymarket already carried the clock (2026-09-06)
+
+Found by the user looking at Polymarket's own page — "2H - 90", "0 - 1" — while
+our board said `KICKED OFF?`. Their event carries:
+
+```json
+{"live": true, "score": "0-1", "period": "2H", "elapsed": "90", "ended": false}
+```
+
+🔑 **And it is on the LIST response, not only on a single-event query** — so it
+was already in the bytes the Scout sweep downloads, and the board was inferring
+liveness from resolved markets instead. Portland Thorns read as `board` with no
+clock while the same payload said `2H, 59', 1-0`.
+
+Best source available by a distance: no second request, no name matching (it IS
+the event), 100% coverage of listed fixtures by construction, and it agrees with
+what Polymarket shows the trader — which is where they will check.
+
+`period` is `1H`/`2H` while playing and `FT`/`VFT` once over, so `finished`
+comes from it rather than from three settled 1X2 rungs.
+
+Scout's order is now **pm → ESPN → a resolved market → the listed kick-off**,
+and the badge says which, because they are different claims. On a live board:
+8 from Polymarket with minute and score, ~2 from ESPN, ~4 on board evidence,
+~5 left on the clock alone — those last are competitions neither source tags,
+where the weak claim is the true one.
+
+⚠️ ESPN is still needed by the **pressure arms**: they want shots, corners and
+possession, and Polymarket carries none of those.
 
 ## Live stats coverage — measured 2026-08-19
 
