@@ -3,6 +3,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 
 import { isNbaMarket } from '../lib/backtest'
+import { AppShell } from '../components/AppShell'
 
 // ── types mirrored from the API route ───────────────────────────────────────
 
@@ -109,7 +110,7 @@ function EquityCurve({ monthly }: { monthly: MonthRow[] }) {
 
 type Phase = 'idle' | 'running' | 'done'
 
-export default function TestPage() {
+export default function LabPage() {
   const [input, setInput] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [termLines, setTermLines] = useState<{ text: string; cls: string }[]>([])
@@ -193,15 +194,17 @@ export default function TestPage() {
   const showResults = phase === 'done' && result?.ok && result.supported && s
 
   return (
-    <div className="lp-root bt-root">
-      <nav className="lp-nav">
-        <div className="lp-brand">
-          <span className="lp-brand-title">NOPREDICTIONS</span>
-          <span className="lp-brand-sub">HYPOTHESIS TESTER · PRIVATE BETA</span>
+    <AppShell>
+      <div className="np-wrap bt-wrap">
+        <div className="np-page-head">
+          <div className="np-eyebrow">Lab · Hypothesis tester</div>
+          <h1 className="np-h1">Write a theory. Find out if it pays.</h1>
+          <p className="np-page-sub">
+            Say it in plain English. It is replayed over 111,475 real games against the
+            closing odds that existed at the time — and you get the answer even when the
+            answer is no, which it usually is.
+          </p>
         </div>
-      </nav>
-
-      <main className="bt-wrap">
         <div className="lp-term bt-term">
           <div className="lp-term-head">
             <span className="lp-term-dot" />
@@ -354,6 +357,22 @@ export default function TestPage() {
                   </div>
                 </div>
 
+                {/* Rule 5 of this project's methodology: positive yield with
+                    non-positive CLV is luck until proven otherwise. The verdict
+                    above is computed from yield and p-value alone, so when the
+                    two arms disagree the page has to say so rather than let
+                    "EDGE FOUND" stand on its own. */}
+                {s.yieldPct > 0 && s.clvPct != null && s.clvPct <= 0 && (
+                  <div className="np-note bt-clv-warn">
+                    <strong>The two arms disagree.</strong> This made money at the closing
+                    price, but its CLV is{' '}
+                    <span className="np-num">{s.clvPct.toFixed(2)}%</span> — the odds did not
+                    move from open to close, so nothing says the market was wrong here rather
+                    than the sample being kind. Positive yield with non-positive CLV is the
+                    signature of luck, and it is the first thing to check out of sample.
+                  </div>
+                )}
+
                 <EquityCurve monthly={result!.monthly ?? []} />
 
                 {(result!.seasons?.length ?? 0) > 1 && (
@@ -406,11 +425,13 @@ export default function TestPage() {
           </section>
         )}
 
-        <footer className="bt-foot">
-          BACKTESTS RUN AGAINST CLOSING ODDS — PINNACLE FOR FOOTBALL, CONSENSUS FOR THE NBA · FLAT
-          1U STAKES · MIN 200 SELECTIONS FOR A VERDICT · PAST RESULTS ≠ FUTURE EDGE
-        </footer>
-      </main>
-    </div>
+        <div className="np-note bt-foot">
+          Backtests run against closing odds — Pinnacle for football, consensus for the NBA.
+          Flat 1u stakes, minimum 200 selections before any verdict.{' '}
+          <strong>A backtest is not an edge.</strong> It is the first filter, and most
+          theories that survive it still die out of sample.
+        </div>
+      </div>
+    </AppShell>
   )
 }

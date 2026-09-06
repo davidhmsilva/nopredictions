@@ -2,9 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Nav, MobileNav } from '../../components/Nav'
+import { AppNav, AppFooter } from '../../components/AppShell'
 import { WalletReport } from '../../components/WalletReport'
-import type { Section } from '../../lib/types'
 import type { WalletProfile } from '../../lib/wallet'
 
 // A big wallet is tens of thousands of fills; the request runs for a while and
@@ -28,9 +27,6 @@ export default function WalletPage() {
   const started = useRef(0)
   const [elapsed, setElapsed] = useState(0)
 
-  const navigateHome = (s: Section) => {
-    window.location.href = s === 'home' ? '/' : `/?section=${s}`
-  }
 
   useEffect(() => {
     if (!address) return
@@ -63,7 +59,7 @@ export default function WalletPage() {
 
   return (
     <div className="scanner-page">
-      <Nav section="home" setSection={navigateHome} />
+      <AppNav />
 
       <main className="scanner-main">
         <button className="wallet-back" onClick={() => router.push('/wallet')}>
@@ -92,12 +88,8 @@ export default function WalletPage() {
         {profile && <WalletReport p={profile} />}
       </main>
 
-      <footer className="scanner-footer">
-        <span>NOPREDICTIONS</span>
-        <span style={{ color: 'var(--grey)' }}>No predictions. Just edges.</span>
-      </footer>
 
-      <MobileNav section="home" setSection={navigateHome} />
+      <AppFooter />
     </div>
   )
 }

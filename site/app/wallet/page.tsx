@@ -2,8 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { Nav, MobileNav } from '../components/Nav'
-import type { Section } from '../lib/types'
+import { AppNav, AppFooter } from '../components/AppShell'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
 
@@ -20,9 +19,6 @@ const KNOWN = [
 export default function WalletIndexPage() {
   const router = useRouter()
   const [value, setValue] = useState('')
-  const navigateHome = (s: Section) => {
-    window.location.href = s === 'home' ? '/' : `/?section=${s}`
-  }
 
   const raw = value.trim()
   // Accept a pasted profile URL as readily as a bare address — that is how
@@ -32,7 +28,7 @@ export default function WalletIndexPage() {
 
   return (
     <div className="scanner-page">
-      <Nav section="home" setSection={navigateHome} />
+      <AppNav />
 
       <main className="scanner-main">
         <div className="scanner-hero">
@@ -83,12 +79,8 @@ export default function WalletIndexPage() {
         </section>
       </main>
 
-      <footer className="scanner-footer">
-        <span>NOPREDICTIONS</span>
-        <span style={{ color: 'var(--grey)' }}>No predictions. Just edges.</span>
-      </footer>
 
-      <MobileNav section="home" setSection={navigateHome} />
+      <AppFooter />
     </div>
   )
 }

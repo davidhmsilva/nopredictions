@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Nav, MobileNav } from '../../components/Nav'
-import type { Section } from '../../lib/types'
+import { AppNav, AppFooter } from '../../components/AppShell'
 import type { GameData, LiveStats, MarketGroup } from '../../lib/gamecenter'
 import { tradeable, type Look, type Pulse } from '../../lib/looks'
 
@@ -480,13 +479,10 @@ export default function GamePage({ params }: { params: { slug: string } }) {
     }
   }
 
-  const navigateHome = (s: Section) => {
-    window.location.href = s === 'home' ? '/' : `/?section=${s}`
-  }
 
   return (
     <div className="scanner-page">
-      <Nav section="home" setSection={navigateHome} />
+      <AppNav />
 
       <main className="scanner-main gc-main">
         {loading && (
@@ -522,12 +518,8 @@ export default function GamePage({ params }: { params: { slug: string } }) {
         )}
       </main>
 
-      <footer className="scanner-footer">
-        <span>NOPREDICTIONS</span>
-        <span style={{ color: 'var(--grey)' }}>No predictions. Just edges.</span>
-      </footer>
 
-      <MobileNav section="home" setSection={navigateHome} />
+      <AppFooter />
     </div>
   )
 }

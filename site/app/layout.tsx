@@ -3,9 +3,9 @@ import './globals.css'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nopredictions.com'),
-  title: 'NOPREDICTIONS — Test Any Betting Idea With AI',
+  title: 'NOPREDICTIONS — Where a price actually exists',
   description:
-    'Write a betting idea in normal English. Our AI tests it against 139,000 real matches and today’s odds — then places the bets for you if it makes money.',
+    'Every football board Polymarket has open, graded on book quality. Test your own theory against 111,475 real games. No tips — measured numbers, and the ones that are not measured say so.',
   alternates: { canonical: '/' },
   icons: {
     icon: [
@@ -15,9 +15,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'NOPREDICTIONS — Test Any Betting Idea With AI',
+    title: 'NOPREDICTIONS — Where a price actually exists',
     description:
-      'Is your betting idea profitable? Say it in normal English, our AI checks it against 139,000 real matches and today’s odds — then bets it for you.',
+      'Today’s Polymarket football boards, graded on the one thing we measured to matter: whether there is a real two-sided book behind the quote.',
     type: 'website',
     url: 'https://nopredictions.com',
     siteName: 'NOPREDICTIONS',
@@ -25,9 +25,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'NOPREDICTIONS — Test Any Betting Idea With AI',
+    title: 'NOPREDICTIONS — Where a price actually exists',
     description:
-      'Is your betting idea profitable? Say it in normal English, our AI checks it against 139,000 real matches and today’s odds — then bets it for you.',
+      'Today’s Polymarket football boards, graded on the one thing we measured to matter: whether there is a real two-sided book behind the quote.',
     images: ['/banner.jpg'],
   },
 }

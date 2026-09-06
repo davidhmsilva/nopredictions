@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { fmtPnl, formatDate, formatDateTime, byRecordThenPnl } from '../lib/helpers'
 import type { Section } from '../lib/types'
 import type { DbStats, Strategy, PaperTrade } from '../lib/supabase'
@@ -32,20 +31,14 @@ export function HomeSection({
   const winRate = settledTrades.length > 0 ? (wins / settledTrades.length) * 100 : 0
   const activeTrades = trades.filter(t => !t.resolved_at)
 
-  const [email, setEmail] = useState('')
-  const [subscribed, setSubscribed] = useState(false)
-
-  function handleSubscribe(e: React.FormEvent) {
-    e.preventDefault()
-    setSubscribed(true)
-  }
-
   return (
     <div>
 
       {/* ── HERO ── */}
       <div className="home-hero">
-        <div className="eyebrow">● AI AGENT · PREDICTION MARKETS · LIVE</div>
+        {/* "LIVE" used to sit here. It is directly contradicted by the banner
+            above this page: the agent is paper and has been since 2026-08-09. */}
+        <div className="eyebrow">● AI AGENT · PREDICTION MARKETS · PAPER</div>
         <h1>
           NO PREDICTIONS.<br />
           <span className="accent">JUST EDGES.</span>
@@ -56,11 +49,11 @@ export function HomeSection({
           Every position, every failure: public.
         </p>
         <div className="cta-row">
-          <button className="btn-primary" onClick={() => setSection('agent')}>
+          <button className="btn-primary" onClick={() => setSection('strategies')}>
             ● SEE THE AGENT
           </button>
-          <a href="/scanner" className="btn-secondary">
-            SCANNER →
+          <a href="/" className="btn-secondary">
+            TODAY&apos;S BOARDS →
           </a>
         </div>
       </div>
@@ -70,7 +63,7 @@ export function HomeSection({
         <div className="block-eyebrow">
           <span>● LATEST POSITION</span>
           {trades.length > 0 && (
-            <button onClick={() => setSection('agent')}>
+            <button onClick={() => setSection('strategies')}>
               ALL {trades.length} →
             </button>
           )}
@@ -124,7 +117,7 @@ export function HomeSection({
       <div className="home-block">
         <div className="block-eyebrow">
           <span>AGENTS</span>
-          <button onClick={() => setSection('agent')}>FULL DETAILS →</button>
+          <button onClick={() => setSection('strategies')}>FULL DETAILS →</button>
         </div>
         {top3.length > 0 ? (
           <>
@@ -169,7 +162,7 @@ export function HomeSection({
       <div className="home-block alt">
         <div className="block-eyebrow">
           <span>● RECENT POSITIONS</span>
-          <button onClick={() => setSection('agent')}>SEE ALL →</button>
+          <button onClick={() => setSection('strategies')}>SEE ALL →</button>
         </div>
         {trades.length > 0 ? (
           trades.slice(0, 3).map((t) => (
@@ -196,46 +189,8 @@ export function HomeSection({
           mathematical models trained on <strong>139,000+ real matches</strong> across football
           and NBA to find mispricings. When it detects the market got a price wrong, it logs a paper trade
           — logged publicly in real time, with full reasoning.
-          No retroactive claims, no quiet failures.{' '}
-          <button onClick={() => setSection('about')}>The full project →</button>
+          No retroactive claims, no quiet failures.
         </p>
-      </div>
-
-      {/* ── NEWSLETTER (inline, compact) ── */}
-      <div className="home-block alt">
-        <div className="block-eyebrow" style={{ justifyContent: 'center' }}><span>● FOLLOW THE EXPERIMENT</span></div>
-        {subscribed ? (
-          <div style={{
-            background: 'var(--bg)', border: '1px solid var(--green)',
-            padding: '16px', color: 'var(--green)', letterSpacing: '2px', fontSize: '13px',
-          }}>
-            ✓ YOU&apos;RE IN.
-          </div>
-        ) : (
-          <>
-            <form onSubmit={handleSubscribe} style={{ display: 'flex', gap: 0, marginBottom: '8px', maxWidth: '480px' }}>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="your@email.com"
-                style={{
-                  flex: 1, minWidth: 0,
-                  background: 'var(--bg)', border: '1px solid var(--border)', borderRight: 'none',
-                  color: 'var(--white)', fontFamily: 'var(--font)',
-                  fontSize: '13px', padding: '12px 14px', outline: 'none',
-                }}
-              />
-              <button type="submit" className="btn-primary" style={{ padding: '12px 18px' }}>
-                SUBSCRIBE
-              </button>
-            </form>
-            <div style={{ fontSize: '11px', color: 'var(--grey)' }}>
-              Weekly: live positions, edge reports, P&amp;L updates. No spam.
-            </div>
-          </>
-        )}
       </div>
 
     </div>
