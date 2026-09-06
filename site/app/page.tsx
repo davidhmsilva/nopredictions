@@ -428,7 +428,7 @@ export default function ScoutPage() {
 
       <div className="np-wrap">
         <div className="sc-head">
-          <h1 className="sc-h1">Today&apos;s football on Polymarket</h1>
+          <h1 className="sc-h1">All of today&apos;s football, priced</h1>
           <p className="sc-h1-sub">
             Every fixture with a live market, in play first — and every board marked with
             whether there is a real price behind the quote.
