@@ -3,16 +3,31 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
+import {
+  IconAccount,
+  IconAgent,
+  IconBell,
+  IconBoard,
+  IconLab,
+  IconMenu,
+  IconSearch,
+  IconWallet,
+} from './icons'
 
 /** The tabs, in the order a bettor uses them on a matchday:
  *  where is the edge → can I test my own idea → what is the agent doing →
  *  who else is doing it well. Game Center is deliberately absent: you reach a
  *  fixture by clicking it, never by picking a tab. */
-export const TABS: { href: string; label: string; hint: string }[] = [
-  { href: '/',       label: 'Scout',  hint: "Today's boards" },
-  { href: '/lab',    label: 'Lab',    hint: 'Test a theory' },
-  { href: '/agent',  label: 'Agent',  hint: 'In testing' },
-  { href: '/wallet', label: 'Wallet', hint: 'Read a trader' },
+export const TABS: {
+  href: string
+  label: string
+  hint: string
+  Icon: (p: { className?: string }) => JSX.Element
+}[] = [
+  { href: '/',       label: 'Scout',  hint: "Today's boards", Icon: IconBoard },
+  { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
+  { href: '/agent',  label: 'Agent',  hint: 'In testing',     Icon: IconAgent },
+  { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
 ]
 
 function isActive(pathname: string, href: string): boolean {
@@ -111,7 +126,13 @@ function Tape() {
 
 // ── nav ──────────────────────────────────────────────────────────────────────
 
-function NavSearch() {
+function NavSearch({
+  onDone,
+  autoFocus,
+}: {
+  onDone?: () => void
+  autoFocus?: boolean
+} = {}) {
   const router = useRouter()
   const [q, setQ] = useState('')
 
@@ -126,6 +147,7 @@ function NavSearch() {
       /polymarket\.com\/(?:[a-z]{2}\/)?(?:event|sports\/[^/]+)\/([^/?#]+)/
     )?.[1]
     router.push(slug ? `/game/${slug}` : `/?q=${encodeURIComponent(v)}`)
+    onDone?.()
   }
 
   return (
@@ -136,6 +158,8 @@ function NavSearch() {
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search a team, or paste a Polymarket link…"
         aria-label="Search fixtures"
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus={autoFocus}
       />
     </form>
   )
@@ -151,6 +175,8 @@ function NavSearch() {
  *  exist and nothing else here has to change. */
 function AccountActions() {
   const [notice, setNotice] = useState<string | null>(null)
+  const [sheet, setSheet] = useState(false)
+  const [mobileSearch, setMobileSearch] = useState(false)
 
   useEffect(() => {
     if (!notice) return
@@ -158,25 +184,77 @@ function AccountActions() {
     return () => clearTimeout(id)
   }, [notice])
 
-  const notYet = (what: string) => () =>
+  // The sheet is a phone affordance and has no business surviving a jump to a
+  // wide window, where the tabs it duplicates are visible again.
+  useEffect(() => {
+    if (!sheet) return
+    const close = () => setSheet(false)
+    window.addEventListener('resize', close)
+    return () => window.removeEventListener('resize', close)
+  }, [sheet])
+
+  const notYet = (what: string) => () => {
+    setSheet(false)
     setNotice(`${what} isn't live yet — the site runs without accounts for now.`)
+  }
 
   return (
     <div className="np-account">
-      <button
-        className="np-icon-btn"
-        onClick={notYet('Alerts')}
-        aria-label="Alerts"
-        title="Alerts"
-      >
-        <span aria-hidden="true">🔔</span>
+      {/* Wide screens: bell, Log in, Sign up. */}
+      <button className="np-icon-btn np-wide-only" onClick={notYet('Alerts')} aria-label="Alerts" title="Alerts">
+        <IconBell className="np-icn" />
       </button>
-      <button className="np-btn-ghost" onClick={notYet('Log in')}>
+      <button className="np-btn-ghost np-wide-only" onClick={notYet('Log in')}>
         Log in
       </button>
-      <button className="np-btn-signup" onClick={notYet('Sign up')}>
+      <button className="np-btn-signup np-wide-only" onClick={notYet('Sign up')}>
         Sign up
       </button>
+
+      {/* Phones: search, account, menu — the three that fit beside a logo. */}
+      <button
+        className="np-icon-btn np-narrow-only"
+        onClick={() => setMobileSearch((v) => !v)}
+        aria-label="Search"
+        aria-expanded={mobileSearch}
+      >
+        <IconSearch className="np-icn" />
+      </button>
+      <button
+        className="np-icon-btn np-narrow-only"
+        onClick={notYet('Your account')}
+        aria-label="Account"
+      >
+        <IconAccount className="np-icn" />
+      </button>
+      <button
+        className="np-icon-btn np-narrow-only"
+        onClick={() => setSheet((v) => !v)}
+        aria-label="Menu"
+        aria-expanded={sheet}
+      >
+        <IconMenu className="np-icn" />
+      </button>
+
+      {mobileSearch && (
+        <div className="np-mobile-search">
+          <NavSearch onDone={() => setMobileSearch(false)} autoFocus />
+        </div>
+      )}
+
+      {sheet && (
+        <>
+          <button className="np-sheet-scrim" aria-label="Close menu" onClick={() => setSheet(false)} />
+          <div className="np-sheet" role="dialog" aria-label="Menu">
+            <button className="np-sheet-item" onClick={notYet('Log in')}>Log in</button>
+            <button className="np-sheet-item is-primary" onClick={notYet('Sign up')}>Sign up</button>
+            <button className="np-sheet-item" onClick={notYet('Alerts')}>Alerts</button>
+            <div className="np-sheet-note">
+              Accounts are not live yet. Everything on the site works without one.
+            </div>
+          </div>
+        </>
+      )}
 
       {notice && (
         <div className="np-notice" role="status">
@@ -232,8 +310,8 @@ export function AppNav() {
             href={t.href}
             className={`np-mobile-tab${isActive(pathname, t.href) ? ' is-active' : ''}`}
           >
+            <t.Icon className="np-mobile-tab-icn" />
             <span className="np-mobile-tab-label">{t.label}</span>
-            <span className="np-mobile-tab-hint">{t.hint}</span>
           </Link>
         ))}
       </nav>

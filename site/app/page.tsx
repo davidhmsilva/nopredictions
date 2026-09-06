@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AppShell } from './components/AppShell'
+import {
+  IconAll,
+  IconBook,
+  IconClock,
+  IconLive,
+  IconRuler,
+  IconStar,
+} from './components/icons'
 import type { BookGrade, ScoutFixture } from './lib/scout'
 
 const WATCHLIST_KEY = 'np_watchlist'
@@ -124,13 +132,18 @@ function sortFixtures(fs: ScoutFixture[], key: SortKey): ScoutFixture[] {
 
 type Filter = 'all' | 'live' | 'soon' | 'clean' | 'measured' | 'watchlist'
 
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'live', label: 'In play' },
-  { id: 'soon', label: 'Starting soon' },
-  { id: 'clean', label: 'Clean books' },
-  { id: 'measured', label: 'Measured' },
-  { id: 'watchlist', label: 'Watchlist' },
+const FILTERS: {
+  id: Filter
+  label: string
+  Icon: (p: { className?: string }) => JSX.Element
+  cls?: string
+}[] = [
+  { id: 'all', label: 'All', Icon: IconAll },
+  { id: 'live', label: 'In play', Icon: IconLive, cls: 'is-live-icn' },
+  { id: 'soon', label: 'Starting soon', Icon: IconClock },
+  { id: 'clean', label: 'Clean books', Icon: IconBook },
+  { id: 'measured', label: 'Measured', Icon: IconRuler },
+  { id: 'watchlist', label: 'Watchlist', Icon: IconStar },
 ]
 
 /** "Starting soon" is the next two hours. Long enough to cover a build-up,
@@ -350,7 +363,7 @@ export default function ScoutPage() {
    *  top of it — nothing here is a separate feed that could disagree with the
    *  rows underneath. */
   const headline = useMemo(
-    () => fixtures.filter((f) => !f.finished).slice(0, 3),
+    () => fixtures.filter((f) => !f.finished).slice(0, 4),
     [fixtures]
   )
 
@@ -366,6 +379,7 @@ export default function ScoutPage() {
                 className={`sc-cat${filter === f.id ? ' is-on' : ''}`}
                 onClick={() => setFilter(f.id)}
               >
+                <f.Icon className={`sc-cat-icn ${f.cls ?? ''}`} />
                 {f.label}
                 {f.id === 'watchlist' && watchlist.length > 0 && (
                   <span className="sc-cat-n np-num">{watchlist.length}</span>

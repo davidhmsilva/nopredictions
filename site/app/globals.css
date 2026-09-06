@@ -2334,10 +2334,16 @@ button { font-family: var(--font); }
 .np-account { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .np-icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border-radius: 999px;
+  width: 34px; height: 34px; border-radius: 999px; flex-shrink: 0;
   background: none; border: 1px solid transparent; cursor: pointer;
-  font-size: 14px; line-height: 1; transition: background .12s, border-color .12s;
+  color: var(--grey); transition: background .12s, border-color .12s, color .12s;
 }
+.np-icon-btn:hover { color: var(--white); }
+.np-icn { width: 19px; height: 19px; display: block; }
+
+/* One set of controls is for a wide window and one is for a phone; the
+   breakpoint decides, not JavaScript, so neither flashes on load. */
+.np-narrow-only { display: none; }
 .np-icon-btn:hover { background: var(--bg2); border-color: var(--border2); }
 .np-btn-ghost {
   background: none; border: none; cursor: pointer; white-space: nowrap;
@@ -2457,14 +2463,12 @@ button { font-family: var(--font); }
     padding-bottom: env(safe-area-inset-bottom);
   }
   .np-mobile-tab {
-    display: flex; flex-direction: column; align-items: center; gap: 1px;
-    padding: 9px 4px 10px; text-decoration: none; color: var(--grey2);
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 8px 4px 9px; text-decoration: none; color: var(--grey2);
     border-top: 2px solid transparent;
   }
   .np-mobile-tab.is-active { color: var(--white); border-top-color: var(--green); }
-  .np-mobile-tab-label { font-size: 12px; font-weight: 600; }
-  .np-mobile-tab-hint { font-size: 9px; color: var(--grey2); }
-  .np-mobile-tab.is-active .np-mobile-tab-hint { color: var(--grey); }
+  .np-mobile-tab-label { font-size: 11.5px; font-weight: 600; }
 }
 
 /* ===========================================================================
@@ -2712,6 +2716,9 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .sc-cat:hover { color: var(--white); background: var(--bg2); }
 .sc-cat.is-on { color: var(--white); background: var(--bg3); font-weight: 600; }
+.sc-cat-icn { width: 14px; height: 14px; flex-shrink: 0; opacity: .8; }
+.sc-cat.is-on .sc-cat-icn { opacity: 1; }
+.sc-cat-icn.is-live-icn { width: 8px; height: 8px; color: var(--red); }
 .sc-cat-n { font-size: 10px; color: var(--grey2); }
 .sc-cat.is-on .sc-cat-n { color: var(--grey); }
 .sc-cat-more { color: var(--blue); }
@@ -2724,7 +2731,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 .sc-big {
   display: grid; gap: 12px; margin-bottom: 22px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .sc-big-card {
   display: flex; flex-direction: column; gap: 11px;
@@ -2785,8 +2792,12 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-clear:hover { color: var(--white); border-color: var(--grey2); }
 .sc-count { font-size: 11.5px; color: var(--grey2); }
 
-@media (max-width: 1080px) {
-  .sc-big { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 1240px) {
+  .sc-big { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sc-big-card:nth-child(4) { display: none; }
+}
+@media (max-width: 980px) {
+  .sc-big { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sc-big-card:nth-child(3) { display: none; }
 }
 @media (max-width: 760px) {
@@ -2796,10 +2807,20 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   /* Sign up survives on a phone; the rest is a tap away once accounts exist. */
   .np-btn-ghost, .np-icon-btn { display: none; }
   .np-btn-signup { padding: 6px 13px; font-size: 12.5px; }
-  /* One card on a phone. Three stacked is most of a screen before the board
-     starts, and the other two are a scroll away in the table anyway. */
-  .sc-big { grid-template-columns: 1fr; }
-  .sc-big-card:nth-child(n + 2) { display: none; }
+  /* All four fixtures on a phone, as a snap slider. Stacking them is most of a
+     screen before the board starts; hiding three of them threw away the games
+     the page exists to lead with. The row is bled to the viewport edge so a
+     half-visible fourth card shows there is more to the right. */
+  .sc-big {
+    display: flex; gap: 10px; overflow-x: auto;
+    scroll-snap-type: x mandatory; scrollbar-width: none;
+    margin: 0 -14px 20px; padding: 0 14px;
+  }
+  .sc-big::-webkit-scrollbar { display: none; }
+  .sc-big-card {
+    flex: 0 0 84%; scroll-snap-align: start;
+  }
+  .sc-big-card:nth-child(3), .sc-big-card:nth-child(4) { display: flex; }
   .sc-h1 { font-size: 19px; line-height: 1.25; }
   .sc-bar-left { width: 100%; }
 }
@@ -3059,3 +3080,48 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .11em;
   text-transform: uppercase; color: var(--grey2); margin-bottom: 10px;
 }
+
+/* ===========================================================================
+   MOBILE HEADER + SHEET
+   =========================================================================== */
+
+@media (max-width: 760px) {
+  .np-wide-only { display: none !important; }
+  .np-narrow-only { display: inline-flex !important; }
+  .np-account { gap: 2px; }
+
+  /* Search moves behind its own icon: a 250px field cannot share a 375px bar
+     with a logo and three controls. */
+  .np-mobile-search {
+    position: fixed; top: 54px; left: 0; right: 0; z-index: 65;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+  }
+  .np-mobile-search .np-search { width: 100%; min-width: 0; flex: 1 1 auto; }
+}
+
+.np-sheet-scrim {
+  position: fixed; inset: 0; z-index: 64;
+  background: rgba(0, 0, 0, .5); border: none; cursor: default;
+}
+.np-sheet {
+  position: absolute; top: calc(100% + 9px); right: 0; z-index: 66;
+  display: flex; flex-direction: column; gap: 4px;
+  min-width: 210px; padding: 8px;
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: var(--r); box-shadow: var(--shadow);
+}
+.np-sheet-item {
+  text-align: left; padding: 10px 12px; border-radius: var(--r-sm);
+  background: none; border: none; cursor: pointer;
+  color: var(--white); font-family: var(--font); font-size: 14px; font-weight: 550;
+}
+.np-sheet-item:hover { background: var(--bg-hover); }
+.np-sheet-item.is-primary { background: var(--green); color: #05140b; font-weight: 650; }
+.np-sheet-item.is-primary:hover { background: #29d669; }
+.np-sheet-note {
+  padding: 8px 12px 4px; font-size: 11.5px; color: var(--grey2); line-height: 1.45;
+}
+
+/* ── bottom tab bar ── */
+.np-mobile-tab-icn { width: 21px; height: 21px; }

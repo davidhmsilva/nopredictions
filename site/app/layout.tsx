@@ -3,9 +3,9 @@ import './globals.css'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nopredictions.com'),
-  title: 'NOPREDICTIONS — Where a price actually exists',
+  title: 'NOPREDICTIONS — Today’s football, priced',
   description:
-    'Every football board Polymarket has open, graded on book quality. Test your own theory against 111,475 real games. No tips — measured numbers, and the ones that are not measured say so.',
+    'Every football market Polymarket has open today, biggest first, in decimal odds. Test your own betting theory against 111,475 real games, and read any trader’s whole record.',
   alternates: { canonical: '/' },
   icons: {
     icon: [
@@ -15,9 +15,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'NOPREDICTIONS — Where a price actually exists',
+    title: 'NOPREDICTIONS — Today’s football, priced',
     description:
-      'Today’s Polymarket football boards, graded on the one thing we measured to matter: whether there is a real two-sided book behind the quote.',
+      'Every football market Polymarket has open today, biggest first, in decimal odds — plus a lab for your own betting theories and a reader for any trader’s record.',
     type: 'website',
     url: 'https://nopredictions.com',
     siteName: 'NOPREDICTIONS',
@@ -25,9 +25,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'NOPREDICTIONS — Where a price actually exists',
+    title: 'NOPREDICTIONS — Today’s football, priced',
     description:
-      'Today’s Polymarket football boards, graded on the one thing we measured to matter: whether there is a real two-sided book behind the quote.',
+      'Every football market Polymarket has open today, biggest first, in decimal odds — plus a lab for your own betting theories and a reader for any trader’s record.',
     images: ['/banner.jpg'],
   },
 }
