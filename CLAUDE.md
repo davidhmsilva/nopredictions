@@ -352,7 +352,7 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Strategy 7 — Sim Model In-Play | ✅ NEW — same MC sim from in-play state |
 | Over Late Goals — observation | 🔬 Paper only, no orders. Fair value known, PM side unmeasured |
 | Live Pressure Overs (strategy 16) | 🔬 Paper only — the only agent still running. **obs_version 4** (book gates, db/037) |
-| Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 3** (rolling reading, entry to 40') |
+| Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 4** (min odds 1.75 + armed monitoring) |
 | Live Pressure Favourite HT (strategy 18) | 🔬 Paper only, favourite ahead at HT. **obs_version 3** (rolling reading, entry to 40') |
 | Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
 | InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
@@ -443,7 +443,11 @@ expect to have to widen the universe before it is reachable.
 
 Same signal as Live Pressure Overs, one market over. The rule: a fixture is still
 **0-0**, the clock has passed **15 minutes**, and those first 15 minutes were
-played at **high pressure** → buy PM **"1st Half O/U 0.5"** (over), 1u, paper.
+played at **high pressure** → buy PM **"1st Half O/U 0.5"** (over), 1u, paper —
+**and never at less than 1.75** (obs_version 4). Pressure and price are two
+separate events: a fixture that presses at a shorter price is **armed** and
+monitored, and enters on the first later poll where the price has arrived and
+the book is still clean.
 Strategy id **17**, hypothesis **H-PRESSURE-1H**, table `ht_pressure_observations`
 (db/033), public view `v_ht_pressure_trades`.
 
@@ -507,6 +511,8 @@ indices beats minute + pre-match total (db/037, `H-PRESSURE-1H-AGG`). See
 [The 100-game review](#the-100-game-review--book-quality-not-pressure-2026-08-3031).
 ⚠️ **`obs_version 3` since 2026-09-05** — the reading is no longer frozen and the
 entry window runs to 40'. Same thresholds, same book gates.
+⚠️ **`obs_version 4` since 2026-09-06** — `MIN_ODDS = 1.75`, with the pressure
+gate latched. See [The 1.75 floor](#the-175-floor--a-price-gate-that-is-mostly-a-clock-gate-2026-09-06).
 
 ---
 
@@ -769,6 +775,73 @@ claims more goals than the match ever had; and the paper trade now settles on
 rather than "the score moved off what we read at entry", because where the tape
 was wrong at entry the LINE is wrong too. `final_goals_source` on every row.
 
+## Rationing one api-football key — day vs evening (2026-09-06)
+
+The blackout is real and it is a **daily allowance that resets at 00:00 UTC** —
+four consecutive nights, recording dies in the evening and the first row back
+lands at **00:02-00:03Z**. That retires the "their quota service is misreporting"
+reading. It does not say whose calls spend it: our own measured usage is far
+short of 75,000, and the headers still advertise 74,999 free while refusing
+every endpoint including `/status`.
+
+⚠️ **2026-09-05 (Saturday) went dark at 16:11Z**, one hour into the only window
+whose boards we can trade, after a day in which **89% of everything recorded was
+a fixture Polymarket does not list** (39,974 fixture-minutes against 4,711; 712
+fixtures against 78). The stats budget was never the binding constraint — a busy
+cycle spends ~7 of 40, throttled by `ENRICH_TTL_S` — so raising or lowering
+`ENRICH_BUDGET_PER_CYCLE` was never going to help. Research was not displacing a
+decision inside a cycle; it was displacing the whole evening.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python -m pytest tests/test_af_budget.py tests/test_sweep_feed_budget.py -q
+cat agent/.af_calls_pressure.json agent/.af_calls_sweep.json   # today's spend
+```
+
+**`agent/af_budget.py` does two separate things.**
+
+1. **Counts.** Every call is recorded at the call site, per UTC day and per hour.
+   Two daemons share the key, so each writes its OWN file and reads the other's:
+   one writer per file needs no lock, and a lock this repo forgets to release is
+   a documented failure mode rather than a hypothetical. The running total is
+   logged every cycle by both agents. 🔑 **Four blackouts were argued from `ok=`
+   counts scraped out of a log after the fact; the number that settles it was
+   the one number the log never carried.**
+2. **Rations.** `EVENING_RESERVE = 45_000` of the 75,000 must still be unspent
+   when `EVENING_START_H = 15` UTC arrives; the daytime gets the rest on a flat
+   per-hour ceiling so the small hours cannot eat the afternoon either.
+
+**Research is sampled, not switched off** — `RESEARCH_DAYTIME_SAMPLE = 4` keeps
+one unlisted fixture in four before 15:00Z, everything after. 🔑 **The sample is
+deterministic on the fixture id**, because a random per-cycle sample cuts the
+same number of calls and destroys what they buy: the pressure arms difference a
+15-minute rolling window, and a fixture measured at 22' and 31' but not 25' has
+no window at all. A fixture sampled out records `stats not fetched: research
+sampled out (daytime budget)` — never "no coverage". The tracker now lets the
+caller name its own skip reason instead of flattening every `rank < 0` into
+"deprioritised"; only the caller knows the difference, and collapsing two
+reasons into one label is the mistake this file has paid for three times.
+
+**The sweep's pending re-query was the largest uncontrolled call class.**
+`/fixtures?live=all` drops a match the moment it ends — which is when the
+post-whistle window opens — so every fixture seen live is followed with a
+batched `/fixtures?ids=` lookup. That part is the thesis. What was not the
+thesis: it re-asked **every** pending fixture on **every** 30-second cycle for
+**three hours**. On a Saturday with 564 fixtures live that is a tail of finished
+matches polled twice a minute long after anything can change. Now
+`PENDING_FRESH_S = 15min` keeps the every-cycle cadence where the whistle
+actually is and `PENDING_SLOW_S = 5min` backs off the tail — ~5.7x fewer calls
+on that class, with the window the thesis depends on untouched.
+
+⚠️ **This machine's clock is UTC+2**, so log timestamps run two hours ahead of
+every UTC figure above. 15:00Z is 17:00 in the logs.
+
+⚠️ **None of this proves the allowance is ours to spend.** It removes our own
+worst daytime waste and makes the spend measurable; if the key is being consumed
+elsewhere the counter will show a blackout arriving while our own total is low,
+which is the discriminating measurement we have never had. The dashboard at
+`dashboard.api-football.com` is still the only place that settles it.
+
 ## Settled-market sweep — observation phase (no money, 2026-09-02)
 
 Thesis, taken from a wallet rather than a model: a PM football market whose
@@ -941,6 +1014,57 @@ gates over stored rows, the funnel goes **s17 60 → 102 fixtures** and **s18
 63 → 90** (some old-gate fixtures are lost: hot opening, quiet by the time the
 book was clean). Pre-registered as `H-PRESSURE-LATE` (db/040), forward-only,
 primary test on all observation rows carrying a book.
+
+## The 1.75 floor — a price gate that is mostly a clock gate (2026-09-06)
+
+Strategy 17 now refuses anything shorter than **1.75**, by the user's decision.
+The signal gate and the price gate are separate events: a fixture that clears
+`MIN_PRESSURE` while the book is still short is **armed** (`state.armed`,
+`armed_at_minute`, `armed_pressure`) and monitored, entering on the first later
+poll where the price has arrived and the book is still clean, still 0-0, still
+inside 40'. `entry_trigger` says whether pressure was passing at the moment of
+entry (`live`) or only when the fixture was armed (`armed`). **obs_version 4** —
+never pool with v1-v3. Migration db/042, hypothesis `H-PRESSURE-MINODDS` (id 34).
+
+🔑 **The gate mostly selects the clock, not the price.** On 5,436 clean 0-0 polls
+between 15' and 40', the share of the book already quoting 1.75 or longer:
+
+| | 15-19' | 20-24' | 25-29' | 30-34' | 35-40' |
+|---|---|---|---|---|---|
+| at 1.75+ | 41% | 77% | 95% | 99% | 100% |
+| median ask | 0.590 (1.69) | 0.530 (1.89) | 0.460 (2.17) | 0.370 (2.70) | 0.280 (3.57) |
+
+The ask falls because the **fair value** falls (~0.59 at 15' to ~0.19 at 40'), so
+"wait for 1.75" is close to "wait until ~25'" — and db/040 already measured that
+later is not cheaper (`real − ask` −3.4 / −4.9 / −3.1 / −2.3 / −5.4pp across the
+same buckets, every CI crossing zero). What it buys is **leverage on whatever the
+pressure signal is worth**, not a better price.
+
+**Funnel, replayed over stored rows.** Of 121 fixtures that ever armed: **11**
+enterable at the arming poll, **49** reached 1.75 on a later poll while still 0-0
+(median wait 9 min, p90 13), **61** never got there before a goal or half time.
+Entries roughly halve and move later and longer.
+
+⚠️ **What the odds bands actually said — this is a decision, not a finding.**
+68 settled entries, 1u flat, net of the fee:
+
+| band | n | won | hit | implied | net yield | 95% CI |
+|---|--:|--:|--:|--:|--:|---|
+| 1.00-1.50 | 16 | 11 | 0.688 | 0.716 | −4.6% | [−39.4, +23.8] |
+| 1.50-1.75 | 31 | 18 | 0.581 | 0.620 | −9.0% | [−35.8, +17.7] |
+| 1.75-2.00 | 16 | 9 | 0.562 | 0.551 | +0.4% | [−45.3, +45.4] |
+| 2.00-2.50 | 5 | 3 | 0.600 | 0.474 | +23.3% | [−61.8, +108.4] |
+| **ALL** | **68** | **41** | 0.603 | 0.616 | **−3.4%** | [−22.9, +15.9] |
+
+The hit rate tracks the implied price band by band — **no gradient** — and every
+interval is 6-25× too coarse for the effect being hunted. `--report` now prints
+this split and the arming funnel on every run.
+
+⚠️ **`armed` is a latch, the fourth in a month** (after the uncovered-league
+blacklist, the PM-listed cache and the stats carry-forward). This one is bounded
+on both ends by construction: consulted only inside 15-40' on a fixture still
+0-0, dropped by `prune()`, and never a substitute for a live reading anywhere it
+is recorded.
 
 ## Live stats coverage — measured 2026-08-19
 

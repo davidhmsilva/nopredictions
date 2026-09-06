@@ -58,6 +58,28 @@ ingest/add_pm_key.sh
 # cron_guard.sh cadence state — machine-local, never shared
 agent/.cron_guard/
 
+# Lag recorder raw captures — hundreds of MB per match, regenerable by re-recording.
+# The whole directory, not a glob: the first capture to be gzipped (a 40MB
+# .jsonl.gz) slipped straight past `*.jsonl` and would have been committed.
+reports/lag/
+
 # pressure_daemon.sh liveness stamp (D6) — proves the wrapper can still
 # write this directory. Local runtime state, never committed.
 agent/.pressure_heartbeat
+
+# api-football call counters — per-process, per-UTC-day, one writer each.
+# Local runtime state: committing them would hand another machine a spend total
+# that is not its own and ration it against a day it never had.
+agent/.af_calls_*.json
+agent/.af_tmp_*
+
+# Row-level audit dumps — 12.8MB of CSV whose rows all still exist in Postgres.
+# Kept on disk as the record behind db/036 and db/038; not in git history, where
+# they are permanent and every clone pays for them. The findings that cite them
+# by name carry the numbers themselves.
+reports/pressure_obs_dupes_backup_*.csv
+reports/pressure_stats_frozen_retracted_*.csv
+reports/deleted_orphan_paper_trades_*.csv
+stuck_trades_*.csv
+ingest/_deleted_*.csv
+
