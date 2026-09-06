@@ -2297,9 +2297,17 @@ button { font-family: var(--font); }
   height: 60px; display: flex; align-items: center; gap: 28px;
 }
 .np-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; flex-shrink: 0; }
+/* The real mark, cropped out of the full lockup in `public/logo.png` — the
+   file is a 1254px square with the NP monogram in its upper middle and the
+   wordmark below it, and the wordmark is live text here rather than pixels.
+   `screen` drops the file's pure-black ground to nothing against the nav, so
+   no dark rectangle shows through. */
 .np-brand-mark {
-  width: 22px; height: 22px; border-radius: 6px; flex-shrink: 0;
-  background: linear-gradient(135deg, var(--green) 0%, #0e7490 100%);
+  width: 40px; height: 25px; flex-shrink: 0;
+  background: url(/logo.png) no-repeat;
+  background-size: 81.5px 81.5px;
+  background-position: -23.2px -20.8px;
+  mix-blend-mode: screen;
 }
 .np-brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .np-brand-name {
@@ -2436,110 +2444,6 @@ button { font-family: var(--font); }
 }
 
 /* ===========================================================================
-   SCOUT  (.sc-*)
-   =========================================================================== */
-
-.sc-stats { display: flex; gap: 28px; padding: 4px 0 20px; }
-.sc-stat { display: flex; flex-direction: column; gap: 1px; }
-.sc-stat-val { font-size: 22px; font-weight: 650; color: var(--white); line-height: 1.1; }
-.sc-stat-key { font-size: 11.5px; color: var(--grey2); letter-spacing: .02em; }
-
-.sc-honesty { margin-bottom: 20px; }
-.sc-error { border-left-color: var(--red); margin-bottom: 20px; }
-
-.sc-controls {
-  display: flex; align-items: center; gap: 12px;
-  margin-bottom: 18px; flex-wrap: wrap;
-}
-.sc-filters { display: flex; gap: 6px; flex-wrap: wrap; }
-.sc-filter {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 13px; border-radius: 999px;
-  border: 1px solid var(--border2); background: transparent;
-  color: var(--grey); font-family: var(--font); font-size: 13px; font-weight: 500;
-  cursor: pointer; transition: all .12s;
-}
-.sc-filter:hover { color: var(--white); border-color: var(--grey2); }
-.sc-filter.is-on {
-  background: var(--white); border-color: var(--white); color: var(--bg); font-weight: 600;
-}
-.sc-filter-count {
-  font-size: 10.5px; background: rgba(0,0,0,.15); border-radius: 999px; padding: 0 5px;
-}
-.sc-filter.is-on .sc-filter-count { background: rgba(0,0,0,.12); }
-.sc-search { max-width: 260px; margin-left: auto; padding: 8px 12px; font-size: 13px; }
-
-.sc-grid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-}
-
-.sc-card {
-  background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--r); overflow: hidden;
-  display: flex; flex-direction: column;
-  transition: border-color .12s, transform .12s;
-}
-.sc-card:hover { border-color: var(--border2); }
-.sc-card.is-live { border-left: 3px solid var(--red); }
-
-.sc-card-top {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 12px 8px;
-}
-.sc-comp {
-  font-size: 11px; color: var(--grey2); letter-spacing: .04em;
-  text-transform: uppercase; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sc-card-top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.sc-kickoff { font-size: 12px; color: var(--grey); }
-.sc-watch {
-  background: none; border: none; cursor: pointer; padding: 0 2px;
-  font-size: 15px; line-height: 1; color: var(--grey2); transition: color .12s;
-}
-.sc-watch:hover { color: var(--white); }
-.sc-watch.is-on { color: var(--amber); }
-
-.sc-card-body { display: block; padding: 0 12px 12px; text-decoration: none; }
-.sc-teams { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
-.sc-team {
-  font-size: 14.5px; font-weight: 600; color: var(--white);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
-}
-.sc-team:last-child { text-align: right; }
-.sc-vs { font-size: 11px; color: var(--grey2); flex-shrink: 0; }
-
-.sc-odds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
-.sc-odd {
-  display: flex; flex-direction: column; align-items: center; gap: 1px;
-  padding: 7px 4px; border-radius: var(--r-sm);
-  background: var(--bg3); border: 1px solid transparent;
-  transition: background .12s, border-color .12s;
-}
-.sc-card-body:hover .sc-odd { background: var(--bg-hover); }
-.sc-odd-key { font-size: 10px; color: var(--grey2); letter-spacing: .06em; font-weight: 600; }
-.sc-odd-val { font-size: 14px; color: var(--white); font-weight: 550; }
-.sc-odd-wide .sc-odd-key { color: var(--grey); }
-
-.sc-card-foot {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 12px; border-top: 1px solid var(--border); background: rgba(0,0,0,.16);
-}
-.sc-foot-meta { font-size: 11px; color: var(--grey2); }
-
-.sc-probe-note {
-  margin: 22px 0 0; font-size: 12px; color: var(--grey2); line-height: 1.6; max-width: 76ch;
-}
-
-@media (max-width: 760px) {
-  .sc-grid { grid-template-columns: 1fr; }
-  .sc-search { max-width: none; margin-left: 0; width: 100%; }
-  .sc-stats { gap: 20px; }
-  .sc-stat-val { font-size: 19px; }
-}
-
-/* ===========================================================================
    AGENT  (.ag-*)  -- the dashboard keeps its structure; this is only chrome.
    =========================================================================== */
 
@@ -2574,11 +2478,171 @@ button { font-family: var(--font); }
   .ag-subtab { flex: 1; text-align: center; }
 }
 
-.bt-clv-warn { margin: 18px 0; border-left-color: var(--amber); }
 
-.sc-honesty { margin-bottom: 20px; }
-.sc-honesty-head { cursor: pointer; list-style: none; }
-.sc-honesty-head::-webkit-details-marker { display: none; }
-.sc-honesty-more { color: var(--blue); white-space: nowrap; font-weight: 500; }
-.sc-honesty[open] .sc-honesty-more { display: none; }
-.sc-honesty-body { margin-top: 10px; }
+
+/* ===========================================================================
+   SCOUT  (.sc-*)
+   A board, not an article. Density over explanation: the case for grading on
+   book quality lives in the column tooltips and in /method, because a trader
+   opening this on a matchday wants the card, not the reasoning.
+   =========================================================================== */
+
+/* ── the tape ── */
+.sc-tape {
+  border-bottom: 1px solid var(--border);
+  background: #08090b;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sc-tape::-webkit-scrollbar { display: none; }
+.sc-tape-inner {
+  max-width: 1240px; margin: 0 auto; padding: 0 20px;
+  display: flex; align-items: center; gap: 26px;
+  height: 34px; white-space: nowrap;
+}
+.sc-tape-cell {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .07em;
+  color: var(--grey2); display: inline-flex; align-items: baseline; gap: 5px;
+}
+.sc-tape-cell b { color: var(--white); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+.sc-tape-cell.is-live b { color: var(--red); }
+.sc-tape-cell.is-good b { color: var(--green); }
+
+/* ── head ── */
+.sc-head { padding: 26px 0 16px; }
+.sc-h1 { font-size: 23px; font-weight: 650; letter-spacing: -.02em; color: var(--white); }
+.sc-h1-sub { margin-top: 4px; font-size: 13px; color: var(--grey); }
+.sc-method-link { color: var(--blue); text-decoration: none; }
+.sc-method-link:hover { text-decoration: underline; }
+
+/* ── controls ── */
+.sc-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border);
+}
+.sc-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.sc-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border2); background: transparent;
+  color: var(--grey); font-family: var(--font); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: all .12s;
+}
+.sc-chip:hover { color: var(--white); border-color: var(--grey2); }
+.sc-chip.is-on { background: var(--white); border-color: var(--white); color: var(--bg); font-weight: 600; }
+.sc-chip-n { font-size: 10px; background: rgba(0,0,0,.14); border-radius: 999px; padding: 0 5px; }
+
+.sc-bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.sc-sort { display: inline-flex; align-items: center; gap: 6px; }
+.sc-sort-key {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--grey2);
+}
+.sc-sort select {
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r-sm);
+  color: var(--white); font-family: var(--font); font-size: 12.5px;
+  padding: 6px 8px; cursor: pointer;
+}
+.sc-search {
+  width: 170px; padding: 6px 11px; border-radius: var(--r-sm);
+  border: 1px solid var(--border2); background: var(--bg2);
+  color: var(--white); font-family: var(--font); font-size: 12.5px;
+}
+.sc-search::placeholder { color: var(--grey2); }
+.sc-search:focus { outline: none; border-color: var(--grey2); }
+
+.sc-error { border-left-color: var(--red); margin: 16px 0; }
+
+/* ── the table ── */
+/* No overflow here on desktop, deliberately. `overflow-x: auto` implies
+   `overflow-y: auto`, which makes this element a scroll container — and a
+   sticky <th> then sticks to the CONTAINER rather than the viewport, so the
+   header row floated over row 1. Horizontal scroll is restored under the
+   breakpoint below, where the header stops being sticky too. */
+.sc-table-wrap { margin-bottom: 40px; }
+.sc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+.sc-table thead th {
+  position: sticky; top: 60px; z-index: 10;
+  background: var(--bg);
+  text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--grey2);
+  padding: 10px 8px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.sc-info { color: var(--grey2); font-size: 9px; cursor: help; }
+
+.sc-table tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+.sc-table tbody tr:hover { background: var(--bg2); }
+.sc-table tbody tr.is-live td:first-child { box-shadow: inset 2px 0 0 var(--red); }
+.sc-table tbody tr.is-done { opacity: .5; }
+.sc-table td { padding: 9px 8px; vertical-align: middle; }
+
+.sc-c-n    { width: 34px; color: var(--grey2); font-size: 11px; }
+.sc-c-star { width: 26px; }
+.sc-c-state, .sc-c-book, .sc-c-vol { white-space: nowrap; }
+.sc-c-odd  { width: 58px; text-align: right; white-space: nowrap; }
+.sc-c-vol  { width: 74px; text-align: right; color: var(--grey); }
+.sc-c-go   { width: 56px; text-align: right; }
+th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
+.sc-c-o25 { border-left: 1px solid var(--border); padding-left: 12px; }
+
+.sc-star {
+  background: none; border: none; cursor: pointer; padding: 0;
+  font-size: 14px; line-height: 1; color: var(--grey2); transition: color .12s;
+}
+.sc-star:hover { color: var(--white); }
+.sc-star.is-on { color: var(--amber); }
+
+.sc-fixture { display: block; text-decoration: none; min-width: 210px; }
+.sc-teams { display: block; color: var(--white); font-weight: 550; font-size: 13.5px; }
+.sc-v { color: var(--grey2); font-weight: 400; }
+.sc-meta { display: flex; gap: 8px; margin-top: 1px; }
+.sc-comp {
+  font-size: 10.5px; color: var(--grey2); letter-spacing: .03em; text-transform: uppercase;
+}
+.sc-mkts { font-size: 10.5px; color: var(--grey2); }
+
+.sc-in { color: var(--grey); font-size: 12px; }
+
+.sc-grade {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border2);
+  color: var(--grey); cursor: help;
+}
+.sc-grade.is-good { color: var(--green); border-color: rgba(34,197,94,.4);  background: rgba(34,197,94,.08); }
+.sc-grade.is-warn { color: var(--amber); border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.08); }
+.sc-grade.is-bad  { color: var(--red);   border-color: rgba(239,68,68,.4);  background: rgba(239,68,68,.08); }
+.sc-grade.is-dim  { color: var(--grey2); }
+.sc-spread { margin-left: 6px; font-size: 11px; color: var(--grey2); cursor: help; }
+.sc-stale { color: var(--grey2); }
+
+.sc-go {
+  font-size: 12px; color: var(--grey); text-decoration: none;
+  padding: 4px 9px; border: 1px solid var(--border2); border-radius: var(--r-sm);
+  transition: all .12s; display: inline-block;
+}
+.sc-table tbody tr:hover .sc-go { color: var(--white); border-color: var(--grey2); }
+
+@media (max-width: 760px) {
+  .sc-tape-inner { height: 30px; gap: 18px; padding: 0 14px; }
+  .sc-head { padding: 20px 0 14px; }
+  .sc-h1 { font-size: 20px; }
+  .sc-bar-right { margin-left: 0; width: 100%; }
+  .sc-search { flex: 1; width: auto; }
+  .sc-table thead th { position: static; }
+  /* No horizontal scroll on a phone. The columns that survive are the ones the
+     row exists for — which fixture, whether it has started, and whether there
+     is a real book behind the quote. The odds ladder is one tap away on the
+     fixture page, and a Book column parked off-screen behind a scroll is the
+     same as no Book column. */
+  .sc-c-odd, .sc-c-vol, .sc-c-go, .sc-c-n { display: none; }
+  .sc-fixture { min-width: 0; }
+  .sc-table { table-layout: auto; }
+  .sc-table td, .sc-table thead th { padding: 9px 4px; }
+  .sc-c-state, .sc-c-book { width: 1%; text-align: right; }
+  th.sc-c-state, th.sc-c-book { text-align: right; }
+  /* The market count and the spread figure are what push the row past the
+     viewport. Both are detail; the grade and the fixture are the row. */
+  .sc-mkts, .sc-spread { display: none; }
+  .sc-comp { font-size: 10px; }
+}
