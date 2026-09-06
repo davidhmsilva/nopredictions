@@ -413,6 +413,21 @@ DISABLED_OUTCOMES: set[str] = (
     else {"over_2.5", "under_2.5", "over_1.5", "under_1.5", "btts"}
 )
 
+# Away longshots — the model's one *measured* structural failure, cut 2026-07-23.
+# Over 63 settled picks at PM odds >= 5.00 the model claimed p=0.248 (15.6 wins)
+# against a market implying 0.115 (7.3 wins). Three landed. That rejects the
+# model's own claim at p=2.6e-5, and it takes 4 extra wins to reach breakeven,
+# so it is not a one-flip artifact. It is corroborated independently by the
+# calibration table, which fails the same way across the whole low-probability
+# region (pred 0.16 -> actual 0.00 at n=19; pred 0.29 -> actual 0.20 at n=214):
+# DC is systematically optimistic about unlikely away outcomes.
+# NOTE: the +3.8% -> +18.5% yield jump from this cut is IN-SAMPLE. The honest
+# claim is "a measured leak is closed", not "the strategy now yields 18%" —
+# whole-strategy CLV is still flat (-1.50%), so this removes a loss, it does not
+# create edge. Override with DC_ENABLE_AWAY_LONGSHOTS=1.
+ENABLE_AWAY_LONGSHOTS = os.environ.get("DC_ENABLE_AWAY_LONGSHOTS") == "1"
+AWAY_LONGSHOT_MAX_PRICE = 0.20  # PM price; 0.20 == 5.00 decimal odds
+
 
 def _classify_market(question: str, home: str, away: str) -> Optional[str]:
     q = question.lower()
@@ -623,6 +638,7 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
         no_bias_trades_logged = []
 
         n_skipped_non_football = 0
+        n_skipped_away_longshot = 0
         for event in events:
             title = event.get("title", "")
             end_date = event.get("endDate", "")
@@ -701,6 +717,11 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
                 if not outcome_key:
                     continue
                 if outcome_key in DISABLED_OUTCOMES:
+                    continue
+                if (outcome_key == "away"
+                        and yes_p <= AWAY_LONGSHOT_MAX_PRICE
+                        and not ENABLE_AWAY_LONGSHOTS):
+                    n_skipped_away_longshot += 1
                     continue
 
                 dc_key = DC_KEY_MAP.get(outcome_key)
@@ -924,6 +945,7 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
         summary = {
             "events_scanned": len(events),
             "non_football_skipped": n_skipped_non_football,
+            "away_longshots_skipped": n_skipped_away_longshot,
             "matches_in_model": n_matched,
             "dc_edges_found": n_edges,
             "dc_trades_logged": len(trades_logged),
@@ -934,6 +956,7 @@ def run(days_ahead: int = DEFAULT_DAYS_AHEAD,
         }
         log.info(
             f"Done — {n_skipped_non_football} non-football skipped | "
+            f"{n_skipped_away_longshot} away longshots skipped | "
             f"{n_matched} matches in model | "
             f"DC: {n_edges} edges, {len(trades_logged)} trades | "
             f"No Bias: {n_no_bias_edges} edges, {len(no_bias_trades_logged)} trades"
