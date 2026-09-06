@@ -19,7 +19,8 @@ set -a; source ../ingest/.env; set +a
 source ../ingest/.venv/bin/activate
 
 while true; do
-  python settled_sweep_observer.py --interval 30 >> settled_sweep_observer.log 2>&1
+  # See pressure_daemon.sh: one writer per counter file, named explicitly.
+  AF_COUNTER_NAME=sweep python settled_sweep_observer.py --interval 30 >> settled_sweep_observer.log 2>&1
   echo "$(date -u +%FT%TZ) observer exited — restarting in 30s" >> settled_sweep_observer.log
   sleep 30
 done

@@ -30,6 +30,8 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+import af_budget
+
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'))
 
 log = logging.getLogger(__name__)
@@ -349,6 +351,10 @@ class LiveMatchTracker:
         # answer was "we did not ask".
         self.enrich_status: dict[int, str] = {}
         self.last_enrich_report: dict[str, int] = {}
+        # Every call this process makes, counted as it is made. Three years of
+        # "is it our quota?" have been argued from log-line proxies; this is the
+        # number itself. See af_budget for why each process writes its own file.
+        self.calls = af_budget.process_counter()
 
     def poll(self, priority=None) -> dict[int, PressureSignals]:
         """
@@ -367,6 +373,7 @@ class LiveMatchTracker:
 
         try:
             # Fetch live fixtures
+            self.calls.record('live')
             resp = requests.get(
                 'https://v3.football.api-sports.io/fixtures',
                 params={'live': 'all'},
@@ -524,8 +531,16 @@ class LiveMatchTracker:
                     continue
                 rank = priority(fid, latest) if priority else 0
                 if rank < 0:
-                    self.enrich_status[fid] = 'not worth a call this cycle'
-                    report['deprioritised'] += 1
+                    # The caller may have written a more specific reason on its
+                    # way to returning -1, and it is the only one that knows the
+                    # difference — "past the last minute we could act on" and
+                    # "inside the window but sampled out to protect the evening
+                    # allowance" are opposite facts about the same missing row.
+                    # Collapsing two reasons into one label is the mistake this
+                    # file has now paid for three times.
+                    named = self.enrich_status.get(fid)
+                    self.enrich_status[fid] = named or 'not worth a call this cycle'
+                    report[named or 'deprioritised'] += 1
                     continue
                 candidates.append((rank, fid, latest))
 
@@ -569,6 +584,13 @@ class LiveMatchTracker:
             self.last_poll_failed = True
             log.error(f'[tracker] Poll error: {e}')
             return {}
+        finally:
+            # In a finally so the REFUSAL path reports too. The last four
+            # blackouts were all diagnosed after the fact from a log that never
+            # said what we had spent when the door closed — which is the one
+            # number that decides whether the allowance was ours to lose.
+            af_budget.log_status(log, self.calls, tag='tracker',
+                                 force=time.time() < self._quota_spent_until)
 
     def league_has_stats(self, league_id: int | None) -> bool | None:
         """Does api-football publish match statistics for this competition?
@@ -585,6 +607,7 @@ class LiveMatchTracker:
 
         answer = None
         try:
+            self.calls.record('leagues')
             resp = requests.get(
                 'https://v3.football.api-sports.io/leagues',
                 params={'id': league_id},
@@ -645,6 +668,7 @@ class LiveMatchTracker:
         what made the remainder undiagnosable.
         """
         try:
+            self.calls.record('stats')
             resp = requests.get(
                 'https://v3.football.api-sports.io/fixtures/statistics',
                 params={'fixture': fid},

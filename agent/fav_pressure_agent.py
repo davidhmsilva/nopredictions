@@ -84,6 +84,7 @@ from late_goals_observer import (                                  # noqa: E402
     ladder_of,
     pm_over25,
 )
+import af_budget
 from live_tracker import LiveMatchTracker, PressureSignals          # noqa: E402
 from pressure_agent import (                                        # noqa: E402
     _no_stats_reason,
@@ -720,6 +721,7 @@ def _halftime_score(fixture_id: int) -> tuple[int, int] | None:
     if not key:
         return None
     try:
+        af_budget.process_counter().record("fixture")
         resp = requests.get(
             "https://v3.football.api-sports.io/fixtures",
             params={"id": fixture_id},

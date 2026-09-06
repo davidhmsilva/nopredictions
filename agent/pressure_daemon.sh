@@ -172,7 +172,11 @@ done
 set -a; source ../ingest/.env; set +a
 source ../ingest/.venv/bin/activate
 while true; do
-  python pressure_agent.py --interval 60 >> pressure_agent.log 2>&1 &
+  # AF_COUNTER_NAME is explicit, not derived. af_budget can work the name out
+  # from argv, but the counter file must have exactly ONE writer and the
+  # --settle cron line is a second process — naming them here is the part
+  # that cannot be surprised by how a launcher happens to set argv[0].
+  AF_COUNTER_NAME=pressure python pressure_agent.py --interval 60 >> pressure_agent.log 2>&1 &
   AGENT_PID=$!
   wait "$AGENT_PID"
   log "pressure agent exited — restarting in 30s"

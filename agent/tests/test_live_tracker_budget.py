@@ -103,6 +103,27 @@ def test_negative_priority_is_never_called(tracker, monkeypatch):
     assert tracker.last_enrich_report.get("deprioritised") == 20
 
 
+def test_a_caller_supplied_reason_survives_the_default(tracker, monkeypatch):
+    """"Past the last minute we could act on" and "inside the window but sampled
+    out to protect the evening allowance" are opposite facts about the same
+    missing row. Only the caller knows which, so the tracker must not overwrite
+    it with the generic label — that collapse is the mistake this file has
+    already paid for three times."""
+    calls = []
+    _install(monkeypatch, 3, FakeResp(_stats_payload()), calls)
+
+    def priority(fid, snap):
+        tracker.enrich_status[fid] = "research sampled out (daytime budget)"
+        return -1
+
+    tracker.poll(priority=priority)
+    assert calls == []
+    assert tracker.last_enrich_report.get("research sampled out (daytime budget)") == 3
+    assert "deprioritised" not in tracker.last_enrich_report
+    assert all(v == "research sampled out (daytime budget)"
+               for v in tracker.enrich_status.values())
+
+
 def test_ttl_prevents_refetch(tracker, monkeypatch):
     """Stats do not move fast enough to justify a call every 60s."""
     calls = []

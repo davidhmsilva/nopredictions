@@ -86,6 +86,8 @@ logging.basicConfig(level=logging.INFO, force=True,
                     format="%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("sweep")
 
+import af_budget
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY", "")
 AF_BASE = "https://v3.football.api-sports.io/fixtures"
@@ -99,6 +101,21 @@ REFRESH_MARKETS_S = 300         # PM opens live boards whenever it likes
 # enough to cover a delayed resolution, short enough that a fixture whose feed
 # died does not sit in the pending-final queue forever.
 KEEP_AFTER_LIVE_S = 3 * 3600
+# How often a fixture that has dropped off the live feed is re-asked about.
+#
+# It used to be EVERY cycle for the full three hours, with no per-fixture
+# throttle at all: on a Saturday with 564 fixtures live, the tail of matches
+# waiting to report a terminal status is re-queried twice a minute in batches of
+# twenty, for hours, long after anything can change. That is the largest
+# uncontrolled call class in this repo and it runs hardest in the afternoon —
+# which is how the day's allowance was gone by 16:11 UTC on 2026-09-05, one hour
+# into the evening window these observations are actually for.
+#
+# The fix keeps the part the thesis depends on and drops the part that cannot
+# pay: the post-whistle window is minutes wide, so a fixture that has just left
+# the feed is still checked every cycle. Only the long tail backs off.
+PENDING_FRESH_S = 15 * 60       # just off the feed: check every cycle
+PENDING_SLOW_S = 5 * 60         # after that: at most once per this interval
 # One row per token per this interval, unless the ask moved. Without it a
 # fixture with 30 settled markets writes 3,600 rows an hour saying the same thing.
 RECORD_TTL_S = 180
@@ -185,11 +202,20 @@ def _parse_af(f: dict) -> dict | None:
 _AF_REFUSED: str | None = None
 
 
+# This process's share of the one api-football key. Counted at the call site so
+# the daily total is a fact rather than something reconstructed from a log.
+# The name picks the file, and af_budget's lockless write assumes exactly one
+# live process per name — so a manual --once run must not share it with the
+# daemon. AF_COUNTER_NAME is how you keep them apart.
+_CALLS = af_budget.process_counter()
+
+
 def _af_get(params: dict) -> list[dict]:
     global _AF_REFUSED
     if not FOOTBALL_API_KEY:
         _AF_REFUSED = "no FOOTBALL_API_KEY"
         return []
+    _CALLS.record("live" if params.get("live") else "ids")
     try:
         resp = requests.get(AF_BASE, params=params,
                             headers={"x-apisports-key": FOOTBALL_API_KEY}, timeout=15)
@@ -225,6 +251,11 @@ class FixtureFeed:
     last_live: dict[int, float] = field(default_factory=dict)
     final: set[int] = field(default_factory=set)
     poll_failed: bool = False
+    # When each pending fixture was last asked about, so the tail can back off
+    # without the fresh whistle window losing a single cycle.
+    last_checked: dict[int, float] = field(default_factory=dict)
+    pending_asked: int = 0
+    pending_held: int = 0
 
     def poll(self) -> dict[int, dict]:
         now = time.time()
@@ -241,9 +272,18 @@ class FixtureFeed:
 
         # Fixtures we watched live that are no longer on the live feed and have
         # not yet reported a terminal status.
-        pending = [fid for fid, ts in self.last_live.items()
-                   if fid not in seen and fid not in self.final
-                   and now - ts <= KEEP_AFTER_LIVE_S]
+        pending, held = [], 0
+        for fid, ts in self.last_live.items():
+            if fid in seen or fid in self.final or now - ts > KEEP_AFTER_LIVE_S:
+                continue
+            fresh = (now - ts) <= PENDING_FRESH_S
+            if not fresh and now - self.last_checked.get(fid, 0) < PENDING_SLOW_S:
+                held += 1
+                continue
+            pending.append(fid)
+        self.pending_asked, self.pending_held = len(pending), held
+        for fid in pending:
+            self.last_checked[fid] = now
         for i in range(0, len(pending), 20):
             for raw in _af_get({"ids": "-".join(str(f) for f in pending[i:i + 20])}):
                 rec = _parse_af(raw)
@@ -257,6 +297,7 @@ class FixtureFeed:
             if now - ts > KEEP_AFTER_LIVE_S:
                 self.last_live.pop(fid, None)
                 self.state.pop(fid, None)
+                self.last_checked.pop(fid, None)
                 self.final.discard(fid)
         return self.state
 
@@ -491,11 +532,13 @@ def cycle(conn, pm_fixtures: list[dict], feed: FixtureFeed, seen: Seen,
           dry_run: bool = False) -> dict:
     now = time.time()
     state = feed.poll()
+    af_budget.log_status(log, _CALLS, tag="sweep", force=feed.poll_failed)
     if feed.poll_failed:
         # Loud, and no rows. A refused feed must never look like a quiet evening
         # with no football on, and it must never let a row be written from a
         # score we did not actually read.
-        log.error(f"api-football REFUSED — recording nothing this cycle: {_AF_REFUSED}")
+        log.error(f"api-football REFUSED — recording nothing this cycle: {_AF_REFUSED} "
+                  f"| pending asked={feed.pending_asked} held={feed.pending_held}")
         return {"live_fixtures": 0, "pm_fixtures": len(pm_fixtures), "determined": 0,
                 "booked": 0, "rows": 0, "no_book": 0, "would_enter": 0,
                 "af_refused": 1}

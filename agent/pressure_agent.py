@@ -81,6 +81,7 @@ from late_goals_observer import (                                   # noqa: E402
     ladder_of,
     pm_over25,
 )
+import af_budget
 from live_tracker import (                                          # noqa: E402
     DAILY_EXHAUSTED,
     PRESSURE_WINDOW_MIN,
@@ -393,12 +394,27 @@ def _enrich_priority(tracker: LiveMatchTracker, pm_fixtures: list[dict]):
         baseline built shortly before that.
 
     A fixture PM does not list can never be traded, and used to be refused a call
-    outright. It is now ranked LAST rather than skipped: 87% of the live fixtures
-    we see are unlisted (715 of 822 over three days), the pressure model can only
+    outright. It is ranked LAST rather than skipped: 87% of the live fixtures we
+    see are unlisted (715 of 822 over three days), the pressure model can only
     ever be fitted on data recorded forward, and an unlisted 0-0 teaches that fit
-    exactly as much as a listed one. They only ever get calls the tradeable
-    fixtures did not want — measured usage is under one stats call per cycle
-    against a budget of 40 — so this cannot displace a decision.
+    exactly as much as a listed one.
+
+    ⚠️ The old claim here — "they only ever get calls the tradeable fixtures did
+    not want, measured usage is under one stats call per cycle against a budget
+    of 40" — was measured on 2026-08-19 and is no longer true. The budget is
+    still never exhausted (a busy Saturday cycle spends ~7 of 40, throttled by
+    ENRICH_TTL_S, not by the budget), but the DAY is: on 2026-09-05 the
+    allowance ran out at 16:11 UTC, one hour into the only window whose boards
+    we can trade, and 89% of everything recorded that day was unlisted
+    (39,974 fixture-minutes against 4,711, 712 fixtures against 78). Research
+    was not displacing a decision inside a cycle. It was displacing the whole
+    evening.
+
+    So before the evening window opens, research is SAMPLED — deterministically
+    on the fixture id, so a match we follow is followed all the way through and
+    its rolling windows stay intact. After it opens, everything is served again.
+    A fixture sampled out is recorded as such (`skip_reason`), never as
+    "no coverage".
     """
     import ht_pressure_agent as ht      # local: ht imports this module at its top
 
@@ -409,7 +425,12 @@ def _enrich_priority(tracker: LiveMatchTracker, pm_fixtures: list[dict]):
             # Below every tradeable rank, above nothing at all. Kept inside the
             # first half, where all three arms' questions live; a 70th minute we
             # can never act on is not worth a paid call.
-            return 10 - minute / 100.0 if minute <= ht.OBSERVE_MAX_MINUTE else -1
+            if minute > ht.OBSERVE_MAX_MINUTE:
+                return -1
+            if not af_budget.research_allowed(fid, tracker.calls):
+                tracker.enrich_status[fid] = _RESEARCH_SAMPLED
+                return -1
+            return 10 - minute / 100.0
         if ht.FIRST15_MIN - 3 <= minute <= ht.ENTRY_MAX_MINUTE:
             return 400 - minute          # the first-half window, unrepeatable
         if minute >= ENTRY_MIN_MINUTE - 5:
@@ -423,8 +444,16 @@ def _enrich_priority(tracker: LiveMatchTracker, pm_fixtures: list[dict]):
     return rank
 
 
+# Written by _enrich_priority and read back by _no_stats_reason. A fixture we
+# chose not to pay for in order to keep the evening allowance is not a fixture
+# api-football would not answer about, and the row has to be able to say so.
+_RESEARCH_SAMPLED = "research sampled out (daytime budget)"
+
+
 def _no_stats_reason(status: str) -> str:
     """Say which of the two very different failures actually happened."""
+    if status == _RESEARCH_SAMPLED:
+        return "stats not fetched: research sampled out (daytime budget)"
     if status in ("empty", "league proven uncovered"):
         return "no api-football stats coverage"
     # Two refusals that used to share one label, and mean opposite things about
@@ -795,6 +824,7 @@ def _goal_minute_api(fixture_id: int, after_minute: int) -> int | None:
     if not key:
         return None
     try:
+        af_budget.process_counter().record("events")
         resp = requests.get(
             "https://v3.football.api-sports.io/fixtures/events",
             params={"fixture": fixture_id, "type": "Goal"},
@@ -842,6 +872,7 @@ def _final_goals_api(fixture_ids: list[int]) -> dict[int, int]:
     for i in range(0, len(fixture_ids), 20):
         batch = fixture_ids[i:i + 20]
         try:
+            af_budget.process_counter().record("ids")
             resp = requests.get(
                 "https://v3.football.api-sports.io/fixtures",
                 params={"ids": "-".join(str(f) for f in batch)},
