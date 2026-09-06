@@ -1,0 +1,80 @@
+# NOPREDICTIONS cron jobs (updated 2026-05-24)
+# All use absolute Python path to avoid macOS permission issues with venv activate
+
+PYTHON=/Users/davidsilva/Documents/agente/ingest/.venv/bin/python
+WORKDIR=/Users/davidsilva/Documents/agente
+
+# ─── PRE-MATCH EDGE SCANS (paper_trader + DC scanner) ──────────────────────
+
+# Morning scan: 07:00 UTC (08:00 Lisboa) — overnight + early matches
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --daily 07:00 paper_morning sh -c "cd $WORKDIR && $PYTHON -m agent.paper_trader >> /tmp/nopredictions_morning.log 2>&1"
+
+# Midday scan: 10:00 UTC — afternoon/evening European matches
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --daily 10:00 paper_midday sh -c "cd $WORKDIR && $PYTHON -m agent.paper_trader >> /tmp/nopredictions_midday.log 2>&1"
+
+# DC scanner: daily at 08:00 UTC — scans PM next 3 days
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --daily 08:00 dc_scanner sh -c "cd $WORKDIR && $PYTHON agent/dc_scanner.py >> $WORKDIR/agent/dc_scanner.log 2>&1"
+
+# Sim Model Pre-Match scanner: daily at 08:00 UTC — MC sim across 5 market groups per match
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --daily 08:00 sim_scanner sh -c "cd $WORKDIR && $PYTHON agent/sim_scanner.py >> $WORKDIR/agent/sim_scanner.log 2>&1"
+
+# ─── CLOSING ODDS COLLECTOR (Pinnacle via api-football) ───────────────────
+
+# Capture Pinnacle closing odds ~5 min before typical kickoff blocks
+# Weekdays: 11:55, 13:55, 17:55, 19:55 UTC (lunch + evening European fixtures)
+*/30 * * * * cd $WORKDIR && $PYTHON agent/closing_collector.py >> $WORKDIR/agent/closing_collector.log 2>&1
+# ─── OBSERVATION LAYER (model vs PM price time series, no trades) ──────────
+*/30 * * * * cd $WORKDIR && $PYTHON agent/observer.py >> $WORKDIR/agent/observer.log 2>&1
+# in-play observation: denser cadence to catch fast live moves
+*/10 * * * * cd $WORKDIR && $PYTHON agent/observer.py --live >> $WORKDIR/agent/observer.log 2>&1
+
+# Weekends: 11:55, 13:55, 15:55, 17:55, 19:55 UTC (full day coverage)
+
+# ─── IN-PLAY POISSON DAEMON V4 (continuous, 24/7) ─────────────────────────
+# Continuous polling every 10 min. Hourly cron + lockfile = crash recovery in ≤1h.
+*/10 * * * * $WORKDIR/agent/inplay_daemon.sh
+
+# ─── PM ON-CHAIN POSITION SYNC ────────────────────────────────────────────
+
+# Every 15 min — reconcile paper_trades with on-chain CTF balances + ingest manual bets
+*/15 * * * * cd $WORKDIR && $PYTHON agent/pm_chain_sync.py >> $WORKDIR/agent/pm_chain_sync.log 2>&1
+
+# ─── DAILY TASKS ──────────────────────────────────────────────────────────
+
+# Daily diary: end-of-day summary at 23:30 UTC
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --daily 23:30 diary sh -c "cd $WORKDIR && $PYTHON agent/daily_diary.py >> /tmp/nopredictions_diary.log 2>&1"
+
+# Cron health check: keep systemd alive
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --daily 02:18 alive /usr/bin/touch /tmp/nopredictions_cron_alive
+
+# In-play CONVERGENCE daemon (shadow) — added 2026-06-04, same windows as inplay_daemon
+*/10 17-21 * * 1-5 $WORKDIR/agent/convergence_daemon.sh
+*/10 12-20 * * 0,6 $WORKDIR/agent/convergence_daemon.sh
+
+# ─── PRE-MATCH DRIFT (NO on longshots, exit at +20% before kickoff) ─────────
+# Scanner: 08:00 + 12:00 UTC — catch new markets as they open
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 300 drift_scanner sh -c "cd $WORKDIR && $PYTHON agent/drift_scanner.py >> $WORKDIR/agent/drift_scanner.log 2>&1"
+# Monitor: every 15 min — check prices, exit at target/stop/kickoff
+*/15 * * * * cd /Users/davidsilva/Documents/agente && /Users/davidsilva/Documents/agente/ingest/.venv/bin/python agent/drift_monitor.py >> /Users/davidsilva/Documents/agente/agent/drift_monitor.log 2>&1
+
+
+# WC In-Play Overs B1 — SHADOW — 2026-06-19 USA-AUS (19:00) + SCO-MAR (22:00)
+# REMOVE this line after 2026-06-19 ~00:30 UTC
+# EXPIRED (WC 2026 window, ended 2026-07-19) — fires EVERY MINUTE when active
+#* * 11-31 6 * cd $WORKDIR && $PYTHON agent/wc_overs_live.py --once >> $WORKDIR/agent/wc_overs.log 2>&1
+# EXPIRED (WC 2026 window, ended 2026-07-19) — fires EVERY MINUTE when active
+#* * 1-19 7 * cd $WORKDIR && $PYTHON agent/wc_overs_live.py --once >> $WORKDIR/agent/wc_overs.log 2>&1
+# FLB: */10 + a 110min guard inside the wrapper, because macOS cron skips
+# jobs missed while asleep and this Mac sleeps ~85% of the day (see flb_daemon.sh)
+# DISABLED 2026-07-28 — FLB closed as DEAD at n=1,108 (-7.5% after costs,
+# CI excludes zero the wrong way). Scanner kept writing paper rows and
+# polluting paper_trades. Re-enable only if the thesis is revived.
+#*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 110 flb $WORKDIR/agent/flb_daemon.sh
+
+# ─── OVER LATE GOALS — observation only, never places an order ─────────────
+# Forever daemon; the wrapper is a singleton so this hourly line only self-heals.
+*/10 * * * * $WORKDIR/agent/late_goals_daemon.sh
+# Backfill outcomes on watched over lines
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 110 late_goals_settle sh -c "cd $WORKDIR/agent && set -a && . $WORKDIR/ingest/.env && set +a && $PYTHON late_goals_observer.py --settle >> $WORKDIR/agent/late_goals_observer.log 2>&1"
+*/10 * * * * $WORKDIR/agent/pressure_daemon.sh
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 110 pressure_settle sh -c "cd $WORKDIR/agent && set -a && . $WORKDIR/ingest/.env && set +a && $PYTHON pressure_agent.py --settle >> $WORKDIR/agent/pressure_agent.log 2>&1"

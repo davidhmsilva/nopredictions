@@ -107,9 +107,9 @@ What actually makes this different:
 • Every position timestamped BEFORE it resolves
 
 **13/**
-The question was never "can an AI pick winners."
+It was never "can an AI pick winners."
 
-It's whether the scientific method — run by something that never gets bored or falls for its own ideas — finds real edge in the market everyone's watching.
+It's whether the scientific method — run by something that never gets bored or falls for its own ideas — finds real edge in the market everyone watches.
 
 Maybe not. We publish that too.
 
@@ -152,6 +152,6 @@ Everyone's building tipster bots.
 
 We built an AI agent with no opinion on who wins — only on whether the price is wrong.
 
-147k matches. Our own line before we look at the market. Zero LLM in the trading loop. Every position timestamped before it resolves.
+147k matches. Our line first, before the market's. No LLM in the trading loop. Every position timestamped before it resolves.
 
 No predictions. Just edges.

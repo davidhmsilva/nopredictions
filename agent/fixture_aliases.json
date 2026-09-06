@@ -3,6 +3,7 @@
  "aliases": {
   "AA Argentinos Juniors": "argentinos jrs",
   "AD Tarma": "ADT",
+  "AE Kifisiás": "kifisia",
   "Aalesunds FK": "aalesund",
   "Accrington Stanley FC": "Accrington ST",
   "Al Bukiryah Club": "Al Bukayriyah",
@@ -26,23 +27,31 @@
   "Dalian Yingbo FC": "dalian zhixing",
   "Dinamo 1948": "dinamo bucuresti",
   "Estudiantes de La Plata": "Estudiantes L.P.",
+  "FC Andijon": "andijan",
+  "FC Dinamo City": "dinamo tirana",
   "FC København": "fc copenhagen",
   "FC Mito Holly Hock": "Mito Hollyhock",
+  "FK Austria Wien": "austria vienna",
   "FK Dinamo Moskva": "dynamo",
   "FK Epitsentr Dunaivtsi": "epitsentr dunayivtsi",
   "FK Kryvbas Kryvyi Rih": "kryvbas kr",
   "FK Obolon Kyiv": "obolon brovar",
   "FK Polissia": "polessya",
   "FK Spartak Moskva": "spartak moscow",
+  "GS Níki Vólou": "niki volos",
   "Gimnasia y Esgrima de La Plata": "Gimnasia L.P.",
+  "KF Víkingur": "vikingur reykjavik",
+  "Kuopion PS": "kups",
   "Operário Ferroviário EC": "operario pr",
   "PFK CSKA Moskva": "cska moscow",
+  "Panaitolikós GFS": "panetolikos",
   "Pumas de la UNAM": "u n a m pumas",
   "Qingdao Hainiu": "Qingdao Jonoon",
   "Qingdao Xihaian": "Qingdao Youth Island",
   "Queens Park Rangers FC": "qpr",
   "Real Racing Club": "racing santander",
   "Red Bull Bragantino": "rb bragantino",
+  "SK Rapid Wien": "rapid vienna",
   "Shandong Taishan": "Shandong Luneng",
   "Shanghai Haigang": "SHANGHAI SIPG",
   "Stade Lavallois Mayenne FC": "laval",
@@ -184,12 +193,26 @@
    "league": "King's Cup",
    "learned_at": "2026-08-14"
   },
+  "andijan": {
+   "evidence": [
+    "PFK Mash AL Mubarek vs. FC Andijon ~ Mash'al vs Andijan"
+   ],
+   "league": "Super League",
+   "learned_at": "2026-08-19"
+  },
   "argentinos jrs": {
    "evidence": [
     "CA River Plate vs. AA Argentinos Juniors ~ River Plate vs Argentinos JRS"
    ],
    "league": "Liga Profesional Argentina",
    "learned_at": "2026-08-14"
+  },
+  "austria vienna": {
+   "evidence": [
+    "SC Braga vs. FK Austria Wien ~ SC Braga vs Austria Vienna"
+   ],
+   "league": "UEFA Europa Conference League",
+   "learned_at": "2026-08-20"
   },
   "bayern munchen": {
    "evidence": [
@@ -233,6 +256,13 @@
    "league": "Liga I",
    "learned_at": "2026-08-14"
   },
+  "dinamo tirana": {
+   "evidence": [
+    "FC Dinamo City vs. Páfos FC ~ Dinamo Tirana vs Pafos"
+   ],
+   "league": "UEFA Europa Conference League",
+   "learned_at": "2026-08-20"
+  },
   "dynamo": {
    "evidence": [
     "FK Zenit vs. FK Dinamo Moskva ~ Zenit vs Dynamo"
@@ -268,12 +298,26 @@
    "league": "Primera A",
    "learned_at": "2026-08-14"
   },
+  "kifisia": {
+   "evidence": [
+    "APS Zákynthos vs. AE Kifisiás ~ Zakynthos vs Kifisia"
+   ],
+   "league": "Cup",
+   "learned_at": "2026-08-19"
+  },
   "kryvbas kr": {
    "evidence": [
     "FK Kryvbas Kryvyi Rih vs. FK Livyi Bereh ~ Kryvbas KR vs Livyi Bereh"
    ],
    "league": "Premier League",
    "learned_at": "2026-08-14"
+  },
+  "kups": {
+   "evidence": [
+    "Shamrock Rovers FC vs. Kuopion PS ~ Shamrock Rovers vs KuPS"
+   ],
+   "league": "UEFA Europa Conference League",
+   "learned_at": "2026-08-20"
   },
   "laval": {
    "evidence": [
@@ -296,6 +340,13 @@
    "league": "Liga Profesional Argentina",
    "learned_at": "2026-08-14"
   },
+  "niki volos": {
+   "evidence": [
+    "GS Níki Vólou vs. Paniónios GSS ~ Niki Volos vs Panionios"
+   ],
+   "league": "Cup",
+   "learned_at": "2026-08-19"
+  },
   "obolon brovar": {
    "evidence": [
     "FK Kudrivka vs. FK Obolon Kyiv ~ Kudrivka vs Obolon'-Brovar"
@@ -309,6 +360,13 @@
    ],
    "league": "Serie B",
    "learned_at": "2026-08-14"
+  },
+  "panetolikos": {
+   "evidence": [
+    "PS Kalamáta vs. Panaitolikós GFS ~ Kalamata vs Panetolikos"
+   ],
+   "league": "Cup",
+   "learned_at": "2026-08-19"
   },
   "polessya": {
    "evidence": [
@@ -330,6 +388,13 @@
    ],
    "league": "La Liga",
    "learned_at": "2026-08-14"
+  },
+  "rapid vienna": {
+   "evidence": [
+    "Heart of Midlothian FC vs. SK Rapid Wien ~ Heart Of Midlothian vs Rapid Vienna"
+   ],
+   "league": "UEFA Europa Conference League",
+   "learned_at": "2026-08-20"
   },
   "rb bragantino": {
    "evidence": [
@@ -379,6 +444,13 @@
    ],
    "league": "K League 1",
    "learned_at": "2026-08-14"
+  },
+  "vikingur reykjavik": {
+   "evidence": [
+    "KF Víkingur vs. FK Borac Banja Luka ~ Vikingur Reykjavik vs Borac Banja Luka"
+   ],
+   "league": "UEFA Europa Conference League",
+   "learned_at": "2026-08-20"
   },
   "wolves": {
    "evidence": [

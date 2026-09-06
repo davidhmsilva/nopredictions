@@ -76,7 +76,7 @@ def generate_seasons(start_year: int, end_year_exclusive: int) -> list:
     return [f'{y}-{str(y + 1)[-2:]}' for y in range(start_year, end_year_exclusive)]
 
 
-DEFAULT_SEASONS = generate_seasons(2010, 2026)
+DEFAULT_SEASONS = generate_seasons(2010, 2027)  # ends at 2026-27 (live season)
 
 
 def season_to_fd_code(season: str) -> str:
@@ -140,10 +140,34 @@ def download_csv(fd_league_code: str, season: str, cache_dir: Path | None):
         log.warning(f'failed to download {url}: {e}')
         return None
 
+    # Football-Data.co.uk runs Apache mod_negotiation: when a season/league file
+    # does not exist yet it does NOT 404 — it returns a "300 Multiple Choices"
+    # HTML page, or silently serves a *different* league whose filename is close
+    # enough (2627/E0.csv -> EC.csv, 2627/SP1.csv -> P1.csv). Both were observed
+    # on 2026-08-15 and the second one silently filed Conference results as
+    # Premier League. Validate the payload before it is cached or parsed.
+    head = resp.content[:512].lstrip().lower()
+    if head.startswith(b'<!doctype') or head.startswith(b'<html'):
+        log.warning(f'{url}: server returned HTML, not a CSV (file not published yet)')
+        return None
+
+    df = read_fd_csv(BytesIO(resp.content))
+    if df is None or df.empty:
+        return df
+
+    if 'Div' in df.columns:
+        divs = set(df['Div'].dropna().astype(str).str.strip().unique())
+        if divs and fd_league_code not in divs:
+            log.warning(
+                f'{url}: Div column says {sorted(divs)} but {fd_league_code} was '
+                f'requested — content negotiation served the wrong league, skipping'
+            )
+            return None
+
     if cache_dir is not None:
         cache_file.write_bytes(resp.content)
 
-    return read_fd_csv(BytesIO(resp.content))
+    return df
 
 
 def read_fd_csv(source):
