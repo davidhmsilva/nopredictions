@@ -163,9 +163,19 @@ const COMPS_SHOWN = 9
 function LiveState({ f }: { f: ScoutFixture }) {
   if (f.finished) return <span className="np-badge">FT</span>
 
-  if (f.liveSource === 'feed') {
+  // Polymarket's own reading and ESPN's look identical on the card, because to
+  // a reader they are the same claim: it is in play and this is the minute.
+  // Which one said so lives in the tooltip, where it belongs.
+  if (f.liveSource === 'pm' || f.liveSource === 'feed') {
     return (
-      <span className="np-badge is-live" title="Live feed: in play right now.">
+      <span
+        className="np-badge is-live"
+        title={
+          f.liveSource === 'pm'
+            ? "Polymarket's own live data for this event — the same clock its page shows."
+            : 'ESPN live feed. Polymarket has not tagged this fixture as live.'
+        }
+      >
         ● {f.minute != null ? <span className="np-num">{f.minute}&apos;</span> : 'LIVE'}
       </span>
     )

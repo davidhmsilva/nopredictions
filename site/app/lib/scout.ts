@@ -199,6 +199,42 @@ function competitionOf(ev: Raw): string | null {
   return pool.sort((a, b) => b.length - a.length)[0]
 }
 
+/** Polymarket's own live block, present on the LIST response and not just on a
+ *  single-event query: `live`, `score` ("0-1"), `period` ("1H"/"2H"/"FT"/"VFT")
+ *  and `elapsed` ("90").
+ *
+ *  This was here the whole time and the board was inferring liveness from
+ *  resolved markets instead — Portland Thorns read as `board` with no clock
+ *  while the same payload said 2H, 59', 1-0. */
+interface PmLive {
+  live: boolean
+  finished: boolean
+  minute: number | null
+  score: { home: number; away: number } | null
+}
+
+function pmLiveOf(ev: Raw): PmLive | null {
+  if (!('live' in ev) && !('period' in ev)) return null
+
+  const period = str(ev.period).toUpperCase()
+  // VFT is "verified full time"; FT is the whistle before verification. Both
+  // are over.
+  const finished = ev.ended === true || period === 'FT' || period === 'VFT'
+  const live = ev.live === true && !finished
+
+  const raw = str(ev.score)
+  const m = raw.match(/^(\d+)\s*-\s*(\d+)$/)
+  const score = m ? { home: parseInt(m[1], 10), away: parseInt(m[2], 10) } : null
+
+  const elapsed = parseInt(str(ev.elapsed), 10)
+  return {
+    live,
+    finished,
+    minute: live && Number.isFinite(elapsed) && elapsed > 0 ? elapsed : null,
+    score,
+  }
+}
+
 function kickoffOf(ev: Raw): string | null {
   const t = str(ev.startTime).trim()
   return t || null
@@ -356,8 +392,11 @@ const MATCH_WINDOW_MS = 2.5 * 3600_000
 
 /** How a live reading was arrived at.
  *
- *  `feed`  — ESPN says it is in play, and gives the minute and the score. The
- *  strongest reading and the only one that can produce a clock.
+ *  `pm`    — Polymarket's own event says so, and carries the score, the half
+ *  and the minute. Strongest by a distance: it is the same event the board comes
+ *  from, so it needs no name matching and no second request, and it is exactly
+ *  what Polymarket's own page shows the trader.
+ *  `feed`  — ESPN, for the fixtures Polymarket has not tagged.
  *  `board` — a market on this fixture has resolved, so the match has certainly
  *  started. This is the only moment a Polymarket board timestamps for free.
  *  `clock` — the listed kick-off has passed and nothing else knows anything.
@@ -366,7 +405,7 @@ const MATCH_WINDOW_MS = 2.5 * 3600_000
  *  late on Sevilla v Rayo. The card says which, because those are different
  *  claims — and since the feed landed, `clock` is what is left over rather than
  *  the usual answer. */
-export type LiveSource = 'feed' | 'board' | 'clock'
+export type LiveSource = 'pm' | 'feed' | 'board' | 'clock'
 
 function pastKickoff(kickoff: string | null): number | null {
   if (!kickoff) return null
@@ -548,18 +587,23 @@ export function buildFixtures(
 
     const kickoff = kickoffOf(canonical)
 
-    // The feed outranks everything: it is the only source that can say a match
-    // is in play at minute 23 with nothing yet resolved, which is most of a
-    // first half. `KICKED OFF?` used to be the answer for all of those.
-    const feed = espn.length ? matchEspn(teams.home, teams.away, espn) : null
+    // Polymarket first: same event, no name matching, no extra request, and it
+    // is what the trader sees on Polymarket's own page. Any sibling can carry
+    // the block, so the first one that does wins — the canonical event is not
+    // always the one they tag.
+    const pm = siblings.map(pmLiveOf).find((x) => x !== null) ?? null
+    // ESPN second, for fixtures Polymarket has not tagged at all.
+    const feed = !pm && espn.length ? matchEspn(teams.home, teams.away, espn) : null
     const feedLive = feed != null && !feed.finished
 
-    const finished = feed?.finished ?? boardFinished(markets, kickoff)
+    const finished = pm?.finished ?? feed?.finished ?? boardFinished(markets, kickoff)
     const liveSource: LiveSource | null = finished
       ? null
-      : feedLive
-        ? 'feed'
-        : liveSourceOf(markets, kickoff)
+      : pm?.live
+        ? 'pm'
+        : feedLive
+          ? 'feed'
+          : liveSourceOf(markets, kickoff)
 
     fixtures.push({
       slug,
@@ -569,8 +613,8 @@ export function buildFixtures(
       kickoff,
       live: liveSource != null,
       liveSource,
-      minute: feedLive ? feed!.minute : null,
-      score: feed ? { home: feed.homeGoals, away: feed.awayGoals } : null,
+      minute: pm?.live ? pm.minute : feedLive ? feed!.minute : null,
+      score: pm?.score ?? (feed ? { home: feed.homeGoals, away: feed.awayGoals } : null),
       finished,
       markets: markets.length,
       volumeUsd,
