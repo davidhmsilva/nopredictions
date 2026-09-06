@@ -106,6 +106,52 @@ function EquityCurve({ monthly }: { monthly: MonthRow[] }) {
   )
 }
 
+// ── what a test gives you ────────────────────────────────────────────────────
+//
+// Shown in place of the empty terminal. A first-time visitor has no idea what
+// "backtest" buys them, and the honest answer — a number, an interval, and a
+// verdict that is usually no — is more convincing than a promise.
+
+const DATA_FACTS: { v: string; k: string }[] = [
+  { v: '111,475', k: 'real games' },
+  { v: '22', k: 'football leagues + NBA' },
+  { v: '2012–2026', k: 'seasons covered' },
+  { v: 'Pinnacle', k: 'closing odds' },
+]
+
+const OUTPUT_FACTS: { k: string; v: string }[] = [
+  { k: 'Selections', v: 'How many bets your theory would actually have made. Under 200 and there is no verdict.' },
+  { k: 'Yield ± 95% CI', v: 'Profit per unit staked, with the interval. The interval is the part that decides it.' },
+  { k: 'p-value', v: 'The odds a result this good came from luck alone.' },
+  { k: 'CLV', v: 'Whether the price moved your way after you bet. Positive yield without it is usually luck.' },
+  { k: 'Equity curve', v: 'The run of it — including the drawdown you would have had to sit through.' },
+]
+
+function WhatYouGet() {
+  return (
+    <section className="bt-explain">
+      <div className="bt-facts">
+        {DATA_FACTS.map((f) => (
+          <div key={f.k} className="bt-fact">
+            <span className="bt-fact-v np-num">{f.v}</span>
+            <span className="bt-fact-k">{f.k}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="bt-explain-head">What comes back</div>
+      <dl className="bt-out">
+        {OUTPUT_FACTS.map((o) => (
+          <div key={o.k} className="bt-out-row">
+            <dt>{o.k}</dt>
+            <dd>{o.v}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
 type Phase = 'idle' | 'running' | 'done'
@@ -197,42 +243,14 @@ export default function LabPage() {
     <AppShell>
       <div className="np-wrap bt-wrap">
         <div className="np-page-head">
-          <div className="np-eyebrow">Lab · Hypothesis tester</div>
-          <h1 className="np-h1">Write a theory. Find out if it pays.</h1>
+          <div className="np-eyebrow">Lab</div>
+          <h1 className="np-h1">You have a theory. Find out if it pays.</h1>
           <p className="np-page-sub">
-            Say it in plain English. It is replayed over 111,475 real games against the
-            closing odds that existed at the time — and you get the answer even when the
-            answer is no, which it usually is.
+            Write it the way you would say it out loud. We replay it over every game we
+            have and tell you what it would have made — including when the answer is
+            nothing, which it usually is.
           </p>
         </div>
-        <div className="lp-term bt-term">
-          <div className="lp-term-head">
-            <span className="lp-term-dot" />
-            <span className="lp-term-dot" />
-            <span className="lp-term-dot" />
-            <span className="lp-term-title">NOPREDICTIONS AGENT — HYPOTHESIS TESTER</span>
-          </div>
-          <div className="lp-term-body bt-term-body">
-            {termLines.length === 0 && (
-              <div className="lp-term-line lp-term-dim">
-                Type a football or NBA betting theory in plain English. The agent backtests it
-                against 111,475 real games — 101,469 football matches (2012-2026, Pinnacle
-                closing odds) and 10,006 NBA games (2014-15 to 2021-22) — and tells you the truth.
-              </div>
-            )}
-            {termLines.map((l, i) => (
-              <div key={i} className={`lp-term-line ${l.cls}`}>
-                {l.text}
-              </div>
-            ))}
-            {phase === 'running' && (
-              <div className="lp-term-line lp-term-cmd">
-                <span className="lp-term-cursor" />
-              </div>
-            )}
-          </div>
-        </div>
-
         <form className="bt-form" onSubmit={handleSubmit}>
           <input
             className="lp-input bt-input"
@@ -264,6 +282,36 @@ export default function LabPage() {
             </button>
           ))}
         </div>
+
+
+        {/* The terminal was the first thing on the page and, until you ran
+            something, it was an empty grey box the height of a screen. It now
+            appears when there is something in it; before that the space says
+            what comes back instead. */}
+        {termLines.length > 0 ? (
+          <div className="lp-term bt-term">
+            <div className="lp-term-head">
+              <span className="lp-term-dot" />
+              <span className="lp-term-dot" />
+              <span className="lp-term-dot" />
+              <span className="lp-term-title">NOPREDICTIONS AGENT — HYPOTHESIS TESTER</span>
+            </div>
+            <div className="lp-term-body bt-term-body">
+              {termLines.map((l, i) => (
+                <div key={i} className={`lp-term-line ${l.cls}`}>
+                  {l.text}
+                </div>
+              ))}
+              {phase === 'running' && (
+                <div className="lp-term-line lp-term-cmd">
+                  <span className="lp-term-cursor" />
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <WhatYouGet />
+        )}
 
         {/* not testable */}
         {phase === 'done' && result?.ok && result.supported === false && (

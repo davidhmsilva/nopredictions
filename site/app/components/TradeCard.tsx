@@ -160,8 +160,15 @@ export function TradeCard({ trade, live = false }: { trade: PaperTrade; live?: b
         </div>
         <div>
           <div style={{ fontSize: '10px', color: 'var(--grey)', letterSpacing: '2px', marginBottom: '6px' }}>EDGE</div>
-          <div style={{ fontSize: '20px', color: hasModel ? 'var(--green)' : 'var(--grey)' }}>
-            {hasModel ? `+${edgePp.toFixed(1)}%` : '—'}
+          {/* The sign came from a hard-coded "+", so a negative edge rendered as
+              "+-1.8%" and was coloured green. It comes from the number now. */}
+          <div
+            style={{
+              fontSize: '20px',
+              color: !hasModel ? 'var(--grey)' : edgePp >= 0 ? 'var(--green)' : 'var(--red)',
+            }}
+          >
+            {hasModel ? `${edgePp >= 0 ? '+' : ''}${edgePp.toFixed(1)}%` : '—'}
           </div>
         </div>
         <div>

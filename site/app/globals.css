@@ -2817,6 +2817,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .ag-stat b { color: var(--white); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
 .ag-stat.is-good b { color: var(--green); }
 .ag-stat.is-bad b { color: var(--red); }
+.ag-stat.is-dim b { color: var(--grey2); }
 .ag-stat-note { margin-left: auto; font-size: 11px; color: var(--grey2); cursor: help; }
 
 /* ===========================================================================
@@ -2963,4 +2964,98 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .gc-tile-v { font-size: 19px; }
   .gc-chart-tick { font-size: 22px; }
   .gc-pulse-list li { flex-wrap: wrap; gap: 4px 10px; }
+}
+
+/* ===========================================================================
+   EQUITY CURVE  (.eq-*)
+   =========================================================================== */
+
+.eq { display: flex; flex-direction: column; gap: 14px; }
+
+.eq-stats {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px;
+}
+.eq-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 12px 14px;
+}
+.eq-stat-v { font-size: 21px; font-weight: 650; color: var(--white); line-height: 1.1; }
+.eq-stat-v i { font-style: normal; color: var(--grey2); font-weight: 400; }
+.eq-stat-v.is-up { color: var(--green); }
+.eq-stat-v.is-down { color: var(--red); }
+.eq-stat-k { font-size: 11px; color: var(--grey2); }
+
+.eq-chart {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 10px 8px 8px;
+}
+.eq-svg { width: 100%; height: auto; display: block; }
+.eq-zero { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 3 3; }
+.eq-tick { fill: var(--grey2); font-size: 14px; font-family: var(--font-mono); }
+.eq-axis {
+  display: flex; justify-content: space-between; padding: 4px 8px 0;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--grey2);
+}
+.eq-note { font-size: 12px; color: var(--grey2); line-height: 1.55; }
+.eq-note strong { color: var(--grey); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .eq-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .eq-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .eq-stat-v { font-size: 18px; }
+  .eq-tick { font-size: 22px; }
+}
+
+/* ===========================================================================
+   LAB — the idle state  (.bt-explain)
+   =========================================================================== */
+
+.bt-explain { margin-top: 26px; }
+.bt-facts {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+  margin-bottom: 24px;
+}
+.bt-fact {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 13px 15px;
+}
+.bt-fact-v { font-size: 20px; font-weight: 650; color: var(--white); line-height: 1.1; }
+.bt-fact-k { font-size: 11.5px; color: var(--grey2); }
+
+.bt-explain-head {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--grey2); margin-bottom: 10px;
+}
+.bt-out {
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--bg2); overflow: hidden;
+}
+.bt-out-row {
+  display: grid; grid-template-columns: 165px 1fr; gap: 14px;
+  padding: 11px 15px; border-bottom: 1px solid var(--border);
+}
+.bt-out-row:last-child { border-bottom: none; }
+.bt-out dt { font-size: 13px; font-weight: 600; color: var(--white); }
+.bt-out dd { font-size: 12.5px; color: var(--grey); line-height: 1.5; }
+
+/* The form leads the page now, so it gets the weight to match. */
+.bt-form { display: flex; gap: 8px; margin: 4px 0 12px; }
+.bt-input { flex: 1; min-width: 0; padding: 13px 16px; font-size: 15px; }
+.bt-submit { padding: 13px 24px; font-size: 14px; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .bt-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bt-out-row { grid-template-columns: 1fr; gap: 3px; }
+  .bt-form { flex-direction: column; }
+}
+
+/* ── wallet index: what a report contains ── */
+.wl-what { margin-top: 28px; }
+.wl-what-head {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--grey2); margin-bottom: 10px;
 }

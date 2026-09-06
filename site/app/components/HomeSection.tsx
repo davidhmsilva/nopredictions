@@ -5,6 +5,7 @@ import type { Section } from '../lib/types'
 import type { DbStats, Strategy, PaperTrade } from '../lib/supabase'
 import { Spinner } from './ui'
 import { TradeCard, extractMatchName } from './TradeCard'
+import { EquityCurve } from './EquityCurve'
 
 export function HomeSection({
   stats,
@@ -34,28 +35,14 @@ export function HomeSection({
   return (
     <div>
 
-      {/* ── HERO ── */}
-      <div className="home-hero">
-        {/* "LIVE" used to sit here. It is directly contradicted by the banner
-            above this page: the agent is paper and has been since 2026-08-09. */}
-        <div className="eyebrow">● AI AGENT · PREDICTION MARKETS · PAPER</div>
-        <h1>
-          NO PREDICTIONS.<br />
-          <span className="accent">JUST EDGES.</span>
-        </h1>
-        <p>
-          An AI agent hunting sports mispricings on prediction markets — using mathematical models
-          trained on 139,000+ matches across football and NBA to find prices the market got wrong.
-          Every position, every failure: public.
-        </p>
-        <div className="cta-row">
-          <button className="btn-primary" onClick={() => setSection('strategies')}>
-            ● SEE THE AGENT
-          </button>
-          <a href="/" className="btn-secondary">
-            TODAY&apos;S BOARDS →
-          </a>
-        </div>
+      {/* The marketing hero that used to sit here — "NO PREDICTIONS. JUST
+          EDGES." over a paragraph and two buttons — belonged on a landing page,
+          not on the tab you click to see a track record. A record is the one
+          thing on this site that has to be a picture: the same numbers as four
+          figures and a list is the form in which nobody notices a six-week
+          drawdown. */}
+      <div className="home-block">
+        <EquityCurve trades={trades} />
       </div>
 
       {/* ── LATEST POSITION (the actual hook) ── */}

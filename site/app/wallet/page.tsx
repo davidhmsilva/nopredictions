@@ -16,6 +16,37 @@ const KNOWN = [
   { addr: '0xf0318c32136c2db7fec88b84869aee6a1106c80c', label: 'BreakTheBank', note: 'big number, no edge' },
 ]
 
+/** What the report actually contains. Same reason as the Lab's version: a
+ *  visitor who has never seen one has no idea what "FIFO round trips" buys
+ *  them, and the list is more convincing than the phrase. Every line here is
+ *  something the analyser computes — nothing aspirational. */
+const REPORT_SECTIONS: { k: string; v: string }[] = [
+  {
+    k: 'Every round trip',
+    v: 'Each fill matched off FIFO into completed positions — entry, exit, hold time, what it made.',
+  },
+  {
+    k: 'Where the money is',
+    v: 'Which leg of the book carries the profit. On the wallet that started our own research, one leg was +783% and the rest was flat.',
+  },
+  {
+    k: 'How it changed',
+    v: 'Month by month, with the regime change named when the behaviour shifts.',
+  },
+  {
+    k: 'Does it survive',
+    v: 'A bootstrap clustered by event, so one lucky tournament cannot carry the record.',
+  },
+  {
+    k: 'A written reading',
+    v: 'The archetype it matches and why, in sentences — each one a threshold on a number in the profile.',
+  },
+  {
+    k: 'What is not established',
+    v: 'Said outright, plus a trust flag when the walk never reached the start of the account.',
+  },
+]
+
 export default function WalletIndexPage() {
   const router = useRouter()
   const [value, setValue] = useState('')
@@ -33,11 +64,11 @@ export default function WalletIndexPage() {
       <main className="scanner-main">
         <div className="scanner-hero">
           <span className="scanner-eyebrow">WALLET ANALYSER</span>
-          <h1 className="scanner-h1">Read a trader&rsquo;s whole record.</h1>
+          <h1 className="scanner-h1">See how a winning trader actually trades.</h1>
           <p className="scanner-hero-sub">
-            Paste a Polymarket wallet address or profile link. Every fill it has ever made is
-            rebuilt into FIFO round trips — what it buys, when it buys it, where the money
-            actually comes from, and how the behaviour changed over time.
+            Paste any Polymarket wallet. We rebuild every fill it has ever made into completed
+            positions and tell you what it really does — what it buys, when, where the profit
+            genuinely comes from, and whether the record holds up or is one lucky run.
           </p>
         </div>
 
@@ -75,6 +106,18 @@ export default function WalletIndexPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="wl-what">
+            <div className="wl-what-head">What comes back</div>
+            <dl className="bt-out">
+              {REPORT_SECTIONS.map((r) => (
+                <div key={r.k} className="bt-out-row">
+                  <dt>{r.k}</dt>
+                  <dd>{r.v}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
         </section>
       </main>
