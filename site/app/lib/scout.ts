@@ -13,6 +13,7 @@
  */
 
 import { fetchBook, teamScore } from './gamecenter'
+import { matchEspn, type EspnLive } from './espn'
 
 const GAMMA_API = 'https://gamma-api.polymarket.com'
 
@@ -67,6 +68,9 @@ export interface ScoutFixture {
   live: boolean
   /** What `live` is standing on. Never null when `live` is true. */
   liveSource: LiveSource | null
+  /** From the feed only. Null when nothing authoritative knows the clock. */
+  minute: number | null
+  score: { home: number; away: number } | null
   finished: boolean
   markets: number
   volumeUsd: number
@@ -352,14 +356,17 @@ const MATCH_WINDOW_MS = 2.5 * 3600_000
 
 /** How a live reading was arrived at.
  *
+ *  `feed`  — ESPN says it is in play, and gives the minute and the score. The
+ *  strongest reading and the only one that can produce a clock.
  *  `board` — a market on this fixture has resolved, so the match has certainly
- *  started. This is the only moment a football board timestamps for free.
- *  `clock` — the listed kick-off has passed and nothing has resolved yet, which
- *  is what the first twenty goalless minutes look like. Probable, not certain:
- *  Polymarket's listed start ran ~30 minutes early on the smaller leagues that
- *  invalidated 73k of our own observations, and eight hours late on Sevilla v
- *  Rayo. The card says which, because those are different claims. */
-export type LiveSource = 'board' | 'clock'
+ *  started. This is the only moment a Polymarket board timestamps for free.
+ *  `clock` — the listed kick-off has passed and nothing else knows anything.
+ *  Probable, not certain: Polymarket's listed start ran ~30 minutes early on the
+ *  smaller leagues that invalidated 73k of our own observations, and eight hours
+ *  late on Sevilla v Rayo. The card says which, because those are different
+ *  claims — and since the feed landed, `clock` is what is left over rather than
+ *  the usual answer. */
+export type LiveSource = 'feed' | 'board' | 'clock'
 
 function pastKickoff(kickoff: string | null): number | null {
   if (!kickoff) return null
@@ -484,7 +491,8 @@ export async function refreshBook(markets: Mkt[]): Promise<BookQuality | null> {
 // ── assembly ─────────────────────────────────────────────────────────────────
 
 export function buildFixtures(
-  events: Raw[]
+  events: Raw[],
+  espn: EspnLive[] = []
 ): { fixtures: ScoutFixture[]; marketsBySlug: Map<string, Mkt[]> } {
   const now = Date.now()
   const from = now - WINDOW_BACK_H * 3600_000
@@ -539,8 +547,19 @@ export function buildFixtures(
     if (markets.length === 0) continue
 
     const kickoff = kickoffOf(canonical)
-    const finished = boardFinished(markets, kickoff)
-    const liveSource = finished ? null : liveSourceOf(markets, kickoff)
+
+    // The feed outranks everything: it is the only source that can say a match
+    // is in play at minute 23 with nothing yet resolved, which is most of a
+    // first half. `KICKED OFF?` used to be the answer for all of those.
+    const feed = espn.length ? matchEspn(teams.home, teams.away, espn) : null
+    const feedLive = feed != null && !feed.finished
+
+    const finished = feed?.finished ?? boardFinished(markets, kickoff)
+    const liveSource: LiveSource | null = finished
+      ? null
+      : feedLive
+        ? 'feed'
+        : liveSourceOf(markets, kickoff)
 
     fixtures.push({
       slug,
@@ -550,6 +569,8 @@ export function buildFixtures(
       kickoff,
       live: liveSource != null,
       liveSource,
+      minute: feedLive ? feed!.minute : null,
+      score: feed ? { home: feed.homeGoals, away: feed.awayGoals } : null,
       finished,
       markets: markets.length,
       volumeUsd,

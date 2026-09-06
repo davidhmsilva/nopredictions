@@ -154,6 +154,50 @@ const SOON_MS = 2 * 3600_000
  *  A Saturday card runs to nearly 60 of them. */
 const COMPS_SHOWN = 9
 
+/** What the fixture's clock is doing, and how confidently we know it.
+ *
+ *  Three different claims, and the badge says which. `KICKED OFF?` used to be
+ *  the answer for every started match with nothing yet resolved on its board —
+ *  which is most of a goalless first half — and it reads as a shrug. Since the
+ *  live feed landed it is what is left over, not the usual case. */
+function LiveState({ f }: { f: ScoutFixture }) {
+  if (f.finished) return <span className="np-badge">FT</span>
+
+  if (f.liveSource === 'feed') {
+    return (
+      <span className="np-badge is-live" title="Live feed: in play right now.">
+        ● {f.minute != null ? <span className="np-num">{f.minute}&apos;</span> : 'LIVE'}
+      </span>
+    )
+  }
+  if (f.liveSource === 'board') {
+    return (
+      <span
+        className="np-badge is-live"
+        title="A market on this board has resolved, so the match has certainly started. No live clock for this competition."
+      >
+        ● LIVE
+      </span>
+    )
+  }
+  if (f.liveSource === 'clock') {
+    return (
+      <span
+        className="np-badge is-warn"
+        title={
+          'The listed kick-off has passed, but no live feed covers this fixture and ' +
+          "nothing on its board has resolved. Polymarket's listed start has run ~30 min " +
+          'early on smaller leagues and eight hours late elsewhere, so this is probable ' +
+          'rather than confirmed.'
+        }
+      >
+        KICKED OFF?
+      </span>
+    )
+  }
+  return <span className="sc-in np-num">{clock(f.kickoff)}</span>
+}
+
 // ── one row ──────────────────────────────────────────────────────────────────
 
 function Row({
@@ -194,30 +238,7 @@ function Row({
       </td>
 
       <td className="sc-c-state">
-        {f.finished ? (
-          <span className="np-badge">FT</span>
-        ) : f.liveSource === 'board' ? (
-          <span
-            className="np-badge is-live"
-            title="A market on this board has resolved, so the match has certainly started."
-          >
-            ● LIVE
-          </span>
-        ) : f.liveSource === 'clock' ? (
-          <span
-            className="np-badge is-warn"
-            title={
-              'The listed kick-off has passed and nothing on the board has resolved yet — ' +
-              "what a goalless opening twenty minutes looks like. Polymarket's listed start " +
-              'has run ~30 min early on smaller leagues and eight hours late elsewhere, so ' +
-              'this is probable rather than confirmed.'
-            }
-          >
-            KICKED OFF?
-          </span>
-        ) : (
-          <span className="sc-in np-num">{clock(f.kickoff)}</span>
-        )}
+        <LiveState f={f} />
       </td>
 
       <td className="sc-c-odd np-num">{odds(f.oneX2.home)}</td>
@@ -441,18 +462,20 @@ export default function ScoutPage() {
                 >
                   <div className="sc-big-top">
                     <span className="sc-big-comp">{f.competition ?? 'Football'}</span>
-                    {f.liveSource === 'board' ? (
-                      <span className="np-badge is-live">● LIVE</span>
-                    ) : f.liveSource === 'clock' ? (
-                      <span className="np-badge is-warn">KICKED OFF?</span>
-                    ) : (
-                      <span className="sc-big-in np-num">{clock(f.kickoff)}</span>
-                    )}
+                    <LiveState f={f} />
                   </div>
 
                   <div className="sc-big-teams">
                     <span>{f.home}</span>
-                    <span className="sc-big-v">v</span>
+                    <span className="sc-big-v">
+                      {f.score && f.live ? (
+                        <b className="np-num sc-big-score">
+                          {f.score.home}–{f.score.away}
+                        </b>
+                      ) : (
+                        'v'
+                      )}
+                    </span>
                     <span>{f.away}</span>
                   </div>
 

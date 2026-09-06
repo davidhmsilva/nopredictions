@@ -17,6 +17,7 @@ import {
   refreshBook,
   type ScoutFixture,
 } from './scout'
+import { fetchEspnLive } from './espn'
 
 /** How many boards get a live CLOB read on top of Gamma's cached quote.
  *
@@ -43,8 +44,14 @@ let cachedAt = 0
 let inFlight: Promise<Board> | null = null
 
 async function sweep(): Promise<Board> {
-  const events = await fetchSoccerEvents()
-  const { fixtures, marketsBySlug } = buildFixtures(events)
+  // Both in parallel: they hit unrelated hosts, and ESPN is free so its cost is
+  // latency alone. A failed ESPN sweep leaves the board exactly as it was
+  // before the feed existed rather than taking it down.
+  const [events, espn] = await Promise.all([
+    fetchSoccerEvents(),
+    fetchEspnLive().catch(() => []),
+  ])
+  const { fixtures, marketsBySlug } = buildFixtures(events, espn)
   const ranked = rankFixtures(fixtures)
 
   // Live boards first — a stale quote costs most where the price is moving.

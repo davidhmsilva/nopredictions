@@ -3125,3 +3125,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 /* ── bottom tab bar ── */
 .np-mobile-tab-icn { width: 21px; height: 21px; }
+
+/* The live score in place of the "v" — only where a feed actually knows it. */
+.sc-big-score { font-size: 15px; font-weight: 700; color: var(--white); letter-spacing: -.02em; }
