@@ -306,15 +306,23 @@ export default function ScoutPage() {
           </div>
         </div>
 
-        <div className="np-note is-info sc-honesty">
-          <strong>This is not a tip sheet.</strong> We do not rank these by a claimed edge
-          against the sharp line — we measured that number and it came out at{' '}
-          <span className="np-num">+0.10pp</span> with a confidence interval spanning zero,
-          which is the spread and the fee, not an edge. What did separate, across 6,449
-          measured rows, is book quality: at a spread of 0-3pp the ask was fair to slightly
-          cheap; past 20pp it ran <span className="np-num">−38pp</span>. So that is what the
-          grade on each card is. Open a fixture for the measured lines.
-        </div>
+        {/* The claim stays visible; the working sits behind a disclosure.
+            On a 375px screen the full paragraph pushed the entire board below
+            the fold, and an honesty note nobody scrolls past is not honesty. */}
+        <details className="np-note is-info sc-honesty">
+          <summary className="sc-honesty-head">
+            <strong>This is not a tip sheet.</strong> Boards are graded on book quality,
+            not on a claimed edge. <span className="sc-honesty-more">Why →</span>
+          </summary>
+          <div className="sc-honesty-body">
+            We do not rank these by an edge against the sharp line: we measured that number
+            and it came out at <span className="np-num">+0.10pp</span> with a confidence
+            interval spanning zero, which is the spread and the fee, not an edge. What did
+            separate, across 6,449 measured rows, is book quality — at a spread of 0-3pp the
+            ask was fair to slightly cheap; past 20pp it ran <span className="np-num">−38pp</span>.
+            So that is what the grade on each card is. Open a fixture for the measured lines.
+          </div>
+        </details>
 
         <div className="sc-controls">
           <div className="sc-filters">

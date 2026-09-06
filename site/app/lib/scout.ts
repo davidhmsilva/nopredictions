@@ -99,12 +99,18 @@ function str(v: unknown): string {
   return v == null ? '' : String(v)
 }
 
-/** Events not yet ended, oldest kick-off first. The date filter is on
- *  `end_date_min`, not `start_date_*`: an event's `startDate` is its listing
- *  time, so filtering kick-off with it returns nothing at all. */
+/** The fixture events, oldest kick-off first.
+ *
+ *  Two date fields on this feed are traps and both were walked into. An event's
+ *  `startDate` is its LISTING time — usually the same morning — so filtering
+ *  kick-off with `start_date_min` returns an empty board. And a fixture event's
+ *  `endDate` EQUALS its `startTime`, so `end_date_min=now` silently drops every
+ *  match the moment it kicks off: the exact set this page exists to show. The
+ *  filter therefore reaches back over the whole window and the window itself
+ *  does the bounding, in `buildFixtures`. */
 export async function fetchSoccerEvents(): Promise<Raw[]> {
   const out: Raw[] = []
-  const endMin = new Date().toISOString()
+  const endMin = new Date(Date.now() - WINDOW_BACK_H * 3600_000).toISOString()
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const url =

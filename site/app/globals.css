@@ -2575,3 +2575,10 @@ button { font-family: var(--font); }
 }
 
 .bt-clv-warn { margin: 18px 0; border-left-color: var(--amber); }
+
+.sc-honesty { margin-bottom: 20px; }
+.sc-honesty-head { cursor: pointer; list-style: none; }
+.sc-honesty-head::-webkit-details-marker { display: none; }
+.sc-honesty-more { color: var(--blue); white-space: nowrap; font-weight: 500; }
+.sc-honesty[open] .sc-honesty-more { display: none; }
+.sc-honesty-body { margin-top: 10px; }
