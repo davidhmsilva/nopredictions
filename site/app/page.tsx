@@ -125,15 +125,24 @@ function sortFixtures(fs: ScoutFixture[], key: SortKey): ScoutFixture[] {
 
 // ── filters ──────────────────────────────────────────────────────────────────
 
-type Filter = 'all' | 'live' | 'clean' | 'measured' | 'watchlist'
+type Filter = 'all' | 'live' | 'soon' | 'clean' | 'measured' | 'watchlist'
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'live', label: 'In play' },
+  { id: 'soon', label: 'Starting soon' },
   { id: 'clean', label: 'Clean books' },
   { id: 'measured', label: 'Measured' },
   { id: 'watchlist', label: 'Watchlist' },
 ]
+
+/** "Starting soon" is the next two hours. Long enough to cover a build-up,
+ *  short enough that the list is still a list. */
+const SOON_MS = 2 * 3600_000
+
+/** How many competitions get their own chip before the rest go behind "More".
+ *  A Saturday card runs to nearly 60 of them. */
+const COMPS_SHOWN = 9
 
 // ── one row ──────────────────────────────────────────────────────────────────
 
@@ -244,6 +253,8 @@ export default function ScoutPage() {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<SortKey>('default')
   const [query, setQuery] = useState('')
+  const [comp, setComp] = useState<string | null>(null)
+  const [allComps, setAllComps] = useState(false)
   const [watchlist, setWatchlist] = useState<string[]>([])
 
   useEffect(() => {
@@ -252,6 +263,15 @@ export default function ScoutPage() {
       if (raw) setWatchlist(JSON.parse(raw))
     } catch {
       /* a blocked or empty store is not an error — the page works without it */
+    }
+    // The nav search sends a team here as ?q=. Read from the URL directly
+    // rather than through useSearchParams, which would opt this statically
+    // rendered page into a Suspense boundary for one string.
+    try {
+      const q = new URLSearchParams(window.location.search).get('q')
+      if (q) setQuery(q)
+    } catch {
+      /* no query string is the normal case */
     }
   }, [])
 
@@ -293,9 +313,15 @@ export default function ScoutPage() {
     const q = query.trim().toLowerCase()
     const filtered = fixtures.filter((f) => {
       if (q && !`${f.home} ${f.away} ${f.competition ?? ''}`.toLowerCase().includes(q)) return false
+      if (comp && f.competition !== comp) return false
       switch (filter) {
         case 'live':
           return f.live
+        case 'soon': {
+          if (f.live || f.finished || !f.kickoff) return false
+          const dt = new Date(f.kickoff).getTime() - Date.now()
+          return dt > 0 && dt <= SOON_MS
+        }
         case 'clean':
           return f.book?.grade === 'clean'
         case 'measured':
@@ -307,46 +333,96 @@ export default function ScoutPage() {
       }
     })
     return sortFixtures(filtered, sort)
-  }, [fixtures, filter, sort, query, watchlist])
+  }, [fixtures, filter, sort, query, comp, watchlist])
 
-  const stats = useMemo(() => {
-    const live = fixtures.filter((f) => f.live).length
-    const clean = fixtures.filter((f) => f.book?.grade === 'clean').length
-    const vol = fixtures.reduce((s, f) => s + f.volumeUsd, 0)
-    const liq = fixtures.reduce((s, f) => s + f.liquidityUsd, 0)
-    const mkts = fixtures.reduce((s, f) => s + f.markets, 0)
-    const comps = new Set(fixtures.map((f) => f.competition).filter(Boolean)).size
-    return { live, clean, vol, liq, mkts, comps }
+  /** The competition chips, ordered by how much of today's card each one is.
+   *  Derived from the board rather than from a hand-kept list, so a cup week
+   *  or a new league shows up on its own. */
+  const competitions = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const f of fixtures) {
+      if (!f.competition) continue
+      counts.set(f.competition, (counts.get(f.competition) ?? 0) + 1)
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, n]) => ({ name, n }))
   }, [fixtures])
 
-  const dash = loading ? '—' : null
+  /** What the four cards above the table stand on. Every one of these is
+   *  counted off the same board the table renders — nothing here is a separate
+   *  feed that could disagree with the rows underneath it. */
+  const cards = useMemo(() => {
+    const open = fixtures.filter((f) => !f.finished)
+    const busiest = open.slice().sort((a, b) => b.volumeUsd - a.volumeUsd).slice(0, 3)
+    const liveNow = fixtures.filter((f) => f.live)
+    const topLive = liveNow.slice().sort((a, b) => b.volumeUsd - a.volumeUsd)[0] ?? null
+    // The busiest boards are also the tightest — on a normal card all three
+    // quote 1.0pp — so a plain "tightest" list is the "busiest" list again.
+    // What is worth surfacing is a clean book on a fixture you would not
+    // otherwise have looked at, so the boards already named above are excluded
+    // and ties on spread go to the QUIETER game rather than the louder one.
+    const named = new Set(busiest.map((f) => f.slug))
+    const tightest = open
+      .filter((f) => !named.has(f.slug) && f.book?.grade === 'clean' && f.book.spreadPp != null)
+      .sort(
+        (a, b) =>
+          (a.book!.spreadPp ?? 99) - (b.book!.spreadPp ?? 99) || a.volumeUsd - b.volumeUsd
+      )
+      .slice(0, 3)
+    const clean = fixtures.filter((f) => f.book?.grade === 'clean').length
+    const cleanPct = fixtures.length ? (clean / fixtures.length) * 100 : 0
+    return { busiest, liveNow, topLive, tightest, clean, cleanPct }
+  }, [fixtures])
 
   return (
     <AppShell>
-      {/* ── the tape ── */}
-      <div className="sc-tape">
-        <div className="sc-tape-inner">
-          <span className="sc-tape-cell">
-            <b className="np-num">{dash ?? fixtures.length}</b> BOARDS
-          </span>
-          <span className="sc-tape-cell">
-            <b className="np-num">{dash ?? stats.mkts.toLocaleString('en-US')}</b> MARKETS
-          </span>
-          <span className="sc-tape-cell">
-            <b className="np-num">{dash ?? stats.comps}</b> COMPETITIONS
-          </span>
-          <span className="sc-tape-cell is-live">
-            <b className="np-num">{dash ?? stats.live}</b> IN PLAY
-          </span>
-          <span className="sc-tape-cell is-good">
-            <b className="np-num">{dash ?? stats.clean}</b> CLEAN BOOKS
-          </span>
-          <span className="sc-tape-cell">
-            VOLUME <b className="np-num">{dash ?? money(stats.vol)}</b>
-          </span>
-          <span className="sc-tape-cell">
-            LIQUIDITY <b className="np-num">{dash ?? money(stats.liq)}</b>
-          </span>
+      {/* ── category bar: state on the left, competition on the right ── */}
+      <div className="sc-cats">
+        <div className="sc-cats-inner">
+          <div className="sc-cat-group">
+            {FILTERS.map((f) => (
+              <button
+                key={f.id}
+                className={`sc-cat${filter === f.id ? ' is-on' : ''}`}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.label}
+                {f.id === 'watchlist' && watchlist.length > 0 && (
+                  <span className="sc-cat-n np-num">{watchlist.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {competitions.length > 0 && (
+            <>
+              <span className="sc-cat-div" aria-hidden="true" />
+              <div className="sc-cat-group">
+                <button
+                  className={`sc-cat${comp === null ? ' is-on' : ''}`}
+                  onClick={() => setComp(null)}
+                >
+                  All football
+                </button>
+                {(allComps ? competitions : competitions.slice(0, COMPS_SHOWN)).map((c) => (
+                  <button
+                    key={c.name}
+                    className={`sc-cat${comp === c.name ? ' is-on' : ''}`}
+                    onClick={() => setComp(comp === c.name ? null : c.name)}
+                  >
+                    {c.name}
+                    <span className="sc-cat-n np-num">{c.n}</span>
+                  </button>
+                ))}
+                {competitions.length > COMPS_SHOWN && (
+                  <button className="sc-cat sc-cat-more" onClick={() => setAllComps(!allComps)}>
+                    {allComps ? 'Less' : `More (${competitions.length - COMPS_SHOWN})`}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -358,21 +434,132 @@ export default function ScoutPage() {
           </p>
         </div>
 
+        {/* ── the four cards ── */}
+        {!loading && !error && fixtures.length > 0 && (
+          <div className="sc-cards">
+            {/* Busiest, which is where a price exists at all — not where an edge is. */}
+            <div className="sc-card">
+              <div className="sc-card-head">
+                <span className="sc-card-title">BUSIEST BOARDS</span>
+                <button className="sc-card-more" onClick={() => setSort('volume')}>
+                  Sort by volume →
+                </button>
+              </div>
+              <ol className="sc-card-list">
+                {cards.busiest.map((f, i) => (
+                  <li key={f.slug}>
+                    <span className="sc-card-rank np-num">{i + 1}</span>
+                    <Link href={`/game/${f.slug}`} className="sc-card-link">
+                      {f.home} v {f.away}
+                    </Link>
+                    <span className="sc-card-val np-num">{money(f.volumeUsd)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {/* One live fixture, big — the thing you came to look at. */}
+            <div className={`sc-card sc-card-live${cards.topLive ? '' : ' is-empty'}`}>
+              <div className="sc-card-head">
+                <span className="sc-card-title">
+                  <span className="sc-dot">●</span> LIVE NOW
+                </span>
+                {cards.liveNow.length > 1 && (
+                  <button className="sc-card-more" onClick={() => setFilter('live')}>
+                    All {cards.liveNow.length} →
+                  </button>
+                )}
+              </div>
+              {cards.topLive ? (
+                <Link href={`/game/${cards.topLive.slug}`} className="sc-live-body">
+                  <span className="sc-live-teams">
+                    {cards.topLive.home} v {cards.topLive.away}
+                  </span>
+                  <span className="sc-live-meta">
+                    {cards.topLive.competition ?? 'Football'} ·{' '}
+                    <span className="np-num">{money(cards.topLive.volumeUsd)}</span> traded
+                  </span>
+                  <span className="sc-live-odds np-num">
+                    {odds(cards.topLive.oneX2.home)} · {odds(cards.topLive.oneX2.draw)} ·{' '}
+                    {odds(cards.topLive.oneX2.away)}
+                  </span>
+                </Link>
+              ) : (
+                <div className="sc-live-body sc-live-none">
+                  Nothing in play right now. The next board opens above.
+                </div>
+              )}
+            </div>
+
+            {/* The differentiator: where a price can actually be paid. */}
+            <div className="sc-card">
+              <div className="sc-card-head">
+                <span className="sc-card-title">CLEAN BOOK, QUIETER GAME</span>
+                <button className="sc-card-more" onClick={() => setSort('spread')}>
+                  Sort by book →
+                </button>
+              </div>
+              <ol className="sc-card-list">
+                {cards.tightest.map((f, i) => (
+                  <li key={f.slug}>
+                    <span className="sc-card-rank np-num">{i + 1}</span>
+                    <Link href={`/game/${f.slug}`} className="sc-card-link">
+                      {f.home} v {f.away}
+                    </Link>
+                    <span className="sc-card-val np-num sc-card-val-good">
+                      {f.book!.spreadPp!.toFixed(1)}pp
+                    </span>
+                  </li>
+                ))}
+                {cards.tightest.length === 0 && (
+                  <li className="sc-card-none">
+                    No clean book outside the boards above right now.
+                  </li>
+                )}
+              </ol>
+            </div>
+
+            {/* An index of the board's own health, with the caveat attached to
+                it rather than left for the reader to supply. */}
+            <div className="sc-card sc-card-index">
+              <div className="sc-card-head">
+                <span className="sc-card-title">BOOK HEALTH</span>
+              </div>
+              <div className="sc-index-val np-num">
+                {cards.cleanPct.toFixed(0)}
+                <span className="sc-index-unit">%</span>
+              </div>
+              <div className="sc-index-bar" aria-hidden="true">
+                <span style={{ width: `${Math.min(100, cards.cleanPct)}%` }} />
+              </div>
+              <div className="sc-index-key">
+                <span className="np-num">{cards.clean}</span> of{' '}
+                <span className="np-num">{fixtures.length}</span> boards quote both sides
+                inside 6pp
+              </div>
+              <div className="sc-index-note">A clean book is not an edge. It is a price you can pay.</div>
+            </div>
+          </div>
+        )}
+
         {/* ── controls ── */}
         <div className="sc-bar">
-          <div className="sc-chips">
-            {FILTERS.map((f) => (
+          <div className="sc-bar-left">
+            {(comp || query || filter !== 'all') && (
               <button
-                key={f.id}
-                className={`sc-chip${filter === f.id ? ' is-on' : ''}`}
-                onClick={() => setFilter(f.id)}
+                className="sc-clear"
+                onClick={() => {
+                  setFilter('all')
+                  setComp(null)
+                  setQuery('')
+                }}
               >
-                {f.label}
-                {f.id === 'watchlist' && watchlist.length > 0 && (
-                  <span className="sc-chip-n np-num">{watchlist.length}</span>
-                )}
+                Clear filters
               </button>
-            ))}
+            )}
+            <span className="sc-count np-num">
+              {loading ? '' : `${shown.length} of ${fixtures.length}`}
+            </span>
           </div>
 
           <div className="sc-bar-right">
@@ -383,19 +570,19 @@ export default function ScoutPage() {
                 onChange={(e) => setSort(e.target.value as SortKey)}
                 aria-label="Sort fixtures"
               >
-                {SORTS.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
+                {SORTS.map((so) => (
+                  <option key={so.id} value={so.id}>
+                    {so.label}
                   </option>
                 ))}
               </select>
             </label>
             <input
               className="sc-search"
-              placeholder="Search…"
+              placeholder="Filter this list…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search fixtures"
+              aria-label="Filter fixtures"
             />
           </div>
         </div>

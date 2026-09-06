@@ -11,7 +11,7 @@ import {
 } from '../lib/supabase'
 import { VALID_SECTIONS, type Section } from '../lib/types'
 import { AppShell } from '../components/AppShell'
-import { Ticker } from '../components/Ticker'
+import { AgentStats } from '../components/AgentStats'
 import { HomeSection } from '../components/HomeSection'
 import { AgentSection } from '../components/AgentSection'
 
@@ -88,7 +88,7 @@ export default function AgentPage() {
   return (
     <AppShell>
       <TestingBanner />
-      <Ticker trades={trades} />
+      <AgentStats trades={trades} />
 
       <div className="np-wrap ag-subtabs-wrap">
         <div className="ag-subtabs" role="tablist">

@@ -2294,7 +2294,7 @@ button { font-family: var(--font); }
 }
 .np-nav-inner {
   max-width: 1240px; margin: 0 auto; padding: 0 20px;
-  height: 60px; display: flex; align-items: center; gap: 28px;
+  height: 60px; display: flex; align-items: center; gap: 20px;
 }
 .np-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; flex-shrink: 0; }
 /* The real mark, cropped out of the full lockup in `public/logo.png` — the
@@ -2329,11 +2329,11 @@ button { font-family: var(--font); }
   color: var(--amber); border: 1px solid rgba(245, 158, 11, .35);
   border-radius: 3px; padding: 1px 4px; line-height: 1.3;
 }
-.np-nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.np-nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .np-paper-pill {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
   color: var(--grey); border: 1px solid var(--border2); border-radius: 999px;
-  padding: 4px 10px; cursor: help;
+  padding: 4px 10px; cursor: help; white-space: nowrap; flex-shrink: 0;
 }
 
 .np-mobile-tabs { display: none; }
@@ -2487,27 +2487,6 @@ button { font-family: var(--font); }
    opening this on a matchday wants the card, not the reasoning.
    =========================================================================== */
 
-/* ── the tape ── */
-.sc-tape {
-  border-bottom: 1px solid var(--border);
-  background: #08090b;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.sc-tape::-webkit-scrollbar { display: none; }
-.sc-tape-inner {
-  max-width: 1240px; margin: 0 auto; padding: 0 20px;
-  display: flex; align-items: center; gap: 26px;
-  height: 34px; white-space: nowrap;
-}
-.sc-tape-cell {
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .07em;
-  color: var(--grey2); display: inline-flex; align-items: baseline; gap: 5px;
-}
-.sc-tape-cell b { color: var(--white); font-size: 12px; font-weight: 600; letter-spacing: 0; }
-.sc-tape-cell.is-live b { color: var(--red); }
-.sc-tape-cell.is-good b { color: var(--green); }
-
 /* ── head ── */
 .sc-head { padding: 26px 0 16px; }
 .sc-h1 { font-size: 23px; font-weight: 650; letter-spacing: -.02em; color: var(--white); }
@@ -2520,18 +2499,6 @@ button { font-family: var(--font); }
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding-bottom: 12px; border-bottom: 1px solid var(--border);
 }
-.sc-chips { display: flex; gap: 4px; flex-wrap: wrap; }
-.sc-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 12px; border-radius: 999px;
-  border: 1px solid var(--border2); background: transparent;
-  color: var(--grey); font-family: var(--font); font-size: 12.5px; font-weight: 500;
-  cursor: pointer; transition: all .12s;
-}
-.sc-chip:hover { color: var(--white); border-color: var(--grey2); }
-.sc-chip.is-on { background: var(--white); border-color: var(--white); color: var(--bg); font-weight: 600; }
-.sc-chip-n { font-size: 10px; background: rgba(0,0,0,.14); border-radius: 999px; padding: 0 5px; }
-
 .sc-bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .sc-sort { display: inline-flex; align-items: center; gap: 6px; }
 .sc-sort-key {
@@ -2624,7 +2591,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-table tbody tr:hover .sc-go { color: var(--white); border-color: var(--grey2); }
 
 @media (max-width: 760px) {
-  .sc-tape-inner { height: 30px; gap: 18px; padding: 0 14px; }
   .sc-head { padding: 20px 0 14px; }
   .sc-h1 { font-size: 20px; }
   .sc-bar-right { margin-left: 0; width: 100%; }
@@ -2646,3 +2612,178 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .sc-mkts, .sc-spread { display: none; }
   .sc-comp { font-size: 10px; }
 }
+
+/* ===========================================================================
+   TAPE  (.np-tape)  -- site-wide, above the nav
+   =========================================================================== */
+
+.np-tape {
+  background: #060709;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.np-tape-track { display: flex; width: max-content; animation: np-tape-roll 60s linear infinite; }
+.np-tape-strip { display: flex; align-items: center; gap: 30px; padding: 0 15px; height: 30px; }
+.np-tape-static {
+  max-width: 1240px; margin: 0 auto; padding: 0 20px;
+  display: flex; align-items: center; height: 30px;
+}
+.np-tape-cell {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .09em;
+  color: var(--grey2); white-space: nowrap; display: inline-flex; align-items: baseline; gap: 5px;
+}
+.np-tape-cell b { color: var(--white); font-size: 11.5px; font-weight: 600; letter-spacing: 0; }
+.np-tape-cell.is-live b { color: var(--red); }
+.np-tape-cell.is-good b { color: var(--green); }
+
+@keyframes np-tape-roll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+/* A marquee is motion nobody asked for. Anyone who has said so gets the strip
+   standing still, scrollable by hand. */
+@media (prefers-reduced-motion: reduce) {
+  .np-tape { overflow-x: auto; }
+  .np-tape-track { animation: none; width: auto; }
+  .np-tape-strip[aria-hidden='true'] { display: none; }
+}
+
+/* ── nav search ── */
+.np-search {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: 999px;
+  padding: 0 13px; height: 34px; flex: 0 1 250px; min-width: 130px;
+  transition: border-color .12s;
+}
+.np-search:focus-within { border-color: var(--grey2); }
+.np-search-icn { color: var(--grey2); font-size: 14px; line-height: 1; }
+.np-search input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none;
+  color: var(--white); font-family: var(--font); font-size: 12.5px;
+}
+.np-search input::placeholder { color: var(--grey2); }
+
+/* ===========================================================================
+   CATEGORY BAR  (.sc-cats)
+   =========================================================================== */
+
+.sc-cats {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sc-cats::-webkit-scrollbar { display: none; }
+.sc-cats-inner {
+  max-width: 1240px; margin: 0 auto; padding: 0 20px;
+  display: flex; align-items: center; gap: 4px; height: 44px; white-space: nowrap;
+}
+.sc-cat-group { display: flex; align-items: center; gap: 2px; }
+.sc-cat-div { width: 1px; height: 18px; background: var(--border2); margin: 0 10px; flex-shrink: 0; }
+.sc-cat {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 11px; border: none; background: none; border-radius: var(--r-sm);
+  color: var(--grey); font-family: var(--font); font-size: 13px; font-weight: 500;
+  cursor: pointer; white-space: nowrap; transition: color .12s, background .12s;
+}
+.sc-cat:hover { color: var(--white); background: var(--bg2); }
+.sc-cat.is-on { color: var(--white); background: var(--bg3); font-weight: 600; }
+.sc-cat-n { font-size: 10px; color: var(--grey2); }
+.sc-cat.is-on .sc-cat-n { color: var(--grey); }
+.sc-cat-more { color: var(--blue); }
+
+/* ===========================================================================
+   CARDS  (.sc-cards)
+   =========================================================================== */
+
+.sc-cards {
+  display: grid; gap: 12px; margin-bottom: 22px;
+  grid-template-columns: repeat(4, 1fr);
+}
+.sc-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 12px 14px; display: flex; flex-direction: column; min-height: 132px;
+}
+.sc-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+.sc-card-title {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--grey);
+}
+.sc-dot { color: var(--red); }
+.sc-card-more {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  font-family: var(--font); font-size: 11px; color: var(--blue); padding: 0;
+}
+.sc-card-more:hover { text-decoration: underline; }
+
+.sc-card-list { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.sc-card-list li { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; }
+.sc-card-rank { color: var(--grey2); font-size: 10.5px; width: 9px; flex-shrink: 0; }
+.sc-card-link {
+  color: var(--white); text-decoration: none; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sc-card-link:hover { color: var(--green); }
+.sc-card-val { color: var(--grey); font-size: 11.5px; flex-shrink: 0; }
+.sc-card-val-good { color: var(--green); }
+.sc-card-none { color: var(--grey2); font-size: 12px; }
+
+.sc-card-live {
+  background: linear-gradient(160deg, rgba(239,68,68,.13), rgba(239,68,68,.02) 60%), var(--bg2);
+  border-color: rgba(239,68,68,.30);
+}
+.sc-card-live.is-empty { background: var(--bg2); border-color: var(--border); }
+.sc-live-body {
+  display: flex; flex-direction: column; gap: 3px; text-decoration: none;
+  margin-top: auto;
+}
+.sc-live-teams { font-size: 14px; font-weight: 600; color: var(--white); line-height: 1.25; }
+.sc-live-meta { font-size: 11px; color: var(--grey); }
+.sc-live-odds { font-size: 12.5px; color: var(--white); margin-top: 3px; }
+.sc-live-none { font-size: 12.5px; color: var(--grey2); }
+
+.sc-card-index { justify-content: flex-start; }
+.sc-index-val { font-size: 30px; font-weight: 650; color: var(--green); line-height: 1; }
+.sc-index-unit { font-size: 15px; color: var(--grey); margin-left: 2px; }
+.sc-index-bar {
+  height: 4px; border-radius: 999px; background: var(--bg3); margin: 9px 0 8px; overflow: hidden;
+}
+.sc-index-bar span { display: block; height: 100%; background: var(--green); border-radius: 999px; }
+.sc-index-key { font-size: 11.5px; color: var(--grey); line-height: 1.45; }
+.sc-index-note { margin-top: auto; padding-top: 8px; font-size: 10.5px; color: var(--grey2); font-style: italic; }
+
+/* ── list controls ── */
+.sc-bar-left { display: flex; align-items: center; gap: 10px; }
+.sc-clear {
+  background: none; border: 1px solid var(--border2); border-radius: 999px;
+  color: var(--grey); font-family: var(--font); font-size: 11.5px;
+  padding: 4px 11px; cursor: pointer;
+}
+.sc-clear:hover { color: var(--white); border-color: var(--grey2); }
+.sc-count { font-size: 11.5px; color: var(--grey2); }
+
+@media (max-width: 1080px) {
+  .sc-cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 760px) {
+  .np-tape-strip { gap: 20px; }
+  .np-search { display: none; }
+  .sc-cats-inner { height: 40px; padding: 0 14px; }
+  .sc-cards { grid-template-columns: 1fr; }
+  .sc-card { min-height: 0; }
+  .sc-bar-left { width: 100%; }
+}
+
+/* ── agent stat strip (was a second marquee) ── */
+.ag-stats { border-bottom: 1px solid var(--border); background: var(--bg2); }
+.ag-stats-inner {
+  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  padding-top: 10px; padding-bottom: 10px;
+}
+.ag-stat {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--grey2);
+  display: inline-flex; align-items: baseline; gap: 5px;
+}
+.ag-stat b { color: var(--white); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
+.ag-stat.is-good b { color: var(--green); }
+.ag-stat.is-bad b { color: var(--red); }
+.ag-stat-note { margin-left: auto; font-size: 11px; color: var(--grey2); cursor: help; }
