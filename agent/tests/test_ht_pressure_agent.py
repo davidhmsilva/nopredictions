@@ -137,10 +137,12 @@ def _row(**kw) -> dict:
     return row
 
 
-def _book(ask=0.60, depth=200.0, bid=None) -> dict:
+def _book(ask=0.55, depth=200.0, bid=None) -> dict:
     # best_bid has been part of the gate since obs_version 2 added MAX_SPREAD;
     # the default sits one tick inside it so a test that is about something
-    # else is not silently blocked by the spread.
+    # else is not silently blocked by the spread. The default ask moved 0.60 ->
+    # 0.55 with obs_version 4 for the same reason: 0.60 is 1.67, under MIN_ODDS,
+    # and would have made the price gate the answer to every question.
     return {"best_ask": ask, "best_bid": ask - 0.01 if bid is None else bid,
             "ask_depth_usd": depth}
 
@@ -152,15 +154,23 @@ def test_why_not_names_the_binding_gate():
     assert "minute" in ht._why_not(_row(), _book(), _sig(minute=44))
     assert "window" in ht._why_not(_row(pressure_now=None), _book(), ok)
     assert "pressure" in ht._why_not(_row(pressure_now=10.0), _book(), ok)
-    assert "ask" in ht._why_not(_row(), _book(ask=0.95), ok)
+    assert "odds" in ht._why_not(_row(), _book(ask=0.95), ok)
     assert "depth" in ht._why_not(_row(), _book(depth=1.0), ok)
+    # obs_version 4: the price gate names itself, in decimal odds, because that
+    # is the unit the rule was given in.
+    assert "1.75" in ht._why_not(_row(), _book(ask=0.62), ok)
     assert "score" in ht._why_not(_row(score_agrees=False, ladder_goals=1), _book(), ok)
 
 
 def test_a_bad_price_is_not_what_blocks_a_trade():
-    """This is a prediction, not a price comparison. If a negative edge ever
-    starts blocking entries, the strategy has silently become a different one."""
-    assert ht._why_not(_row(), _book(ask=0.84), _sig(minute=17)) == ""
+    """This is a prediction, not a price comparison. If a negative EDGE ever
+    starts blocking entries, the strategy has silently become a different one.
+
+    obs_version 4's MIN_ODDS is a price gate, not an edge gate: it asks what the
+    book quotes, never what our own fair value says about it. 0.57 is 1.754 —
+    over the bar and comfortably worse than the ~0.55 fair value at this minute,
+    which is exactly the combination this test exists to keep enterable."""
+    assert ht._why_not(_row(), _book(ask=0.57), _sig(minute=17)) == ""
 
 
 def test_the_threshold_is_reachable():
@@ -214,10 +224,20 @@ def _pm_fixture_with_book() -> dict:
 
 
 @pytest.fixture
-def board(monkeypatch):
-    monkeypatch.setattr(ht, "_fetch_book", lambda tok: {
-        **tok, "best_bid": 0.58, "best_ask": 0.60,
-        "bid_depth_usd": 300.0, "ask_depth_usd": 300.0})
+def quote():
+    """The CLOB book the synthetic board serves — MUTABLE, so a test can move
+    the price between polls. That is the entire obs_version 4 mechanism: the
+    signal and the price arrive at different minutes.
+
+    0.55 is 1.818, just clear of MIN_ODDS.
+    """
+    return {"best_bid": 0.53, "best_ask": 0.55,
+            "bid_depth_usd": 300.0, "ask_depth_usd": 300.0}
+
+
+@pytest.fixture
+def board(monkeypatch, quote):
+    monkeypatch.setattr(ht, "_fetch_book", lambda tok: {**tok, **quote})
     return [_pm_fixture_with_book()]
 
 
@@ -304,12 +324,148 @@ def test_pressure_arriving_late_can_still_enter(board):
 def test_a_dead_window_is_not_a_reading(board):
     """has_window is false when the baseline and the latest snapshot carry the
     same paid fetch. Differencing a stat block against itself reads as a dead
-    match; scaling it reads as a surge. Neither is allowed to enter."""
+    match; scaling it reads as a surge. Neither is a reading, and neither may
+    arm a fixture.
+
+    The opening here is deliberately QUIET, so nothing armed earlier: this test
+    is about the dead window being unable to open a position on its own. What an
+    already-armed fixture may do is a different question, answered next."""
     state = ht.HTState()
-    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+    quiet = _sig(minute=16, home_possession=50.0, away_possession=50.0)
+    ht.observe({1: quiet}, fht.load(), board, state)
+    assert 1 not in state.armed
+
     rows = ht.observe({1: _pressing(30, has_window=False)}, fht.load(), board, state)
     assert rows[0]["pressure_now"] is None
     assert not rows[0]["would_enter"]
+
+
+def test_an_armed_fixture_may_enter_on_a_reading_that_has_since_died(board, quote):
+    """The deliberate consequence of obs_version 4, spelled out so it cannot be
+    mistaken for the bug above.
+
+    The latch does NOT invent a pressure reading — it enters on one that was
+    really measured, at 16', and recorded. What it stops requiring is that the
+    reading still be available at the minute the PRICE arrives, because the
+    price arrives on the market's clock and the stats arrive on api-football's.
+    The row says exactly which: entry_trigger 'armed', with armed_pressure
+    carrying the number the decision was actually made on.
+    """
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60      # 1.61 — under the bar
+    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+    assert state.armed[1]["minute"] == 16
+
+    quote["best_ask"], quote["best_bid"] = 0.54, 0.52      # 1.85 — the price lands
+    rows = ht.observe({1: _pressing(30, has_window=False)}, fht.load(), board, state)
+    assert rows[0]["pressure_now"] is None                 # no live reading
+    assert rows[0]["would_enter"]
+    assert rows[0]["entry_trigger"] == "armed"
+    assert rows[0]["armed_at_minute"] == 16
+    assert rows[0]["armed_pressure"] >= ht.MIN_PRESSURE
+
+
+# ── obs_version 4: the price gate and the monitoring state ───────────────────
+
+def test_a_pressed_opening_at_a_short_price_arms_instead_of_entering(board, quote):
+    """The user's rule: never take this line under 1.75. A fixture that presses
+    at a shorter price has not failed — its price has not arrived."""
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60      # 1.61
+    rows = ht.observe({1: _pressing(16)}, fht.load(), board, state)
+    assert not rows[0]["would_enter"]
+    assert rows[0]["armed_at_minute"] == 16
+    assert rows[0]["armed_pressure"] >= ht.MIN_PRESSURE
+    # entry_trigger describes the pressure state AT THIS POLL, not the fact of
+    # entering: the match is still pressing while it waits for its price.
+    assert rows[0]["entry_trigger"] == "live"
+    assert "monitoring" in rows[0]["skip_reason"]
+    assert "1.75" in rows[0]["skip_reason"]
+
+
+def test_the_armed_fixture_enters_when_the_price_arrives(board, quote):
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60
+    assert not ht.observe({1: _pressing(16)}, fht.load(), board, state)[0]["would_enter"]
+
+    # 25' with the ask at 0.50: on real books 95% of clean quotes are past 1.75
+    # by this minute, because the fair value has fallen — not because the market
+    # got cheaper.
+    quote["best_ask"], quote["best_bid"] = 0.50, 0.48
+    rows = ht.observe({1: _pressing(25, has_window=True,
+                                    home_shots_on_window=3,
+                                    home_shots_inside_window=4,
+                                    home_xg_window=0.7,
+                                    home_corners_window=3)},
+                      fht.load(), board, state)
+    assert rows[0]["would_enter"], rows[0]["skip_reason"]
+    assert rows[0]["entry_trigger"] == "live"          # still pressing as well
+    assert rows[0]["armed_at_minute"] == 16            # but armed nine minutes ago
+
+
+def test_only_the_first_arming_is_kept(board, quote):
+    """The reading that made a fixture a candidate is the one a later entry has
+    to be judged against. Overwriting it with whatever the index happened to say
+    on the minute the price crossed would leave the record describing the price,
+    not the signal."""
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60
+    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+    first = state.armed[1]["pressure"]
+
+    hotter = _sig(minute=17, home_shots_on_total=9, home_shots_inside_total=9,
+                  home_xg_total=2.0, home_corners_total=6,
+                  home_possession=70.0, away_possession=30.0)
+    ht.observe({1: hotter}, fht.load(), board, state)
+    assert state.armed[1]["pressure"] == first
+    assert state.armed[1]["minute"] == 16
+
+
+def test_a_long_price_alone_never_enters(board, quote):
+    """MIN_ODDS is a second gate, not a substitute for the first. A quiet match
+    at 3.00 is a quiet match."""
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.33, 0.31     # 3.03
+    quiet = _sig(minute=30, home_possession=50.0, away_possession=50.0,
+                 has_window=True)
+    rows = ht.observe({1: quiet}, fht.load(), board, state)
+    assert not rows[0]["would_enter"]
+    assert rows[0]["entry_trigger"] is None
+    assert 1 not in state.armed
+
+
+def test_the_latch_expires_with_the_entry_window(board, quote):
+    """An armed fixture that runs out of clock is the cost of the price gate,
+    and the row has to say so — a plain 'minute > 40' would hide it inside the
+    ordinary window misses."""
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60
+    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+
+    quote["best_ask"], quote["best_bid"] = 0.20, 0.18
+    rows = ht.observe({1: _pressing(44)}, fht.load(), board, state)
+    assert not rows[0]["would_enter"]
+    assert "armed at 16" in rows[0]["skip_reason"]
+
+
+def test_a_goal_beats_the_latch(board, quote):
+    """Arming is not a promise. The bet is defined by the match being 0-0."""
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60
+    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+
+    quote["best_ask"], quote["best_bid"] = 0.50, 0.48
+    rows = ht.observe({1: _pressing(25, home_goals=1)}, fht.load(), board, state)
+    assert not rows[0]["would_enter"]
+    assert "0-0" in rows[0]["skip_reason"]
+
+
+def test_min_odds_and_max_entry_price_are_the_same_number(board):
+    """1/0.5714 is 1.75008, not 1.75. A book quoting exactly the bar must not be
+    refused by a rounding artifact."""
+    assert 1.0 / ht.MAX_ENTRY_PRICE == pytest.approx(ht.MIN_ODDS)
+    ok = _sig(minute=17)
+    assert ht._why_not(_row(), _book(ask=ht.MAX_ENTRY_PRICE), ok) == ""
 
 
 def test_a_goal_ends_it(board):

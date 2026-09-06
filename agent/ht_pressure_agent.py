@@ -8,6 +8,13 @@ THE RULE (as specified)
 A fixture is still 0-0, the clock has passed 15 minutes, and the first 15 minutes
 were played at high pressure. Buy Over 0.5 for the first half, 1u, paper.
 
+From obs_version 4 (2026-09-06) there is a second, independent gate: never take
+this line at less than 1.75. The two gates are separate EVENTS, not one test —
+a fixture that presses while the book is still short is ARMED and monitored, and
+enters on the first later poll where the price has arrived and the book is
+clean. See MIN_ODDS for what that gate actually selects, which is mostly the
+clock.
+
 It is a PREDICTION, not a price comparison — the same design as the sibling
 agent's obs_version 2. The fair value from the empirical table is computed and
 stored on every row, with and without the pressure term, because that is the null
@@ -61,6 +68,16 @@ Two things that did NOT change, deliberately:
 books is about equally negative at every minute (-3.4pp at 15-19', -4.9 at 20-24',
 -3.1 at 25-29', -2.3 at 30-34', -5.4 at 35-40'; all CIs cross zero). See db/040.
 
+WHAT obs_version 4 CHANGES, AND WHAT IT DOES NOT
+-------------------------------------------------
+It changes WHICH fixtures are bought and at what price; it does not claim to
+improve the signal. The odds-band split of the first 68 settled entries shows no
+gradient at all — hit rate tracks the implied price band by band (0.688 vs 0.716,
+0.581 vs 0.620, 0.562 vs 0.551) and every band's CI is ±26pp or wider against a
+2-4pp target. The gate is a decision about what this strategy IS, taken by the
+user, and it is recorded as a new obs_version precisely so it is never pooled
+with the v1-v3 series.
+
 Usage:
     python ht_pressure_agent.py --once            # one cycle (own tracker poll)
     python ht_pressure_agent.py --once --dry-run  # no DB writes, no trades
@@ -104,6 +121,7 @@ from late_goals_observer import (                                  # noqa: E402
     ladder_of,
     pm_over25,
 )
+import af_budget
 from live_tracker import LiveMatchTracker, PressureSignals, danger_index  # noqa: E402
 from pressure_agent import (                                       # noqa: E402
     _no_stats_reason,
@@ -122,7 +140,7 @@ log = logging.getLogger("ht_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure HT Over 0.5"
-OBS_VERSION = 3
+OBS_VERSION = 4
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -185,7 +203,39 @@ ENTRY_MAX_MINUTE = 40
 # 19 still means "busier than three fixtures in four" on the new axis: 23.2% of
 # rolling readings clear it. No threshold was refitted to an outcome.
 MIN_PRESSURE = 19.0
+# ── the minimum price — obs_version 4, 2026-09-06 ───────────────────────────
+# The user's rule: do not take this line at less than 1.75. A fixture that
+# presses while the book is still shorter than that is NOT dropped — it is
+# ARMED, and the agent keeps watching it until the price gets there (see
+# HTState.armed).
+#
+# Be clear about what this gate actually selects, because it does not read like
+# a price rule in the data. On 5,436 clean 0-0 polls between 15' and 40', the
+# share of the book already quoting 1.75 or longer is:
+#
+#   15-19'  41%   median ask 0.590 (1.69)      30-34'  99%   0.370 (2.70)
+#   20-24'  77%              0.530 (1.89)      35-40' 100%   0.280 (3.57)
+#   25-29'  95%              0.460 (2.17)
+#
+# The ask falls with the clock because the FAIR VALUE falls with the clock, so
+# "wait for 1.75" is very close to "wait until ~25'" — a clock rule wearing a
+# price rule's clothes. And db/040 measured that later is not cheaper: `real -
+# ask` on clean books is about equally negative at every minute from 15' to 40'
+# (-3.4 / -4.9 / -3.1 / -2.3 / -5.4pp, every CI crossing zero). What this buys
+# is leverage on whatever the pressure signal is worth, not a better price.
+#
+# Replaying it over the stored rows, of 121 fixtures that ever armed (pressure
+# >= 19, still 0-0, 15-40'): 11 were enterable at the arming poll, 49 more got
+# there on a later poll (median wait 9 minutes, p90 13), and 61 never reached
+# 1.75 on a clean book before a goal or half time. So the funnel roughly halves
+# and the entries move to a later, longer part of the clock.
+MIN_ODDS = 1.75
+MAX_ENTRY_PRICE = 1.0 / MIN_ODDS          # 0.5714
+_PRICE_EPS = 1e-9                         # 1/0.5714 is 1.75008, not 1.75
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
+# — now subsumed by MAX_ENTRY_PRICE, kept because it is what the v1-v3 series was
+# recorded against and removing it would silently change the meaning of the
+# skip_reason histogram.
 # The sibling asks for $50. This book is an order of magnitude thinner (see the
 # header), and 1u of paper stands in for a $1-2.50 real order, so $25 across the
 # top five levels is the honest floor. Below it there is no fill to speak of.
@@ -353,13 +403,34 @@ class HTState:
     """What has to survive between polls.
 
     first15  — fixture_id -> the frozen opening measurement.
+    armed    — fixture_id -> the poll at which this fixture first cleared the
+               pressure gate, from obs_version 4. The price gate (MIN_ODDS) is
+               separate from the signal gate: a fixture that presses at 16'
+               while the book is still 1.62 is not a fixture that failed, it is
+               a fixture whose price has not arrived. It stays armed and enters
+               on the first later poll where the book is long enough and clean.
+               Only the FIRST arming is kept — the reading that made this
+               fixture a candidate is the one the eventual entry has to be
+               judged against, not whatever the index happened to read on the
+               minute the price crossed.
     pre      — PM fixture title -> {p, prematch}. The bucket the fair value is
                read from is the PRE-MATCH total, so a value first seen at 20'
                into a goalless match is not it: that price has already drifted
                down and would push the fixture into the 'lo' bucket and quietly
                lower our own fair value. Captured before kickoff or not used.
+
+    ⚠️ `armed` is a latch, and this project has been bitten three times in three
+    weeks by latches that never expired (the uncovered-league blacklist, the
+    PM-listed cache, the stats carry-forward). This one is bounded on both ends
+    and cannot outlive its own question: it is only ever consulted inside
+    ENTRY_MIN_MINUTE..ENTRY_MAX_MINUTE on a fixture that is still 0-0, and
+    prune() drops it with everything else. It is also deliberately NOT a
+    substitute for a live reading anywhere it is recorded: entry_trigger says on
+    every row whether pressure was passing at the moment of entry or only when
+    the fixture was armed.
     """
     first15: dict[int, dict] = field(default_factory=dict)
+    armed: dict[int, dict] = field(default_factory=dict)
     pre: dict[str, dict] = field(default_factory=dict)
 
     def prune(self, older_than_s: float = 6 * 3600) -> None:
@@ -372,6 +443,8 @@ class HTState:
         cutoff = time.time() - older_than_s
         for fid in [k for k, v in self.first15.items() if v["at"] < cutoff]:
             del self.first15[fid]
+        for fid in [k for k, v in self.armed.items() if v["at"] < cutoff]:
+            del self.armed[fid]
         for title in [k for k, v in self.pre.items() if v["at"] < cutoff]:
             del self.pre[title]
 
@@ -517,15 +590,51 @@ def observe(signals: dict[int, PressureSignals], table: dict,
                     edge_pressure_pp=100.0 * (fair_pressure - book["best_ask"]) - fee,
                 )
 
+        # ── arming ──────────────────────────────────────────────────────────
+        # The signal gate and the price gate are now separate events, and they
+        # rarely happen on the same poll: 41% of clean books are already at 1.75
+        # by 15-19' against 95% by 25-29'. A fixture that presses is armed here;
+        # what it is waiting for is the price, and it waits with the pressure
+        # reading that armed it on the record.
+        #
+        # The reading as of THIS poll — cumulative to 18', rolling window after.
+        # Never the running average past 18': it dilutes a late surge into the
+        # quiet opening that preceded it.
+        pressing = bool(
+            row["pressure_now"] is not None
+            and row["pressure_now"] >= MIN_PRESSURE
+            and sig.has_stats
+        )
+        if (pressing and goals == 0
+                and ENTRY_MIN_MINUTE <= sig.minute <= ENTRY_MAX_MINUTE
+                and sig.fixture_id not in state.armed):
+            state.armed[sig.fixture_id] = {
+                "minute": sig.minute,
+                "pressure": row["pressure_now"],
+                "source": row["pressure_source"],
+                "at": time.time(),
+            }
+        armed = state.armed.get(sig.fixture_id)
+        if armed:
+            row["armed_at_minute"] = armed["minute"]
+            row["armed_pressure"] = armed["pressure"]
+        # 'live'  — pressure is passing at this very poll
+        # 'armed' — it passed earlier and the fixture has been monitored since,
+        #           which is the case the price gate exists to create. Recorded
+        #           because an entry made on a reading that has since cooled is
+        #           not the same bet, and the two must stay separable.
+        row["entry_trigger"] = ("live" if pressing else "armed") if armed else None
+
+        odds_ok = book["best_ask"] <= MAX_ENTRY_PRICE + _PRICE_EPS
         row["would_enter"] = bool(
             goals == 0
             and ENTRY_MIN_MINUTE <= sig.minute <= ENTRY_MAX_MINUTE
-            # The reading as of THIS poll — cumulative to 18', rolling window
-            # after. Never the running average past 18': it dilutes a late surge
-            # into the quiet opening that preceded it.
-            and row["pressure_now"] is not None
-            and row["pressure_now"] >= MIN_PRESSURE
+            # Either pressing now, or armed by an earlier poll and still 0-0.
+            and (pressing or armed is not None)
             and sig.has_stats
+            # obs_version 4: never shorter than MIN_ODDS. Below it the fixture
+            # keeps being observed and stays armed; it is not an entry.
+            and odds_ok
             and book["best_ask"] <= MAX_ASK
             and book["best_bid"] is not None
             and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
@@ -535,26 +644,41 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             and row["score_agrees"] is not False
         )
         if not row["would_enter"] and not row["skip_reason"]:
-            row["skip_reason"] = _why_not(row, book, sig)
+            row["skip_reason"] = _why_not(row, book, sig, armed)
         rows.append(row)
 
     return rows
 
 
-def _why_not(row: dict, book: dict, sig: PressureSignals) -> str:
+def _why_not(row: dict, book: dict, sig: PressureSignals,
+             armed: dict | None = None) -> str:
     goals = sig.home_goals + sig.away_goals
     if goals:
         return f"not 0-0 ({sig.home_goals}-{sig.away_goals})"
     if sig.minute < ENTRY_MIN_MINUTE:
         return f"minute {sig.minute} < {ENTRY_MIN_MINUTE}"
     if sig.minute > ENTRY_MAX_MINUTE:
+        # An armed fixture that ran out of clock is the cost of the price gate,
+        # and it has to be legible as that rather than as a plain window miss.
+        if armed:
+            return (f"armed at {armed['minute']}' — window closed at "
+                    f"{ENTRY_MAX_MINUTE}' without reaching {MIN_ODDS:.2f}")
         return f"minute {sig.minute} > {ENTRY_MAX_MINUTE}"
+    # The price gate is reported BEFORE the pressure gate for an armed fixture:
+    # the reason it did not enter is the price, and the reading is allowed to
+    # have cooled while it waited. This is the monitoring state, not a failure.
+    if armed and book["best_ask"] > MAX_ENTRY_PRICE + _PRICE_EPS:
+        return (f"armed at {armed['minute']}' (pressure {armed['pressure']:.0f}) "
+                f"— monitoring: {1 / book['best_ask']:.2f} < {MIN_ODDS:.2f}")
     if row["pressure_now"] is None:
         return (f"no {FIRST15_MIN}-minute window at {sig.minute}' "
                 f"(fixture picked up late)")
     if row["pressure_now"] < MIN_PRESSURE:
         return (f"{row['pressure_source'] or 'pressure'} pressure "
                 f"{row['pressure_now']:.0f} < {MIN_PRESSURE}")
+    if book["best_ask"] > MAX_ENTRY_PRICE + _PRICE_EPS:
+        return (f"odds {1 / book['best_ask']:.2f} < {MIN_ODDS:.2f} "
+                f"(ask {book['best_ask']:.3f})")
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
     if book["best_bid"] is None:
@@ -596,6 +720,9 @@ def _base_row(sig: PressureSignals) -> dict:
         "pressure_source": None,         # 'opening' | 'window'
         "pressure_minute": None,
         "has_window": False,
+        "armed_at_minute": None,         # obs_version 4 — the latch
+        "armed_pressure": None,
+        "entry_trigger": None,           # 'live' | 'armed' | None (never armed)
         "pressure_factor": None,
         "pre_over25": None, "pre_is_prematch": False,
         "best_bid": None, "best_ask": None,
@@ -619,7 +746,8 @@ _COLS = [
     "has_stats", "has_xg",
     "home_danger", "away_danger", "pressure_index", "opening_pressure",
     "opening_minute", "pressure_now", "pressure_source", "pressure_minute",
-    "has_window", "pressure_factor", "pre_over25", "pre_is_prematch",
+    "has_window", "armed_at_minute", "armed_pressure", "entry_trigger",
+    "pressure_factor", "pre_over25", "pre_is_prematch",
     "best_bid", "best_ask", "bid_depth_usd", "ask_depth_usd",
     "fair_base", "fair_pressure", "fair_n", "fee_pp",
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
@@ -679,18 +807,34 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
             span = (f"the first {r['pressure_minute']} minutes"
                     if r["pressure_source"] == "opening"
                     else f"the 15 minutes to {r['pressure_minute']}'")
+            if r["entry_trigger"] == "armed":
+                press_txt = (
+                    f"Armed at {r['armed_at_minute']}' on a pressure reading of "
+                    f"{r['armed_pressure']:.0f}/100 and monitored since — this is "
+                    f"the poll at which the price finally reached {MIN_ODDS:.2f}. "
+                    f"The reading NOW is "
+                    + (f"{r['pressure_now']:.0f}/100 over {span}. "
+                       if r['pressure_now'] is not None else "unavailable. ")
+                )
+            else:
+                press_txt = (
+                    f"Pressure {r['pressure_now']:.0f}/100 over {span} "
+                    f"(danger H={r['home_danger']:.0f} A={r['away_danger']:.0f}). "
+                )
             reasoning = (
                 f"{r['home']} 0-0 {r['away']} {r['minute']}' — Over 0.5 first half "
                 f"at {r['best_ask']:.3f} ({1 / r['best_ask']:.2f}). "
-                f"Pressure {r['pressure_now']:.0f}/100 over {span} "
-                f"(danger H={r['home_danger']:.0f} A={r['away_danger']:.0f}). "
+                + press_txt +
                 f"PREDICTION: a goalless match being played at this intensity is "
                 f"more likely to produce a goal before the break than the market "
                 f"is paying for. Bought on "
                 f"that call alone, not on a price comparison. For the record, "
                 f"{fair_txt} — recorded as the null, NOT a gate. "
                 f"PAPER — and note PM's price on this market has historically sat "
-                f"~4pp ABOVE the realised frequency, so this starts from behind."
+                f"~4pp ABOVE the realised frequency, so this starts from behind. "
+                f"obs_version 4 takes nothing shorter than {MIN_ODDS:.2f}; the ask "
+                f"falls with the clock because the fair value does, so that gate "
+                f"buys leverage, not a cheaper price."
             )
             cur.execute(
                 """INSERT INTO paper_trades
@@ -726,6 +870,7 @@ def _first_half_goals_api(fixture_id: int) -> tuple[int | None, int | None]:
     if not key:
         return None, None
     try:
+        af_budget.process_counter().record("events")
         resp = requests.get(
             "https://v3.football.api-sports.io/fixtures/events",
             params={"fixture": fixture_id, "type": "Goal"},
@@ -946,6 +1091,68 @@ def report(conn) -> None:
                       f"{r['mean_minute']:4.1f}  mean ask {r['mean_ask']:.3f} "
                       f"({1 / r['mean_ask']:.2f})  hit {hit}")
             print("  (n >= 200 per bucket before reading anything into this)")
+
+        # The monitoring state itself — obs_version 4. A fixture that armed and
+        # never got its price is the whole cost of MIN_ODDS, and it has to be
+        # countable rather than inferred from a shrinking entry count.
+        cur.execute(
+            """WITH a AS (
+                 SELECT fixture_id,
+                        min(armed_at_minute) AS armed_at,
+                        bool_or(entered)     AS entered,
+                        min(minute) FILTER (WHERE entered) AS entry_minute,
+                        max(entry_trigger) FILTER (WHERE entered) AS trigger
+                   FROM ht_pressure_observations
+                  WHERE obs_version >= 4 AND armed_at_minute IS NOT NULL
+                  GROUP BY 1)
+               SELECT count(*) AS armed,
+                      count(*) FILTER (WHERE entered) AS entered,
+                      count(*) FILTER (WHERE trigger = 'live')  AS live,
+                      count(*) FILTER (WHERE trigger = 'armed') AS waited,
+                      avg(armed_at)::float8 AS mean_armed_at,
+                      avg(entry_minute - armed_at)::float8 AS mean_wait
+                 FROM a"""
+        )
+        a = cur.fetchone()
+        if a and a["armed"]:
+            print(f"\nMIN_ODDS {MIN_ODDS:.2f} funnel (obs_version >= 4): "
+                  f"{a['armed']} fixtures armed, {a['entered']} entered "
+                  f"({a['armed'] - a['entered']} never reached the price)")
+            print(f"  armed at mean minute {a['mean_armed_at']:.1f}; entries "
+                  f"{a['live']} on a live reading, {a['waited']} after monitoring"
+                  + (f" (mean wait {a['mean_wait']:.1f} min)"
+                     if a["mean_wait"] is not None else ""))
+
+        # By odds band. Every band here is far below the n>=200 gate, so this is
+        # a description of what has been bought, not a result about any band.
+        cur.execute(
+            """SELECT width_bucket(pt.entry_odds, ARRAY[1.50,1.75,2.00,2.50,3.50]) AS b,
+                      count(*) AS n,
+                      count(*) FILTER (WHERE pt.result = 'won') AS won,
+                      avg(pt.entry_odds)::float8 AS mean_odds,
+                      avg(o.fair_pressure)::float8 AS fair,
+                      sum(pt.payout_units - pt.stake_units)::float8 AS pnl,
+                      sum(pt.stake_units)::float8 AS staked,
+                      sum(0.05 * (1 - pt.entry_price))::float8 AS fee
+                 FROM ht_pressure_observations o
+                 JOIN paper_trades pt ON pt.id = o.paper_trade_id
+                WHERE pt.result IS NOT NULL
+                GROUP BY 1 ORDER BY 1"""
+        )
+        bands = cur.fetchall()
+        if bands:
+            names = ["<1.50", "1.50-1.75", "1.75-2.00", "2.00-2.50",
+                     "2.50-3.50", "3.50+"]
+            print("\nsettled by odds band (1u flat, fee = 0.05*(1-p) per unit):")
+            for r in bands:
+                hit = r["won"] / r["n"]
+                net = 100.0 * (r["pnl"] - r["fee"]) / r["staked"]
+                fair = f"{1 / r['fair']:.2f}" if r["fair"] else "  -  "
+                print(f"  {names[r['b']]:>10}  n={r['n']:4d}  won={r['won']:4d}  "
+                      f"hit {hit:.3f}  mean odds {r['mean_odds']:.2f}  "
+                      f"fair {fair}  P&L {r['pnl']:+7.2f}u  net yield {net:+6.1f}%")
+            print("  (no band is near n >= 200 — this describes the book, it does "
+                  "not test it)")
 
         cur.execute(
             """SELECT count(*) AS n,
