@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { fmtPnl, formatDate, formatDateTime } from '../lib/helpers'
+import { fmtPnl, formatDate, formatDateTime, byRecordThenPnl } from '../lib/helpers'
 import type { Section } from '../lib/types'
 import type { DbStats, Strategy, PaperTrade } from '../lib/supabase'
 import { Spinner } from './ui'
@@ -21,9 +21,11 @@ export function HomeSection({
   loading: boolean
 }) {
   const latestTrade = trades[0] ?? null
-  const top3 = [...strategies]
-    .sort((a, b) => (b.total_pnl ?? 0) - (a.total_pnl ?? 0))
-    .slice(0, 3)
+  // Ranked by P&L, but an agent with nothing settled sorts LAST rather than
+  // at 0.00u — otherwise a newly registered arm outranks every real record on
+  // the strength of having never bet, and takes a homepage slot off one that
+  // has.
+  const top3 = [...strategies].sort(byRecordThenPnl).slice(0, 3)
   const settledTrades = trades.filter(t => !!t.resolved_at)
   const totalPnl = settledTrades.reduce((s, t) => s + Number(t.payout_units ?? 0) - Number(t.stake_units ?? 0), 0)
   const wins = settledTrades.filter(t => t.result === 'won').length
@@ -118,10 +120,10 @@ export function HomeSection({
         </div>
       </div>
 
-      {/* ── STRATEGIES OVERVIEW ── */}
+      {/* ── AGENTS OVERVIEW ── */}
       <div className="home-block">
         <div className="block-eyebrow">
-          <span>STRATEGIES</span>
+          <span>AGENTS</span>
           <button onClick={() => setSection('agent')}>FULL DETAILS →</button>
         </div>
         {top3.length > 0 ? (
@@ -156,9 +158,9 @@ export function HomeSection({
             background: 'var(--bg)', border: '1px solid var(--border)',
             padding: '24px 20px', fontSize: '13px', color: 'var(--grey)', lineHeight: '1.7',
           }}>
-            <span style={{ color: 'var(--white)' }}>No strategies ranked yet.</span>{' '}
+            <span style={{ color: 'var(--white)' }}>No agents ranked yet.</span>{' '}
             The agent is scanning Polymarket for mispriced markets.
-            Strategies appear here once they accumulate enough trades.
+            Agents appear here once they accumulate enough trades.
           </div>
         )}
       </div>

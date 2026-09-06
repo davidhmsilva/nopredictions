@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { fmtPnl, fmtPct } from '../lib/helpers'
+import { fmtPnl, fmtPct, byRecordThenPnl } from '../lib/helpers'
 import type { PaperTrade, Strategy } from '../lib/supabase'
 import { SectionWrap, SectionTitle, Spinner } from './ui'
 import { TradeCard } from './TradeCard'
@@ -37,10 +37,14 @@ export function AgentSection({
   )
   const settled = trades.filter((t) => !!t.resolved_at && t.result !== 'void')
   const recentSettled = trades.filter((t) => !!t.resolved_at).slice(0, 10)
-  // Use strategy view totals (no limit) instead of trades array (capped at 200)
-  const totalPnl = strategies.reduce((s, st) => s + (st.total_pnl ?? 0), 0)
-  const wins = strategies.reduce((s, st) => s + (st.wins ?? 0), 0)
-  const losses = strategies.reduce((s, st) => s + (st.losses ?? 0), 0)
+  // Use strategy view totals (no limit) instead of trades array (capped at 200).
+  // Rows with a parent are SLICES of another agent's trades (v2 re-reads
+  // strategy 16's entries), so they are shown in the list but never summed —
+  // adding them would count the same fixture twice.
+  const owned = strategies.filter((st) => st.parent_strategy_id == null)
+  const totalPnl = owned.reduce((s, st) => s + (st.total_pnl ?? 0), 0)
+  const wins = owned.reduce((s, st) => s + (st.wins ?? 0), 0)
+  const losses = owned.reduce((s, st) => s + (st.losses ?? 0), 0)
   const totalSettled = wins + losses
 
   return (
@@ -89,17 +93,17 @@ export function AgentSection({
         </div>
       )}
 
-      {/* Strategy table (merged from leaderboard) */}
+      {/* Agent table (merged from leaderboard) */}
       {strategies.length > 0 && (
         <>
           <div style={{ fontSize: '11px', letterSpacing: '3px', color: 'var(--grey)', marginBottom: '20px' }}>
-            STRATEGIES
+            AGENTS
           </div>
           <div className="table-scroll" style={{ marginBottom: '40px' }}>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>STRATEGY</th>
+                  <th>AGENT</th>
                   <th>POSITIONS</th>
                   <th>WIN RATE</th>
                   <th>YIELD</th>
@@ -109,7 +113,7 @@ export function AgentSection({
               </thead>
               <tbody>
                 {[...strategies]
-                  .sort((a, b) => (b.total_pnl ?? 0) - (a.total_pnl ?? 0))
+                  .sort(byRecordThenPnl)
                   .map((s) => {
                   const isActive = !s.retired_at
                   const pnlVal = s.total_pnl ?? 0

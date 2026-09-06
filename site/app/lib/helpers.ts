@@ -44,3 +44,21 @@ export function formatDateTime(iso: string | null): string {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     + ' · ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
+
+/**
+ * Leaderboard order: best P&L first, but any agent with nothing settled sorts
+ * LAST rather than at 0.00u.
+ *
+ * A newly registered arm has no record, and 0.00u is not a good one — left to
+ * a plain P&L sort it outranks every agent that has actually bet, purely for
+ * not having bet yet.
+ */
+export function byRecordThenPnl(
+  a: { total_bets?: number; total_pnl?: number },
+  b: { total_bets?: number; total_pnl?: number },
+): number {
+  const hasA = (a.total_bets ?? 0) > 0
+  const hasB = (b.total_bets ?? 0) > 0
+  if (hasA !== hasB) return hasA ? -1 : 1
+  return (b.total_pnl ?? 0) - (a.total_pnl ?? 0)
+}

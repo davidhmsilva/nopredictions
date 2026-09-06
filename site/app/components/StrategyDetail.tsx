@@ -1,9 +1,77 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { fmtPnl, fmtPct, formatDate, formatDateTime } from '../lib/helpers'
-import type { PaperTrade, Strategy } from '../lib/supabase'
+import type { PaperTrade, PressureTrade, Strategy } from '../lib/supabase'
+import {
+  PRESSURE_STRATEGY_IDS,
+  PRESSURE_V2_STRATEGY_ID,
+  V2_WINDOW,
+  fetchPressureTrades,
+  inV2Window,
+} from '../lib/supabase'
 import { formatOutcome, extractMatchName } from './TradeCard'
+
+/**
+ * The two clock cells for a Live Pressure Overs row: when we bought, and when
+ * the goal came.
+ *
+ * The goal minute is only meaningful on a winner — a loser has no goal to date,
+ * so it shows NO GOAL rather than an em dash that could be read as missing data.
+ * A minute measured off our own 60s polling is marked with a leading ~ and can
+ * never exceed 90; only the api-football source carries stoppage time.
+ */
+function PressureClock({
+  row,
+  isWon,
+  isResolved,
+}: {
+  row?: PressureTrade
+  isWon: boolean
+  isResolved: boolean
+}) {
+  const grey = { color: 'var(--grey)', fontSize: '11px' }
+  if (!row) {
+    return (<><td style={grey}>—</td><td style={grey}>—</td></>)
+  }
+  const approx = row.goal_minute_source === 'poll'
+  const waited =
+    row.goal_minute != null ? row.goal_minute - row.entry_minute : null
+
+  return (
+    <>
+      <td style={{ color: 'var(--white)', fontSize: '11px' }}>
+        {row.entry_minute}&apos;
+      </td>
+      <td style={{ fontSize: '11px' }}>
+        {row.goal_minute != null ? (
+          <span
+            style={{ color: 'var(--green)' }}
+            title={
+              approx
+                ? 'Minute we first observed the new score (60s polling, capped at 90)'
+                : 'Exact goal minute from api-football, including stoppage time'
+            }
+          >
+            {approx ? '~' : ''}
+            {row.goal_minute}&apos;
+            {waited != null && waited >= 0 && (
+              // NOT "+5": in football that reads as stoppage time (90+5). This
+              // is how long the bet waited, so it has to say so.
+              <span style={{ color: 'var(--grey)', marginLeft: '6px', fontSize: '10px' }}>
+                {waited}&apos; wait
+              </span>
+            )}
+          </span>
+        ) : isResolved && !isWon ? (
+          <span style={{ color: 'var(--grey)' }}>NO GOAL</span>
+        ) : (
+          <span style={grey}>—</span>
+        )}
+      </td>
+    </>
+  )
+}
 
 export function StrategyDetail({
   strategy,
@@ -19,11 +87,32 @@ export function StrategyDetail({
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }, [strategy.id])
 
-  // Strategy 9 ("Live Polymarket") is synthetic: aggregates every paper_trade
-  // that was actually submitted on-chain, regardless of its source strategy.
+  // Both pressure agents bet on WHEN a goal arrives, so the clock is the point
+  // of the strategy, not decoration. It is not on paper_trades — see
+  // fetchPressureTrades — so it is fetched only for these strategies.
+  const isPressure = PRESSURE_STRATEGY_IDS.includes(strategy.id)
+  const [pressure, setPressure] = useState<Map<number, PressureTrade>>(new Map())
+  useEffect(() => {
+    if (!isPressure) return
+    let live = true
+    fetchPressureTrades().then((m) => { if (live) setPressure(m) })
+    return () => { live = false }
+  }, [isPressure])
+
+  // Two strategies own no paper_trades of their own and resolve their rows from
+  // someone else's. 9 ("Live Polymarket") takes every trade actually submitted
+  // on-chain, whatever produced it; 19 ("v2") takes strategy 16's own entries
+  // that land in the minute/odds window, from the date it started counting.
+  //
+  // The v2 predicate needs the entry minute, which lives on v_pressure_trades
+  // and arrives a moment after the page does — so this list is empty on the
+  // first paint while the header, which reads the DB view, is already right.
+  const isV2 = strategy.id === PRESSURE_V2_STRATEGY_ID
   const stratTrades = trades
     .filter((t) =>
-      strategy.id === 9 ? !!t.pm_live : t.strategy_id === strategy.id
+      strategy.id === 9 ? !!t.pm_live
+        : isV2 ? inV2Window(t, pressure.get(t.id)?.entry_minute)
+        : t.strategy_id === strategy.id
     )
     .sort((a, b) => new Date(b.game_time ?? b.placed_at).getTime() - new Date(a.game_time ?? a.placed_at).getTime())
 
@@ -93,17 +182,54 @@ export function StrategyDetail({
           marginBottom: '24px',
         }}
       >
-        ← ALL STRATEGIES
+        ← ALL AGENTS
       </button>
 
       {/* Strategy name */}
       <div style={{ fontSize: '18px', letterSpacing: '3px', color: 'var(--white)', marginBottom: '8px' }}>
         {strategy.name}
       </div>
-      <div style={{ fontSize: '11px', color: 'var(--grey)', marginBottom: '32px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--grey)', marginBottom: isV2 ? '16px' : '32px' }}>
         {strategy.retired_at ? 'RETIRED' : 'LIVE'}
         {' · '}{stratTrades.length} TRADES LOADED
       </div>
+
+      {/* v2 is a filter over another agent, chosen by looking at the data it is
+          now being judged on. Saying so on the page is not a disclaimer — it is
+          the reason the arm starts empty instead of opening on the number that
+          made it look worth tracking. */}
+      {isV2 && (
+        <div
+          style={{
+            fontSize: '11px',
+            lineHeight: '1.8',
+            color: 'var(--grey)',
+            border: '1px solid var(--border, #2a2a2a)',
+            padding: '14px 16px',
+            marginBottom: '32px',
+            maxWidth: '640px',
+          }}
+        >
+          A filter over <span style={{ color: 'var(--white)' }}>Live Pressure Overs</span>, not a
+          second agent — it buys nothing of its own. Every entry that agent makes between minute{' '}
+          <span style={{ color: 'var(--white)' }}>{V2_WINDOW.minMinute}&apos;–{V2_WINDOW.maxMinute}&apos;</span>{' '}
+          at odds{' '}
+          <span style={{ color: 'var(--white)' }}>
+            {V2_WINDOW.minOdds.toFixed(2)}–{(V2_WINDOW.maxOddsExclusive - 0.01).toFixed(2)}
+          </span>{' '}
+          is counted here too, so this P&L is a slice of that one and is left out of the totals.
+          <br />
+          <br />
+          The window was picked as the best cell of a minute × odds grid over 112 settled entries.
+          Reshuffled noise finds an equally good cell{' '}
+          <span style={{ color: 'var(--white)' }}>half the time (p = 0.39)</span>, and the same
+          pocket measured across 564 fixtures is worth{' '}
+          <span style={{ color: 'var(--white)' }}>+1.34pp, CI [−3.46, +6.28]</span> against a 2.89pp
+          taker fee. So the honest prior is zero to slightly negative. It counts from{' '}
+          {formatDate(new Date(V2_WINDOW.from).toISOString())} forward — the trades it was chosen on
+          are deliberately not in the record.
+        </div>
+      )}
 
       {/* Stats strip — 6 cells, so use 3-column variant (3+3 balanced). */}
       <div className="lab-stats-strip cols-3" style={{ marginBottom: '40px' }}>
@@ -220,6 +346,8 @@ export function StrategyDetail({
               <tr>
                 <th>MATCH</th>
                 <th>PICK</th>
+                {isPressure && <th>ENTRY</th>}
+                {isPressure && <th>GOAL</th>}
                 <th>PM ODDS</th>
                 <th>MODEL</th>
                 <th>EDGE</th>
@@ -253,11 +381,18 @@ export function StrategyDetail({
                 return (
                   <tr key={t.id}>
                     <td style={{ color: 'var(--white)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {extractMatchName(t)}
+                      {/* Pressure entries have no pm_markets row to join, so
+                          extractMatchName returns nothing and the column reads
+                          as a full column of em-dashes. The teams are already
+                          in the view we fetched for the clock. */}
+                      {extractMatchName(t) === '—' && pressure.get(t.id)
+                        ? `${pressure.get(t.id)!.home} vs ${pressure.get(t.id)!.away}`
+                        : extractMatchName(t)}
                     </td>
                     <td style={{ color: 'var(--accent)', fontSize: '11px' }}>
                       {formatOutcome(t.outcome)}
                     </td>
+                    {isPressure && <PressureClock row={pressure.get(t.id)} isWon={isWon} isResolved={isResolved} />}
                     <td>{entryOdds > 0 ? entryOdds.toFixed(2) : '—'}</td>
                     <td>{modelOdds > 0 ? modelOdds.toFixed(2) : '—'}</td>
                     <td style={{ color: 'var(--green)' }}>+{edgePp.toFixed(1)}%</td>

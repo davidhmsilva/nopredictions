@@ -13,12 +13,16 @@ export function LeaderboardSection({
 }) {
   if (loading) return <SectionWrap><Spinner /></SectionWrap>
 
-  const totalBets = strategies.reduce((s, x) => s + (x.total_bets ?? 0), 0)
-  const totalPnl = strategies.reduce((s, x) => s + (x.total_pnl ?? 0), 0)
-  const allWins = strategies.reduce((s, x) => s + (x.wins ?? 0), 0)
+  // A row with a parent is a slice of that parent's trades (v2 re-reads
+  // strategy 16), so it appears in the table but is kept out of every total —
+  // summing it would double-count the trades it borrows.
+  const owned = strategies.filter((x) => x.parent_strategy_id == null)
+  const totalBets = owned.reduce((s, x) => s + (x.total_bets ?? 0), 0)
+  const totalPnl = owned.reduce((s, x) => s + (x.total_pnl ?? 0), 0)
+  const allWins = owned.reduce((s, x) => s + (x.wins ?? 0), 0)
   const avgClv =
-    strategies.length > 0
-      ? strategies.reduce((s, x) => s + (x.avg_clv ?? 0), 0) / strategies.length
+    owned.length > 0
+      ? owned.reduce((s, x) => s + (x.avg_clv ?? 0), 0) / owned.length
       : 0
 
   return (
@@ -29,7 +33,7 @@ export function LeaderboardSection({
       <div className="rg-4" style={{ gap: '16px', marginBottom: '40px' }}>
         {[
           { label: 'TOTAL P&L', value: totalBets > 0 ? fmtPnl(totalPnl) : '—', green: totalPnl >= 0 },
-          { label: 'AVG YIELD', value: totalBets > 0 ? fmtPct(strategies.reduce((s, x) => s + (x.yield_pct ?? 0), 0) / strategies.length) : '—', green: true },
+          { label: 'AVG YIELD', value: totalBets > 0 ? fmtPct(owned.reduce((s, x) => s + (x.yield_pct ?? 0), 0) / owned.length) : '—', green: true },
           { label: 'AVG CLV', value: totalBets > 0 ? fmtClv(avgClv * 100) : '—', green: avgClv >= 0 },
           { label: 'TOTAL POSITIONS', value: totalBets > 0 ? String(totalBets) : '—', green: true },
         ].map((s) => (
