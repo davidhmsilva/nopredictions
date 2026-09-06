@@ -2330,10 +2330,34 @@ button { font-family: var(--font); }
   border-radius: 3px; padding: 1px 4px; line-height: 1.3;
 }
 .np-nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0; }
-.np-paper-pill {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
-  color: var(--grey); border: 1px solid var(--border2); border-radius: 999px;
-  padding: 4px 10px; cursor: help; white-space: nowrap; flex-shrink: 0;
+/* ── accounts (rendered, not wired) ── */
+.np-account { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.np-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 999px;
+  background: none; border: 1px solid transparent; cursor: pointer;
+  font-size: 14px; line-height: 1; transition: background .12s, border-color .12s;
+}
+.np-icon-btn:hover { background: var(--bg2); border-color: var(--border2); }
+.np-btn-ghost {
+  background: none; border: none; cursor: pointer; white-space: nowrap;
+  color: var(--grey); font-family: var(--font); font-size: 13px; font-weight: 550;
+  padding: 7px 10px; border-radius: var(--r-sm); transition: color .12s, background .12s;
+}
+.np-btn-ghost:hover { color: var(--white); background: var(--bg2); }
+.np-btn-signup {
+  background: var(--green); border: 1px solid var(--green); border-radius: 999px;
+  color: #05140b; font-family: var(--font); font-size: 13px; font-weight: 650;
+  padding: 7px 15px; cursor: pointer; white-space: nowrap; transition: background .12s;
+}
+.np-btn-signup:hover { background: #29d669; border-color: #29d669; }
+
+.np-notice {
+  position: absolute; top: calc(100% + 9px); right: 0; z-index: 70;
+  background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+  padding: 9px 13px; font-size: 12.5px; color: var(--white);
+  width: max-content; max-width: 270px; line-height: 1.45;
 }
 
 .np-mobile-tabs { display: none; }
@@ -2769,6 +2793,9 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .np-tape-strip { gap: 20px; }
   .np-search { display: none; }
   .sc-cats-inner { height: 40px; padding: 0 14px; }
+  /* Sign up survives on a phone; the rest is a tap away once accounts exist. */
+  .np-btn-ghost, .np-icon-btn { display: none; }
+  .np-btn-signup { padding: 6px 13px; font-size: 12.5px; }
   /* One card on a phone. Three stacked is most of a screen before the board
      starts, and the other two are a scroll away in the table anyway. */
   .sc-big { grid-template-columns: 1fr; }

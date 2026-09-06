@@ -141,6 +141,52 @@ function NavSearch() {
   )
 }
 
+/** Accounts and alerts, built but not wired.
+ *
+ *  These are here so the shell is visually finished; there is no auth behind
+ *  them yet. A click therefore SAYS so rather than doing nothing — a button
+ *  that silently swallows the click is the pattern this repo already removed
+ *  once, in a newsletter form that set local state and showed a tick without
+ *  sending anywhere. Replace `notYet` with the real handlers when accounts
+ *  exist and nothing else here has to change. */
+function AccountActions() {
+  const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!notice) return
+    const id = setTimeout(() => setNotice(null), 3200)
+    return () => clearTimeout(id)
+  }, [notice])
+
+  const notYet = (what: string) => () =>
+    setNotice(`${what} isn't live yet — the site runs without accounts for now.`)
+
+  return (
+    <div className="np-account">
+      <button
+        className="np-icon-btn"
+        onClick={notYet('Alerts')}
+        aria-label="Alerts"
+        title="Alerts"
+      >
+        <span aria-hidden="true">🔔</span>
+      </button>
+      <button className="np-btn-ghost" onClick={notYet('Log in')}>
+        Log in
+      </button>
+      <button className="np-btn-signup" onClick={notYet('Sign up')}>
+        Sign up
+      </button>
+
+      {notice && (
+        <div className="np-notice" role="status">
+          {notice}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function AppNav() {
   const pathname = usePathname() ?? '/'
 
@@ -174,12 +220,7 @@ export function AppNav() {
 
           <div className="np-nav-right">
             <NavSearch />
-            <span
-              className="np-paper-pill"
-              title="No real money is at risk anywhere on this site. There are no accounts, because there is nothing yet to sign in to."
-            >
-              PAPER MODE
-            </span>
+            <AccountActions />
           </div>
         </div>
       </header>
@@ -210,7 +251,8 @@ export function AppFooter() {
           Nothing here is a tip.
         </div>
         <div className="np-footer-legal">
-          18+ · NOT FINANCIAL OR BETTING ADVICE · PAST RESULTS DO NOT PREDICT FUTURE RESULTS
+          PAPER ONLY — NO REAL MONEY · 18+ · NOT FINANCIAL OR BETTING ADVICE · PAST RESULTS DO
+          NOT PREDICT FUTURE RESULTS
         </div>
       </div>
     </footer>
