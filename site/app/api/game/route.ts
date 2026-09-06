@@ -236,6 +236,19 @@ export async function GET(request: Request) {
     const pressure = buildPressure(groups, board, nextRung?.points ?? [], preOver25)
 
     const headlines = buildHeadlines(groups, teams.home, teams.away)
+
+    // The headline markets' own 24h price series, joined on the question so the
+    // chart and the odds tiles above it are the same five markets. Sides were
+    // already resolved by the alias-aware scorer inside buildHeadlines — doing
+    // it a second time here is how the two would drift apart.
+    const series = headlines
+      .map((h) => {
+        const hist = histories.find((x) => x.question === h.question)
+        return hist && hist.points.length > 1
+          ? { label: h.label, points: hist.points }
+          : null
+      })
+      .filter((x): x is { label: string; points: PricePoint[] } => x !== null)
     const looks = buildLooks(groups, live, board, preOver25, competition)
     const watch = buildWatch(groups, live, board, competition, preOver25, movers)
 
@@ -268,6 +281,7 @@ export async function GET(request: Request) {
       looks,
       pulse,
       headlines,
+      series,
       movers: movers.slice(0, 3),
       groups,
       history,

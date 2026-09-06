@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppNav, AppFooter } from '../../components/AppShell'
-import type { GameData, LiveStats, MarketGroup } from '../../lib/gamecenter'
+import type {
+  GameData,
+  Headline,
+  LiveStats,
+  MarketGroup,
+  PricePoint,
+} from '../../lib/gamecenter'
 import { tradeable, type Look, type Pulse } from '../../lib/looks'
 
 const WATCHLIST_KEY = 'np_watchlist'
@@ -34,123 +40,311 @@ function signed(pp: number | null | undefined): string {
   return pp == null ? '—' : `${pp > 0 ? '+' : ''}${pp.toFixed(1)}pp`
 }
 
-// ── the state bar ────────────────────────────────────────────────────────────
+// ── the match, big ───────────────────────────────────────────────────────────
 //
 // Everything a companion needs in the three seconds you look away from the
 // game: who is playing, what the score is, what minute it is.
 
-function StateBar({ data }: { data: GameData }) {
+function MatchHero({ data }: { data: GameData }) {
   const live = data.live
   const board = data.board
   const kickoff = data.kickoff ? new Date(data.kickoff) : null
 
   // The live feed wins when it is there; the board carries the score when it is
   // not, which is most of the time on smaller competitions.
-  const score =
-    live
-      ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute }
-      : board.homeGoals != null && board.awayGoals != null
-        ? { h: board.homeGoals, a: board.awayGoals, minute: null }
-        : null
+  const score = live
+    ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute }
+    : board.homeGoals != null && board.awayGoals != null
+      ? { h: board.homeGoals, a: board.awayGoals, minute: null }
+      : null
   const inPlay = !!live || board.phase === 'live'
-  const badge = board.phase === 'finished' ? 'FT' : inPlay ? 'LIVE' : null
+  const done = board.phase === 'finished'
 
   return (
-    <div className="gc-bar">
-      <div className="gc-bar-main">
-        <span className="gc-bar-team">{data.home}</span>
-        {score ? (
-          <span className="gc-bar-score">
-            {score.h}-{score.a}
-          </span>
-        ) : (
-          <span className="gc-bar-vs">vs</span>
-        )}
-        <span className="gc-bar-team gc-bar-team-a">{data.away}</span>
-      </div>
-
-      <div className="gc-bar-meta">
-        {badge && (
-          <span className={badge === 'FT' ? 'gc-ft-badge' : 'analysis-live-badge'}>{badge}</span>
-        )}
-        {score?.minute != null ? (
-          <span className="gc-bar-minute">{score.minute}&apos;</span>
+    <header className={`gc-hero${inPlay && !done ? ' is-live' : ''}`}>
+      <div className="gc-hero-top">
+        <span className="gc-hero-comp">{data.competition ?? 'Football'}</span>
+        {done ? (
+          <span className="np-badge">FULL TIME</span>
         ) : inPlay ? (
-          <span className="gc-bar-noclock" title={board.evidence ?? undefined}>
-            no clock
+          <span className="np-badge is-live">
+            ● LIVE
+            {score?.minute != null && <span className="gc-hero-min">{score.minute}&apos;</span>}
           </span>
         ) : kickoff ? (
-          <span className="gc-bar-ko">
-            {kickoff.toLocaleString(undefined, {
+          <span className="gc-hero-ko np-num">
+            {kickoff.toLocaleString([], {
               weekday: 'short', hour: '2-digit', minute: '2-digit',
             })}
           </span>
         ) : null}
-        {data.competition && <span className="gc-bar-comp">{data.competition}</span>}
       </div>
-    </div>
+
+      <div className="gc-hero-teams">
+        <span className="gc-hero-team">{data.home}</span>
+        {score ? (
+          <span className="gc-hero-score np-num">
+            {score.h}<i>–</i>{score.a}
+          </span>
+        ) : (
+          <span className="gc-hero-v">v</span>
+        )}
+        <span className="gc-hero-team gc-hero-team-away">{data.away}</span>
+      </div>
+
+      {/* When there is no clock, say so rather than showing a minute we do not
+          have. Polymarket's listed start ran half an hour early on some leagues
+          and eight hours late on others, so it is never used as a substitute. */}
+      {inPlay && !done && score?.minute == null && (
+        <div className="gc-hero-noclock" title={board.evidence ?? undefined}>
+          in play · no verified clock for this competition
+        </div>
+      )}
+    </header>
   )
 }
 
-// ── what just happened ───────────────────────────────────────────────────────
+// ── the prices, as tiles ─────────────────────────────────────────────────────
 
-function Pulse({ pulse, stats }: { pulse: Pulse[]; stats: LiveStats | null }) {
-  if (!pulse.length && !stats) return null
-
+function OddsTiles({ headlines }: { headlines: Headline[] }) {
+  if (headlines.length === 0) return null
   return (
-    <section className="gc-pulse">
-      <div className="gc-eyebrow">Last 20 minutes</div>
-
-      {pulse.length > 0 ? (
-        <ul className="gc-pulse-list">
-          {pulse.slice(0, 4).map((p, i) => (
-            <li key={i} className={p.movePp > 0 ? 'gc-pulse-up' : 'gc-pulse-down'}>
-              <span className="gc-pulse-move">{signed(p.movePp)}</span>
-              <span className="gc-pulse-what">
-                {p.question.split(':').pop()?.trim()} — {p.outcome}
-              </span>
-              <span className="gc-pulse-price">
-                {odds(p.from)} → {odds(p.to)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="gc-quiet">Prices have not moved. Nothing is happening.</p>
-      )}
-
-      {stats && <StatStrip s={stats} />}
+    <section className="gc-section">
+      <div className="gc-eyebrow">The main markets</div>
+      <div className="gc-tiles">
+        {headlines.map((h) => (
+          <div key={h.label} className={`gc-tile${h.isMid ? ' is-mid' : ''}`}>
+            <span className="gc-tile-k">{h.label}</span>
+            <span className="gc-tile-v np-num">{h.odds ? h.odds.toFixed(2) : '—'}</span>
+            <span className="gc-tile-sub">
+              {h.isMid ? (
+                <span className="gc-tile-warn" title="No order book — this is a Gamma mid, a number rather than a price you can pay.">
+                  no book
+                </span>
+              ) : (
+                <>
+                  <span className="np-num">{pct(h.prob)}</span>
+                  {h.spreadPp != null && (
+                    <span className="np-num gc-tile-spread"> · {h.spreadPp.toFixed(1)}pp</span>
+                  )}
+                </>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
     </section>
   )
 }
 
-function StatStrip({ s }: { s: LiveStats }) {
-  type Cell = string | number | null
-  const rows: Array<[string, Cell, Cell]> = ([
-    ['xG', s.homeXg?.toFixed(2) ?? null, s.awayXg?.toFixed(2) ?? null],
-    ['shots on', s.homeShotsOn, s.awayShotsOn],
-    ['shots', s.homeShotsTotal, s.awayShotsTotal],
-    ['corners', s.homeCorners, s.awayCorners],
-    ['possession', s.homePossession != null ? `${s.homePossession}%` : null,
-      s.awayPossession != null ? `${s.awayPossession}%` : null],
-  ] as Array<[string, Cell, Cell]>).filter(([, h, a]) => h != null || a != null)
+// ── the chart ────────────────────────────────────────────────────────────────
 
-  if (!rows.length) return null
+const SERIES_COLOUR = ['#22c55e', '#8b94a3', '#3b82f6', '#f59e0b', '#a855f7']
+
+/** Decimal odds on a log axis.
+ *
+ *  Probability would give a bounded, easier axis, but this site quotes decimals
+ *  everywhere and switching units inside one page is how a reader misreads a
+ *  chart. Log spacing is what makes 1.20 and 12.00 share an axis at all; a
+ *  linear one flattens every short price into the same line.
+ *
+ *  A rising line is a price DRIFTING — the outcome getting less likely. */
+function PriceChart({
+  series,
+  headlines,
+}: {
+  series: Array<{ label: string; points: PricePoint[] }>
+  headlines: Headline[]
+}) {
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+
+  const shown = series.filter((s) => !hidden.has(s.label))
+
+  const geom = useMemo(() => {
+    const W = 900
+    const H = 240
+    const PAD_L = 48
+    const PAD_R = 8
+    const PAD_T = 10
+    const PAD_B = 20
+
+    // Only points inside the tradeable band: an outcome at 0.004 renders as
+    // 250.00 and would own the whole axis on its own.
+    const pts = shown.flatMap((s) => s.points.filter((p) => p.p > 0.02 && p.p < 0.98))
+    if (pts.length < 2) return null
+
+    const ts = pts.map((p) => p.t)
+    const t0 = Math.min(...ts)
+    const t1 = Math.max(...ts)
+    const odds = pts.map((p) => 1 / p.p)
+    const lo = Math.max(1.01, Math.min(...odds) * 0.93)
+    const hi = Math.min(60, Math.max(...odds) * 1.07)
+
+    const x = (t: number) => PAD_L + ((t - t0) / (t1 - t0 || 1)) * (W - PAD_L - PAD_R)
+    const y = (o: number) =>
+      PAD_T +
+      (1 - (Math.log(o) - Math.log(lo)) / (Math.log(hi) - Math.log(lo) || 1)) * (H - PAD_T - PAD_B)
+
+    const lines = shown.map((s, i) => {
+      const p = s.points
+        .filter((q) => q.p > 0.02 && q.p < 0.98)
+        .map((q, j) => `${j === 0 ? 'M' : 'L'}${x(q.t).toFixed(1)},${y(1 / q.p).toFixed(1)}`)
+        .join(' ')
+      const last = s.points[s.points.length - 1]
+      return {
+        label: s.label,
+        d: p,
+        colour: SERIES_COLOUR[series.findIndex((z) => z.label === s.label) % SERIES_COLOUR.length],
+        last: last && last.p > 0.01 && last.p < 0.99 ? 1 / last.p : null,
+      }
+    })
+
+    // Four gridlines at round-ish odds inside the range.
+    const ticks: { v: number; y: number }[] = []
+    for (const v of [1.1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 25, 40]) {
+      if (v >= lo && v <= hi) ticks.push({ v, y: y(v) })
+    }
+
+    return { W, H, PAD_L, lines, ticks, t0, t1 }
+  }, [shown, series])
+
+  if (series.length === 0) return null
+
+  const hours = geom ? Math.round((geom.t1 - geom.t0) / 3600) : 0
 
   return (
-    <div className="gc-statstrip">
-      {rows.map(([label, h, a]) => (
-        <span key={label} className="gc-statcell">
-          <b>{h ?? '—'}</b>
-          <em>{label}</em>
-          <b>{a ?? '—'}</b>
-        </span>
-      ))}
-    </div>
+    <section className="gc-section">
+      <div className="gc-eyebrow">
+        Price · last {hours > 0 ? `${hours}h` : '24h'}
+      </div>
+
+      {geom ? (
+        <div className="gc-chart">
+          <svg viewBox={`0 0 ${geom.W} ${geom.H}`} className="gc-chart-svg" role="img"
+               aria-label="Decimal odds over time for this fixture's main markets">
+            {geom.ticks.map((t) => (
+              <g key={t.v}>
+                <line x1={geom.PAD_L} y1={t.y} x2={geom.W - 8} y2={t.y} className="gc-chart-grid" />
+                <text x={6} y={t.y + 5} className="gc-chart-tick">{t.v.toFixed(t.v < 10 ? 2 : 0)}</text>
+              </g>
+            ))}
+            {geom.lines.map((l) => (
+              <path key={l.label} d={l.d} fill="none" stroke={l.colour} strokeWidth={1.8}
+                    strokeLinejoin="round" strokeLinecap="round" />
+            ))}
+          </svg>
+        </div>
+      ) : (
+        <p className="gc-quiet">Not enough price history yet to draw this fixture.</p>
+      )}
+
+      <div className="gc-legend">
+        {series.map((s, i) => {
+          const off = hidden.has(s.label)
+          // The same number the tile shows: the ask you could pay. The LINE is
+          // the 5-minute history, which lags it and is a different thing.
+          const o = headlines.find((h) => h.label === s.label)?.odds ?? null
+          return (
+            <button
+              key={s.label}
+              className={`gc-legend-item${off ? ' is-off' : ''}`}
+              onClick={() =>
+                setHidden((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(s.label)) next.delete(s.label)
+                  else next.add(s.label)
+                  return next
+                })
+              }
+            >
+              <span className="gc-legend-dot" style={{ background: SERIES_COLOUR[i % SERIES_COLOUR.length] }} />
+              {s.label}
+              {o && <b className="np-num">{o.toFixed(2)}</b>}
+            </button>
+          )
+        })}
+      </div>
+      <p className="gc-chart-note">
+        A line going up is the price drifting — that outcome getting longer. The figure beside
+        each market is the price you could pay right now; the line is Polymarket&apos;s own
+        5-minute history, so it lags. Click a market to hide it.
+      </p>
+    </section>
   )
 }
 
-// ── the shortlist ────────────────────────────────────────────────────────────
+// ── what the game looks like ─────────────────────────────────────────────────
+
+function Momentum({ s, home, away }: { s: LiveStats; home: string; away: string }) {
+  const rows: { label: string; h: number; a: number; fmt?: (v: number) => string }[] = [
+    { label: 'Possession', h: s.homePossession ?? 0, a: s.awayPossession ?? 0, fmt: (v) => `${v}%` },
+    { label: 'Shots', h: s.homeShotsTotal, a: s.awayShotsTotal },
+    { label: 'On target', h: s.homeShotsOn, a: s.awayShotsOn },
+    { label: 'Corners', h: s.homeCorners, a: s.awayCorners },
+  ]
+  if (s.homeXg != null && s.awayXg != null) {
+    rows.splice(1, 0, { label: 'xG', h: s.homeXg, a: s.awayXg, fmt: (v) => v.toFixed(2) })
+  }
+
+  const short = (t: string) => t.split(/\s+/).slice(0, 2).join(' ')
+
+  return (
+    <section className="gc-section">
+      <div className="gc-eyebrow">How it is going</div>
+      {/* The rails are two colours and nothing else says which is which, so the
+          names carry the key. */}
+      <div className="gc-mom-head">
+        <span className="gc-mom-home">{short(home)}</span>
+        <span className="gc-mom-away">{short(away)}</span>
+      </div>
+      <div className="gc-mom">
+        {rows.map((r) => {
+          const total = r.h + r.a
+          // A 0-0 split renders as an empty rail rather than as a 50/50 bar that
+          // claims a balance nothing has established yet.
+          const hp = total > 0 ? (r.h / total) * 100 : 0
+          const fmt = r.fmt ?? ((v: number) => String(v))
+          return (
+            <div key={r.label} className="gc-mom-row">
+              <span className="gc-mom-v np-num">{fmt(r.h)}</span>
+              <div className="gc-mom-mid">
+                <span className="gc-mom-k">{r.label}</span>
+                <div className="gc-mom-rail">
+                  <span className="gc-mom-fill" style={{ width: `${hp}%` }} />
+                </div>
+              </div>
+              <span className="gc-mom-v gc-mom-v-away np-num">{fmt(r.a)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// ── the last twenty minutes ──────────────────────────────────────────────────
+
+function Pulse({ pulse }: { pulse: Pulse[] }) {
+  if (pulse.length === 0) return null
+  return (
+    <section className="gc-section">
+      <div className="gc-eyebrow">Moved in the last 20 minutes</div>
+      <ul className="gc-pulse-list">
+        {pulse.slice(0, 5).map((p, i) => (
+          <li key={i} className={p.movePp > 0 ? 'gc-pos' : 'gc-neg'}>
+            <span className="gc-pulse-move np-num">{signed(p.movePp)}</span>
+            <span className="gc-pulse-what">
+              {p.question.split(':').pop()?.trim()} — {p.outcome}
+            </span>
+            <span className="gc-pulse-price np-num">
+              {odds(p.from)} → {odds(p.to)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
 
 const CALL_LABEL: Record<Look['call'], string> = {
   back: 'CHEAP',
@@ -494,9 +688,14 @@ export default function GamePage({ params }: { params: { slug: string } }) {
 
         {data && (
           <>
-            <StateBar data={data} />
+            <MatchHero data={data} />
+            <OddsTiles headlines={data.headlines ?? []} />
+            <PriceChart series={data.series ?? []} headlines={data.headlines ?? []} />
+            {data.live?.stats && (
+              <Momentum s={data.live.stats} home={data.home} away={data.away} />
+            )}
+            <Pulse pulse={data.pulse ?? []} />
             <Looks data={data} />
-            <Pulse pulse={data.pulse ?? []} stats={data.live?.stats ?? null} />
             <Board groups={data.groups} />
 
             <div className="gc-actions">

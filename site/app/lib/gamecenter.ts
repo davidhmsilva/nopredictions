@@ -154,6 +154,8 @@ export interface GameData {
   /** What the prices did in the last twenty minutes. */
   pulse: Pulse[]
   headlines: Headline[]
+  /** The headline markets' 24h price series, labelled as the tiles are. */
+  series: Array<{ label: string; points: PricePoint[] }>
   movers: Mover[]
   groups: MarketGroup[]
   history: { tokenId: string; label: string; points: PricePoint[] } | null
