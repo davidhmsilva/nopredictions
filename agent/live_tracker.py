@@ -51,7 +51,7 @@ _W_XG, _W_SHOTS_ON, _W_SHOTS_IN, _W_CORNERS, _W_POSS = 0.40, 0.25, 0.15, 0.10, 0
 
 def danger_index(shots_on: float, shots_inside: float, xg: float,
                  corners: float, possession: float,
-                 has_xg: bool = True) -> float:
+                 has_xg: bool = True, has_inside: bool = True) -> float:
     """
     Composite danger score 0–100.
     Weights: xG(40%) + shots_on(25%) + shots_inside(15%) + corners(10%) + possession(10%)
@@ -86,15 +86,30 @@ def danger_index(shots_on: float, shots_inside: float, xg: float,
     corners_score = min(100, corners * 15)             # ~7 corners = 100
     poss_score = max(0, (possession - 30) / 40 * 100)  # 30%=0, 70%=100
 
+    # `has_inside=False` is the same statement as `has_xg=False`, for a feed that
+    # publishes shots but not where they were taken from — ESPN's public
+    # scoreboard is the case this was added for. Same treatment: the term is
+    # DROPPED and the rest rescaled, never counted as zero, because zero says
+    # "nobody got into the box" and the truth is "nobody told us".
     score = (
         shots_on_score * _W_SHOTS_ON +
-        shots_inside_score * _W_SHOTS_IN +
         corners_score * _W_CORNERS +
         poss_score * _W_POSS
     )
-    if not has_xg:
-        return score / (1.0 - _W_XG)
-    return score + xg_score * _W_XG
+    missing = 0.0
+    if has_xg:
+        score += xg_score * _W_XG
+    else:
+        missing += _W_XG
+    if has_inside:
+        score += shots_inside_score * _W_SHOTS_IN
+    else:
+        missing += _W_SHOTS_IN
+    # Every weight missing would be a division by zero and a meaningless number;
+    # a caller with nothing to measure gets nothing rather than a 0.
+    if missing >= 1.0:
+        return 0.0
+    return score / (1.0 - missing) if missing else score
 
 
 @dataclass
