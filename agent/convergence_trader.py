@@ -317,24 +317,45 @@ def _settle(conn, pos, result):
             conn, pos["id"], settle_price,
             "settled_win" if won else "settled_loss",
             None, entry, size,
+            fill_verified=True,  # shares redeem at $1/$0 on resolution — a real fill
         )
     return won, settle_pnl, actual
 
 
-def _close_position(conn, pos_id, exit_price, reason, exit_minute, entry_price, size_shares):
+def _close_position(conn, pos_id, exit_price, reason, exit_minute, entry_price, size_shares,
+                    *, fill_verified: bool):
+    """Book an exit. `fill_verified` is keyword-only and required: every caller
+    has to state whether `exit_price` was actually executable. Pass True only
+    for a matched live SELL, a bid ladder with real depth for the full size, or
+    a settlement redemption. See db/028."""
     realized = (float(exit_price) - float(entry_price)) * float(size_shares)
     pct = (float(exit_price) / float(entry_price) - 1.0) if entry_price else None
     cur = conn.cursor()
     cur.execute(
         """UPDATE convergence_shadow SET
               status='closed', exit_at=NOW(), exit_price=%s, exit_reason=%s,
-              exit_minute=%s, realized_pnl_usd=%s, realized_pct=%s, updated_at=NOW()
+              exit_minute=%s, realized_pnl_usd=%s, realized_pct=%s,
+              exit_fill_verified=%s, updated_at=NOW()
            WHERE id=%s""",
         (exit_price, reason, exit_minute, round(realized, 4),
-         round(pct, 4) if pct is not None else None, pos_id),
+         round(pct, 4) if pct is not None else None, fill_verified, pos_id),
     )
     conn.commit()
     return realized, pct
+
+
+def _record_exit_signal(conn, pos_id, bid, minute) -> None:
+    """First time the convergence condition fires, stash the minute and the
+    quoted bid. Counterfactual only — this is the number the pre-028 code
+    booked as realized P&L. Keeping it lets us keep measuring the gap between
+    what the quote promised and what actually filled."""
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE convergence_shadow SET exit_signal_bid=%s, exit_signal_minute=%s
+           WHERE id=%s AND exit_signal_minute IS NULL""",
+        (bid, minute, pos_id),
+    )
+    conn.commit()
 
 
 def _touch_position(conn, pos_id, fair, bid, minute):
@@ -438,6 +459,52 @@ def _fetch_token_ask(token_id: str) -> Optional[float]:
     except Exception:
         pass
     return None
+
+
+def _executable_exit(token_id: str, size_shares: float) -> Optional[tuple[float, float]]:
+    """Volume-weighted price we could ACTUALLY sell `size_shares` into, walking
+    the real CLOB bid ladder.
+
+    The top-of-book bid is a quote, not a fill — booking an exit at it credits
+    P&L for size the book never had. Returns (vwap, shares_available);
+    shares_available < size_shares means the ladder cannot absorb the position.
+    Returns None if the book is unreachable, in which case the caller must NOT
+    close — an unverifiable exit is worse than a late one.
+    """
+    try:
+        resp = requests.get(
+            "https://clob.polymarket.com/book",
+            params={"token_id": token_id},
+            timeout=8,
+        )
+        if not resp.ok:
+            return None
+        bids = resp.json().get("bids") or []
+    except Exception:
+        return None
+    if not bids:
+        return 0.0, 0.0
+    # CLOB returns the bid ladder ascending (best bid last) — sort defensively.
+    levels = sorted(
+        ((float(b["price"]), float(b["size"])) for b in bids), key=lambda x: -x[0]
+    )
+    want = float(size_shares)
+    need, notional, got = want, 0.0, 0.0
+    for price, avail in levels:
+        if need <= 0:
+            break
+        take = min(need, avail)
+        notional += take * price
+        got += take
+        need -= take
+    if got <= 0:
+        return 0.0, 0.0
+    # Summing many levels drifts `got` a hair below `want` even on a book that
+    # fully covers us; without this the caller reads a full fill as partial and
+    # blocks a legitimate exit.
+    if need <= want * 1e-9:
+        got = want
+    return notional / got, got
 
 
 # Phrases that mean a market is NOT a plain 1X2 — sibling markets on the same
@@ -604,17 +671,18 @@ def _update_live_exit(conn, pos_id: int, order_id, exit_price: float, live_pnl: 
     conn.commit()
 
 
-def _attempt_live_sell(conn, pos: dict, bid: float) -> bool:
+def _attempt_live_sell(conn, pos: dict, bid: float) -> Optional[float]:
     """Place a live SELL at the current bid, wait 8s, confirm fill on the CLOB.
     Records real P&L only on a confirmed fill (size_matched > 0) — never from
-    shadow prices. Returns True if filled; unfilled orders are cancelled so the
-    position stays whole and can be retried next cycle or settle at resolution.
+    shadow prices. Returns the actual fill price when filled, else None;
+    unfilled orders are cancelled so the position stays whole and can be
+    retried next cycle or settle at resolution.
     """
     live_size = float(pos["pm_live_size"])
     sell = _conv_place(pos["token_id"], "SELL", bid, live_size)
     if not sell["ok"] or not sell.get("order_id"):
         log.warning(f"    [LIVE] SELL failed — will retry next cycle or settle at resolution")
-        return False
+        return None
     time.sleep(8)
     status = _run_pm(["get_order_json", sell["order_id"]])
     order_info = status.get("order") or {}
@@ -626,10 +694,10 @@ def _attempt_live_sell(conn, pos: dict, bid: float) -> bool:
         live_pnl = (sell_price - avg_cost) * size_matched
         _update_live_exit(conn, pos["id"], sell["order_id"], sell_price, live_pnl)
         log.info(f"    [LIVE] SELL filled {size_matched:.2f}sh @ {sell_price:.3f} | live_pnl=${live_pnl:+.2f}")
-        return True
+        return sell_price
     _run_pm(["cancel_json", sell["order_id"]])
     log.warning(f"    [LIVE] SELL not filled after 8s — cancelled. Retry next cycle / settle at resolution.")
-    return False
+    return None
 
 
 def _open_shadow(conn, *, token_id, condition_id, question, home, away, outcome_key,
@@ -773,17 +841,43 @@ def run_once(dry_run: bool = False,
             continue
         _touch_position(conn, pos["id"], fair, bid, ls["minute"])
         # Convergence / edge-gone: market bid has caught up to (or passed) fair.
-        if (fair - bid) <= EXIT_BUFFER_PP / 100.0:
-            pnl, pct = _close_position(
-                conn, pos["id"], bid, "converged", ls["minute"],
-                pos["entry_price"], pos["size_shares"],
-            )
-            n_exits += 1
-            log.info(f"  EXIT converged | {key[0]} v {key[1]} {pos['outcome_key']} "
-                     f"@{ls['minute']}' | entry {float(pos['entry_price']):.3f}→bid {bid:.3f} "
-                     f"| fair {fair:.3f} | PnL ${pnl:+.2f} ({pct*100:+.1f}%)")
-            if pos.get("pm_live") and pos.get("pm_live_size"):
-                _attempt_live_sell(conn, pos, bid)
+        if (fair - bid) > EXIT_BUFFER_PP / 100.0:
+            continue
+
+        # Signal fired. Stash the quoted bid as a counterfactual, then find out
+        # what we could actually get for it — a quote is not a fill (db/028).
+        _record_exit_signal(conn, pos["id"], bid, ls["minute"])
+        pos_tag = f"{key[0]} v {key[1]} {pos['outcome_key']} @{ls['minute']}'"
+
+        if pos.get("pm_live") and pos.get("pm_live_size"):
+            # Real money: the only proof of executability is a matched SELL.
+            exec_px = _attempt_live_sell(conn, pos, bid)
+            if exec_px is None:
+                log.info(f"  EXIT signalled, SELL unfilled | {pos_tag} | quoted bid "
+                         f"{bid:.3f} — position HELD, retry next cycle")
+                continue
+        else:
+            # Paper: the bid ladder must really hold the whole position.
+            book = _executable_exit(pos["token_id"], pos["size_shares"])
+            if book is None:
+                log.warning(f"  EXIT signalled, book unreachable | {pos_tag} — position HELD")
+                continue
+            exec_px, avail = book
+            if avail < float(pos["size_shares"]) or exec_px <= 0:
+                log.info(f"  EXIT signalled, book too thin | {pos_tag} | quoted bid "
+                         f"{bid:.3f} but only {avail:.1f}/{float(pos['size_shares']):.1f} "
+                         f"shares bid — position HELD")
+                continue
+
+        pnl, pct = _close_position(
+            conn, pos["id"], exec_px, "converged", ls["minute"],
+            pos["entry_price"], pos["size_shares"], fill_verified=True,
+        )
+        n_exits += 1
+        slip = (bid - exec_px) * 100.0
+        log.info(f"  EXIT converged | {pos_tag} | entry {float(pos['entry_price']):.3f}"
+                 f"→fill {exec_px:.3f} (quoted {bid:.3f}, slip {slip:+.1f}pp) "
+                 f"| fair {fair:.3f} | PnL ${pnl:+.2f} ({pct*100:+.1f}%)")
 
     # ── ENTRY pass ──
     if not live:
@@ -822,7 +916,16 @@ def run_once(dry_run: bool = False,
                 ask = float(ask)
                 if not (PRICE_BAND[0] <= ask <= PRICE_BAND[1]):
                     continue
-                if _classify_market(mkt.get("question", ""), home, away) != outcome_key:
+                question = mkt.get("question", "")
+                if _classify_market(question, home, away) != outcome_key:
+                    continue
+                # _classify_market maps "X to win the second half?" onto plain
+                # home_win/away_win, so 14 second-half markets reached the paper
+                # ledger and were then settled against the FULL-TIME result.
+                # The live path already screens these in _verify_live_market;
+                # the shadow path needs the same screen or its P&L is fiction.
+                if _NOT_1X2_RE.search(question.lower()):
+                    log.info(f"  SKIP non-1X2 sibling market | {question[:60]}")
                     continue
                 edge_pp = round((fair - ask) * 100, 1)
                 if edge_pp < ENTRY_THRESHOLD_PP:
@@ -994,10 +1097,51 @@ def _market_for_token(markets: list[dict], token_id: str) -> Optional[dict]:
 
 # ── Report ──────────────────────────────────────────────────────────────────────
 
+def _fill_verification_note(cur, staked) -> None:
+    """Rule 1's P&L is only meaningful for exits that could actually be executed.
+    Pre-028 rows booked the quoted bid with no fill check — paired against real
+    money they overstated by 137.6pp (db/028). Never print the blended number
+    without this split."""
+    cur.execute(
+        """SELECT count(*), COALESCE(sum(realized_pnl_usd), 0)
+             FROM convergence_shadow
+            WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL
+              AND market_is_1x2 AND exit_reason = 'converged'
+              AND exit_fill_verified IS NOT TRUE"""
+    )
+    n_unver, pnl_unver = cur.fetchone()
+    cur.execute(
+        """SELECT count(*), COALESCE(sum(realized_pnl_usd), 0)
+             FROM convergence_shadow
+            WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL
+              AND market_is_1x2
+              AND exit_reason = 'converged' AND exit_fill_verified IS TRUE"""
+    )
+    n_ver, pnl_ver = cur.fetchone()
+    cur.execute(
+        """SELECT count(*), COALESCE(sum(realized_pnl_usd), 0)
+             FROM convergence_shadow
+            WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL
+              AND market_is_1x2 AND exit_reason <> 'converged'"""
+    )
+    n_hold, pnl_hold = cur.fetchone()
+
+    def _sub(label, pnl, cnt, note):
+        yld = float(pnl) / (cnt * SHADOW_STAKE_USD) * 100 if cnt else 0.0
+        print(f"  {label:<28}{float(pnl):>+9.2f}{yld:>+8.1f}%{cnt:>5}  {note}")
+
+    # Rule 1 blends two different populations — split them or it reads as edge.
+    _sub("└ flips, VERIFIED fill", pnl_ver, n_ver,
+         "executable" if n_ver else "⚠ none yet — thesis untested")
+    if n_unver:
+        _sub("└ flips, UNVERIFIED", pnl_unver, n_unver, "⚠ quoted bid, never filled")
+    _sub("└ never flipped (redeemed)", pnl_hold, n_hold, "settlement, not convergence")
+
+
 def report():
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT count(*) FROM convergence_shadow WHERE status='open'")
+    cur.execute("SELECT count(*) FROM convergence_shadow WHERE status='open' AND market_is_1x2")
     n_open = cur.fetchone()[0]
 
     print(f"\n=== Convergence shadow ledger ===")
@@ -1024,7 +1168,8 @@ def report():
                   count(*) FILTER (WHERE exit_tb_out_price IS NOT NULL AND in_time_bomb),
                   count(*) FILTER (WHERE in_time_bomb)
            FROM convergence_shadow
-           WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL"""
+           WHERE settle_result IS NOT NULL AND realized_pnl_usd IS NOT NULL
+             AND market_is_1x2"""
     )
     row = cur.fetchone()
     (n, conv_pnl, hold_pnl, peak_pnl,
@@ -1052,6 +1197,7 @@ def report():
         print(f"  {label:<28}{pnl_s}{yield_s}{fired_s}  {note}")
 
     _row("1. CONVERGED (current)",  conv_pnl,   conv_wins, n,      "bid ≈ fair")
+    _fill_verification_note(cur, staked)
     _row("2. HOLD to resolution",   hold_pnl,   hold_wins, n,      "FT result")
     _row("3. PEAK bid (ceiling)",   peak_pnl,   None,      n,      "best bid seen (oracle)")
     _row(f"4. AT MODEL FAIR",        fair_pnl,   None,      n_fair, f"first bid ≥ entry_fair  ({n_fair}/{n} fired)")
@@ -1066,7 +1212,8 @@ def report():
     print(f"\n  ⚠ n={n} — need ≥30 settled flips for conclusions.")
 
     cur.execute(
-        "SELECT COALESCE(avg(realized_pct),0) FROM convergence_shadow WHERE exit_reason='converged'"
+        "SELECT COALESCE(avg(realized_pct),0) FROM convergence_shadow "
+        "WHERE exit_reason='converged' AND market_is_1x2"
     )
     print(f"\n  Converged avg per-unit return: {float(cur.fetchone()[0])*100:+.1f}%")
 
@@ -1078,6 +1225,7 @@ def report():
                   exit_at_fair_price, exit_at_target_price, exit_tb_out_price, peak_bid
            FROM convergence_shadow
            WHERE settle_result IS NOT NULL AND settle_pnl_usd IS NOT NULL
+             AND market_is_1x2
            ORDER BY settled_at DESC NULLS LAST LIMIT 15"""
     )
     rows = cur.fetchall()
