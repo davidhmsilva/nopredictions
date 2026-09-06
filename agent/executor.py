@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sys
 import argparse
@@ -52,6 +53,7 @@ CHAIN_ID           = 137
 
 STAKE_USDC         = 1.0      # default stake per trade
 MAX_LOSS_USDC      = 20.0     # kill switch: stop if cumulative loss exceeds this
+MIN_NOTIONAL_USDC  = 1.0      # PM rejects marketable orders below this
 
 # Strategies allowed for live execution (by strategy name)
 ALLOWED_STRATEGIES = {
@@ -334,8 +336,14 @@ def run(live: bool = False, stake: float = STAKE_USDC, max_trades: int = 10) -> 
             tick = float(tick_size)
             price = round(round(price / tick) * tick, 2)
 
-            # Calculate size (number of shares = stake / price)
-            size = round(stake / price, 2) if price > 0 else 0
+            # Calculate size (number of shares = stake / price). Round UP: to
+            # nearest leaves the notional just under PM's $1.00 minimum whenever
+            # stake/price has a long tail (1.0/0.12 → 8.33 → $0.9996 → rejected
+            # as "invalid amount for a marketable order"). Same fix as
+            # live_executor.shares_for_stake().
+            size = math.ceil(stake / price * 100.0) / 100.0 if price > 0 else 0
+            while size > 0 and size * price < MIN_NOTIONAL_USDC:
+                size = round(size + 0.01, 2)
             if size <= 0:
                 log.warning("Trade %d: invalid size %.2f (price=%.4f), skipping",
                             trade['id'], size, price)

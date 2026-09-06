@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import subprocess
 from dataclasses import dataclass
@@ -36,6 +37,8 @@ LIVE_STAKE_USD = float(os.environ.get("PM_LIVE_STAKE_USD", "1.0"))
 MAX_NOTIONAL_PER_ORDER = float(os.environ.get("PM_MAX_NOTIONAL_PER_ORDER", "5.0"))
 BALANCE_HEADROOM = float(os.environ.get("PM_BALANCE_HEADROOM", "1.1"))
 MIN_SHARES = float(os.environ.get("PM_MIN_SHARES", "5"))
+# Polymarket rejects marketable orders below $1.00 notional. See shares_for_stake().
+MIN_NOTIONAL_USD = float(os.environ.get("PM_MIN_NOTIONAL_USD", "1.0"))
 # Take the ask to guarantee a fill, but never pay more than this above the mid.
 MAX_SLIPPAGE_PP = float(os.environ.get("PM_MAX_SLIPPAGE_PP", "2.0"))
 # Require the edge to survive at the price we actually execute at (not the mid).
@@ -119,6 +122,27 @@ def refined_decision(fair_prob, exec_price, sharp_prob, sim_se):
         return False, (f"refined: model-only raw edge {res.edge_raw_pp:+.1f}pp "
                        f"> {MAX_MODEL_EDGE_PP:.0f}pp cap, no sharp to validate")
     return True, f"refined OK: {res.reason}"
+
+def shares_for_stake(stake: float, price: float) -> float:
+    """
+    Share count to order for `stake` dollars at `price`, on PM's 0.01 increment.
+
+    Rounds the share count UP, not to nearest. Rounding to nearest leaves the
+    notional a hair under PM's $1.00 minimum for marketable orders whenever
+    stake/price has a long tail: round(1.0 / 0.12, 2) = 8.33 → $0.9996 →
+    "invalid amount for a marketable order". That silently killed 8 of the 43
+    live orders in the fortnight to 2026-07-28, all of them longshots priced
+    0.12–0.18 — i.e. exactly the band the size is most sensitive in.
+    """
+    if price <= 0:
+        return 0.0
+    size = max(MIN_SHARES, math.ceil(stake / price * 100.0) / 100.0)
+    # Ceiling the share count normally clears MIN_NOTIONAL_USD on its own, but
+    # float error can land a cent short; step up until the notional is clear.
+    while size * price < MIN_NOTIONAL_USD:
+        size = round(size + 0.01, 2)
+    return size
+
 
 _REPO = Path(__file__).resolve().parent.parent
 PM_VENV_PYTHON = os.environ.get("PM_VENV_PYTHON") or str(_REPO / ".venv-pm" / "bin" / "python")
@@ -210,7 +234,7 @@ def try_execute(
             edge_skip = (f"edge {edge_vs_exec:+.1f}pp at exec {exec_price:.3f} "
                          f"< {MIN_EXEC_EDGE_PP}pp min")
 
-    size = max(MIN_SHARES, round(stake / exec_price, 2)) if exec_price > 0 else 0.0
+    size = shares_for_stake(stake, exec_price)
     notional = round(size * exec_price, 4)  # actual $ at risk = shares × price
 
     r = LiveResult(

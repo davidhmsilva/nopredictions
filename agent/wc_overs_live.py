@@ -453,8 +453,9 @@ def cycle() -> dict:
 
             # Per-order notional check on top of executor cap
             stake_usd = float(os.environ.get("PM_LIVE_STAKE_USD", "1.0"))
-            min_shares = float(os.environ.get("PM_MIN_SHARES", "5"))
-            size = max(min_shares, round(stake_usd / yes_p, 2))
+            # Same sizing live_executor will use when it submits, so the daily-cap
+            # check below is measured against the real notional.
+            size = live_executor.shares_for_stake(stake_usd, yes_p)
             notional = size * yes_p
             if today + notional > DAILY_CAP_USD:
                 log.warning(

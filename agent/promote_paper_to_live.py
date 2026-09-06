@@ -121,7 +121,7 @@ def main():
         edge_pp = round((float(model_p) - current_p) * 100, 1)
 
         stake = live_executor.LIVE_STAKE_USD
-        size = max(live_executor.MIN_SHARES, round(stake / current_p, 2))
+        size = live_executor.shares_for_stake(stake, current_p)
         notional = round(size * current_p, 4)
         cap_ok = notional <= live_executor.MAX_NOTIONAL_PER_ORDER
 
