@@ -742,6 +742,9 @@ def _base_row(sig: PressureSignals) -> dict:
         "home_possession": sig.home_possession, "away_possession": sig.away_possession,
         "home_reds": sig.home_reds, "away_reds": sig.away_reds,
         "has_stats": sig.has_stats, "has_xg": False,
+        # ESPN, the free fallback, publishes no team xG and no shots inside the
+        # box. Recorded so the two populations never pool in a fit.
+        "stats_source": sig.stats_source, "has_inside": sig.has_inside,
         "home_danger": None, "away_danger": None,
         "pressure_index": None,          # cumulative, scaled to 15 min, this poll
         "opening_pressure": None,        # the frozen first-15 reading — CONTROL
@@ -773,7 +776,7 @@ _COLS = [
     "home_shots_on", "away_shots_on", "home_shots_total", "away_shots_total",
     "home_shots_inside", "away_shots_inside", "home_corners", "away_corners",
     "home_possession", "away_possession", "home_reds", "away_reds",
-    "has_stats", "has_xg",
+    "has_stats", "has_xg", "stats_source", "has_inside",
     "home_danger", "away_danger", "pressure_index", "opening_pressure",
     "opening_minute", "pressure_now", "pressure_source", "pressure_minute",
     "has_window", "armed_at_minute", "armed_pressure", "entry_trigger",
@@ -819,9 +822,19 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
             continue
         with conn.cursor() as cur:
             cur.execute(
+                # Matched on the TEAMS as well as the id. When api-football
+                # goes down mid-match the tracker falls back to ESPN, which
+                # namespaces the fixture id negative — so the same real match
+                # arrives under a second id and an id-only guard lets it be
+                # bought twice. `home`/`away` are whatever the source called
+                # them, so this catches the common case (same source, same
+                # names) rather than every case; the id check still carries the
+                # rest.
                 "SELECT 1 FROM ht_pressure_observations "
-                "WHERE fixture_id = %s AND entered LIMIT 1",
-                (r["fixture_id"],),
+                "WHERE (fixture_id = %s OR (home = %s AND away = %s)) "
+                "  AND entered AND observed_at > now() - interval '6 hours' "
+                "LIMIT 1",
+                (r["fixture_id"], r["home"], r["away"]),
             )
             if cur.fetchone():
                 r["would_enter"], r["skip_reason"] = False, "already entered this fixture"

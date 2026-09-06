@@ -23,9 +23,13 @@ import live_tracker as lt  # noqa: E402
 
 
 class FakeResp:
-    def __init__(self, payload, status=200):
+    def __init__(self, payload, status=200, headers=None):
         self._payload = payload
         self.status_code = status
+        # The refusal path logs the rate-limit headers alongside the error,
+        # because api-football contradicts itself there — it refused every
+        # endpoint on 2026-09-02 while reporting 74,999 of 75,000 remaining.
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -50,6 +54,15 @@ def _stats_payload(shots=7):
         {"team": {"name": "Home0"}, "statistics": [{"type": "Total Shots", "value": shots}]},
         {"team": {"name": "Away0"}, "statistics": [{"type": "Total Shots", "value": 3}]},
     ]}
+
+
+@pytest.fixture(autouse=True)
+def _no_espn(monkeypatch):
+    """From 2026-09-06 a refused api-football poll falls back to ESPN. Every
+    refusal test in this file would otherwise make a real request to a third
+    party — so the fallback is stubbed empty here, and the tests that are ABOUT
+    the fallback stub it with content of their own."""
+    monkeypatch.setattr(lt.espn_stats, "live_fixtures", lambda *a, **k: [])
 
 
 @pytest.fixture
@@ -394,6 +407,9 @@ def test_refused_live_poll_is_not_reported_as_zero_fixtures():
     finally:
         lt.requests.get = original
 
+    # Empty because the ESPN fallback is stubbed to nothing by `_no_espn`; the
+    # assertions here are about api-football's own bookkeeping surviving a
+    # refusal, which it must do whether or not a second source answers.
     assert out == {}
     # the refusal has to leave a mark the next cycle can act on, or the agent
     # spends the outage hammering an API that is saying no
@@ -427,3 +443,51 @@ def test_a_genuinely_quiet_feed_still_reads_as_zero():
 
     assert out == {}
     assert tracker._quota_spent_until == 0      # nothing armed
+
+
+# ── the ESPN fallback ────────────────────────────────────────────────────────
+
+def test_a_refused_poll_falls_back_to_espn(tracker, monkeypatch):
+    """2026-09-06 was the fourth evening in a week where the allowance ran out
+    mid-match and every arm went blind for hours, because a refusal returned {}.
+    A degraded reading recorded AS degraded beats no reading."""
+    import espn_stats
+
+    monkeypatch.setattr(lt.requests, "get", lambda *a, **k: FakeResp(
+        {"errors": {"requests": "You have reached the request limit for the day"},
+         "response": []}))
+    monkeypatch.setattr(lt.espn_stats, "live_fixtures", lambda *a, **k: [
+        espn_stats.EspnFixture(
+            event_id="401882892", league_code="esp.1", league="LaLiga",
+            home="Espanyol", away="Sevilla", minute=67, state="in", detail="67'",
+            home_stats=espn_stats.EspnTeamStats(shots_on=4, shots_total=9,
+                                                corners=3, possession=58.0),
+            away_stats=espn_stats.EspnTeamStats(shots_on=1, shots_total=4,
+                                                corners=1, possession=42.0),
+        )
+    ])
+
+    out = tracker.poll()
+    assert out, "the fallback has to produce signals, not an empty dict"
+
+    fid, sig = next(iter(out.items()))
+    # Namespaced negative: ESPN's ids and api-football's do not collide today,
+    # but a collision would splice two matches' histories into one.
+    assert fid < 0
+    assert sig.home == "Espanyol" and sig.away == "Sevilla"
+    assert sig.minute == 67
+    # The row has to say it is a different measurement, or the two populations
+    # pool into one meaningless number.
+    assert sig.stats_source == "espn"
+    assert sig.has_inside is False
+
+
+def test_the_espn_fallback_does_not_hide_a_spent_day(tracker, monkeypatch):
+    """Falling back must not clear the flag that stops us hammering an API which
+    is saying no — the outage is still an outage."""
+    monkeypatch.setattr(lt.requests, "get", lambda *a, **k: FakeResp(
+        {"errors": {"requests": "You have reached the request limit for the day"},
+         "response": []}))
+    tracker.poll()
+    assert tracker._quota_reason == lt.DAILY_EXHAUSTED
+    assert tracker._quota_spent_until > time.time() + 1800

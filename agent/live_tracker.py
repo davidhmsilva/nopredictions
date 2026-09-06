@@ -31,6 +31,7 @@ import requests
 from dotenv import load_dotenv
 
 import af_budget
+import espn_stats
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'))
 
@@ -116,6 +117,12 @@ def danger_index(shots_on: float, shots_inside: float, xg: float,
 class StatSnapshot:
     minute: int
     timestamp: float
+    # Which feed this came from, and what that feed cannot measure. Two sources
+    # producing one column would pool two different measurements into one
+    # number; every consumer writes `source` to its row so a later fit can
+    # separate them, exactly as has_xg already does.
+    source: str = "api-football"
+    has_inside: bool = True
     home_shots_on: int = 0
     away_shots_on: int = 0
     home_shots_total: int = 0
@@ -158,6 +165,11 @@ class PressureSignals:
     # answer "which competitions are we actually measuring" — which is the first
     # question anyone asks of a coverage problem.
     league: str | None = None
+    # 'api-football' | 'espn'. ESPN publishes no team xG and no shots inside the
+    # box, so a reading from it is the same quantity measured with fewer terms —
+    # every consumer writes both to its row so the populations stay separable.
+    stats_source: str = "api-football"
+    has_inside: bool = True
     # The minute the stat block was actually true, which is not `minute` on a
     # poll that reused the previous fetch (ENRICH_TTL_S). Anything turning totals
     # into a per-minute rate must divide by THIS, or a 16th-minute reading of
@@ -381,8 +393,8 @@ class LiveMatchTracker:
         equally for ENRICH_BUDGET_PER_CYCLE calls.
         """
         if not self.api_key:
-            log.warning('[tracker] No FOOTBALL_API_KEY set')
-            return {}
+            log.warning('[tracker] No FOOTBALL_API_KEY set — falling back to ESPN')
+            return self._poll_espn(reason='no api key')
 
         now = time.time()
 
@@ -432,8 +444,8 @@ class LiveMatchTracker:
                 log.error(
                     f'[tracker] api-football REFUSED the live poll: '
                     f'{str(errors)[:200]} | headers {quota} -> '
-                    f'{self._quota_reason}, no fixtures this cycle')
-                return {}
+                    f'{self._quota_reason}, falling back to ESPN')
+                return self._poll_espn(reason=self._quota_reason)
 
             fixtures = body.get('response', [])
             log.info(f'[tracker] {len(fixtures)} live fixtures')
@@ -806,6 +818,73 @@ class LiveMatchTracker:
             return best
         return None
 
+    def _poll_espn(self, reason: str) -> dict[int, PressureSignals]:
+        """Live fixtures and stats from ESPN, when api-football will not answer.
+
+        Used only as a whole-cycle substitute: 2026-09-06 was the fourth evening
+        in a week where the allowance ran out mid-match and every arm went blind
+        for hours. A degraded reading recorded as degraded beats no reading at
+        all, which is what the previous behaviour — `return {}` — produced.
+
+        ⚠️ **The fixture id is namespaced NEGATIVE.** ESPN's event ids are ~400M
+        and api-football's ~1.5M so they do not collide today, but "today" is not
+        a guarantee and a collision would splice two matches' snapshot histories
+        into one. Negative also makes the source visible in any row, any query,
+        without a join.
+
+        ⚠️ **This is a different measurement, not the same one from elsewhere.**
+        ESPN publishes no team xG and no shots inside the box — 55% of the index
+        weight — so `has_inside=False` travels with the snapshot and
+        `danger_index` drops both terms rather than scoring them zero. Rows carry
+        `stats_source` so the two populations never pool in a fit.
+        """
+        try:
+            fixtures = espn_stats.live_fixtures()
+        except Exception as exc:                       # noqa: BLE001
+            log.error(f'[tracker] ESPN fallback failed too: {exc}')
+            return {}
+
+        now = time.time()
+        usable = 0
+        for fx in fixtures:
+            if fx.minute is None or not fx.has_stats:
+                continue
+            fid = -abs(int(fx.event_id)) if fx.event_id.isdigit() else None
+            if fid is None:
+                continue
+
+            self.fixture_info[fid] = {
+                'home': fx.home, 'away': fx.away,
+                'league': fx.league, 'league_id': None,
+                'fixture_id': fid, 'source': 'espn',
+            }
+            snap = StatSnapshot(
+                minute=fx.minute, timestamp=now,
+                source='espn', has_inside=False,
+                home_goals=fx.home_stats.goals, away_goals=fx.away_stats.goals,
+                home_shots_on=fx.home_stats.shots_on,
+                away_shots_on=fx.away_stats.shots_on,
+                home_shots_total=fx.home_stats.shots_total,
+                away_shots_total=fx.away_stats.shots_total,
+                home_corners=fx.home_stats.corners,
+                away_corners=fx.away_stats.corners,
+                home_possession=fx.home_stats.possession,
+                away_possession=fx.away_stats.possession,
+            )
+            # ESPN's stats arrive WITH the fixture, so they are always as fresh
+            # as the minute — there is no second paid call to wait for and
+            # nothing to carry forward.
+            snap.stats_minute, snap.stats_fetched_at = fx.minute, now
+            self.snapshots[fid].append(snap)
+            usable += 1
+
+        log.warning(
+            f'[tracker] ESPN fallback ({reason}): {len(fixtures)} live, '
+            f'{usable} with stats — no xG, no shots-in-box, rows tagged espn')
+        self.enrich_status = {}
+        return {fid: sig for fid in list(self.snapshots)
+                if fid < 0 and (sig := self.get_signals(fid)) is not None}
+
     def get_signals(self, fixture_id: int) -> PressureSignals | None:
         """Calculate pressure signals for a specific fixture."""
         snaps = self.snapshots.get(fixture_id)
@@ -906,20 +985,25 @@ class LiveMatchTracker:
         # the index should score low — a competition api-football publishes no xG
         # for is not a measurement at all.
         has_xg = bool(latest.home_xg or latest.away_xg)
+        signals.stats_source = latest.source
+        signals.has_inside = latest.has_inside
         signals.home_danger_index = self._danger_index(
             signals.home_shots_on_window, signals.home_shots_inside_window,
             signals.home_xg_window, signals.home_corners_window,
-            signals.home_possession, latest.minute, has_xg=has_xg)
+            signals.home_possession, latest.minute, has_xg=has_xg,
+            has_inside=latest.has_inside)
         signals.away_danger_index = self._danger_index(
             signals.away_shots_on_window, signals.away_shots_inside_window,
             signals.away_xg_window, signals.away_corners_window,
-            signals.away_possession, latest.minute, has_xg=has_xg)
+            signals.away_possession, latest.minute, has_xg=has_xg,
+            has_inside=latest.has_inside)
 
         return signals
 
     def _danger_index(self, shots_on: int, shots_inside: int,
                       xg: float, corners: int, possession: float,
-                      minute: int, has_xg: bool = True) -> float:
+                      minute: int, has_xg: bool = True,
+                      has_inside: bool = True) -> float:
         """Composite danger score 0–100 over the rolling window.
 
         This used to drop has_xg on purpose, to protect the record Live Pressure
@@ -938,7 +1022,7 @@ class LiveMatchTracker:
         row so the fit can control for it.
         """
         return danger_index(shots_on, shots_inside, xg, corners, possession,
-                            has_xg=has_xg)
+                            has_xg=has_xg, has_inside=has_inside)
 
     def get_all_signals(self) -> dict[int, PressureSignals]:
         """Get pressure signals for all tracked fixtures."""

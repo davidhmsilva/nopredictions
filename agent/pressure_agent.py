@@ -699,6 +699,11 @@ def _base_row(sig: PressureSignals, window_min: int) -> dict:
         # played and effectively cannot clear MIN_PRESSURE. None, not False,
         # when there were no stats at all: "measured, no xG" and "never
         # measured" are different facts and only one of them is evidence.
+        # Which feed measured this, and whether it could see inside the box.
+        # ESPN (the free fallback) cannot, so the two are different measurements
+        # of the same quantity and must stay separable in the data.
+        "stats_source": sig.stats_source,
+        "has_inside": sig.has_inside,
         "has_xg": (bool(sig.home_xg_total or sig.away_xg_total)
                    if sig.has_stats else None),
         "home_danger": sig.home_danger_index, "away_danger": sig.away_danger_index,
@@ -726,6 +731,7 @@ _COLS = [
     "window_min", "home_xg_window", "away_xg_window", "home_shots_on_window",
     "away_shots_on_window", "home_shots_inside_window", "away_shots_inside_window",
     "home_corners_window", "away_corners_window", "has_window", "has_xg",
+    "stats_source", "has_inside",
     "stats_frozen",
     "home_danger", "away_danger", "pressure_index", "pressure_factor",
     "pre_over25", "target_line", "best_bid", "best_ask", "bid_depth_usd",
@@ -766,9 +772,18 @@ def open_trades(conn, strategy_id: int, rows: list[dict]) -> int:
             continue
         with conn.cursor() as cur:
             cur.execute(
+                # Matched on the TEAMS as well as the id. When api-football goes
+                # down mid-match the tracker falls back to ESPN, which namespaces
+                # the fixture id negative — so the same real match arrives under
+                # a second id and an id-only guard lets the same line be bought
+                # twice. The target_line still scopes it: this arm deliberately
+                # takes a second position when the score moves the rung.
                 "SELECT 1 FROM pressure_observations "
-                "WHERE fixture_id = %s AND target_line = %s AND entered LIMIT 1",
-                (r["fixture_id"], r["target_line"]),
+                "WHERE (fixture_id = %s OR (home = %s AND away = %s)) "
+                "  AND target_line = %s AND entered "
+                "  AND observed_at > now() - interval '6 hours' "
+                "LIMIT 1",
+                (r["fixture_id"], r["home"], r["away"], r["target_line"]),
             )
             if cur.fetchone():
                 r["would_enter"], r["skip_reason"] = False, "already entered this line"
