@@ -105,19 +105,26 @@ riding the AI + prediction-markets wave simultaneously.
 │       ├── critic.py
 │       ├── prompts/
 │       └── tools/runner.py
-└── site/                              ← Next.js public dashboard ✅ LIVE
+└── site/                              ← Next.js SaaS app ✅ LIVE (split 2026-09-06)
     ├── app/
-    │   ├── wallet/                    ← /wallet analyser — hidden route, noindex ✅ NEW
-    │   ├── api/wallet/route.ts        ← on-demand wallet analysis (TS port) ✅ NEW
-    │   ├── lib/wallet.ts              ← the port; kept in step by --verify-site ✅ NEW
+    │   ├── page.tsx                   ← SCOUT — the matchday board (home)
+    │   ├── lab/page.tsx               ← LAB — hypothesis tester (was /test)
+    │   ├── agent/page.tsx             ← AGENT — the paper record (was /dashboard)
+    │   ├── wallet/                    ← WALLET — analyser, now a public tab
+    │   ├── game/[slug]/page.tsx       ← GAME CENTER — reached by clicking a fixture
+    │   ├── api/scout/route.ts         ← the board  ·  api/pulse → the tape's 7 numbers
+    │   ├── api/game · api/backtest · api/wallet
+    │   ├── lib/scout.ts               ← Gamma sweep → fixtures + book grades
+    │   ├── lib/scoutCache.ts          ← 45s TTL + in-flight coalescing, shared
+    │   ├── lib/gamecenter.ts · lib/looks.ts · lib/wallet.ts · lib/backtest.ts
+    │   ├── components/AppShell.tsx    ← tape · nav · tabs · account actions · footer
+    │   ├── components/icons.tsx       ← inline SVG on currentColor
+    │   ├── components/EquityCurve.tsx ← the agent's record as a chart
     │   ├── layout.tsx                 ← root layout + SEO metadata
-    │   ├── page.tsx                   ← main SPA (1372 lines — needs decomposition)
-    │   ├── globals.css                ← dark theme + responsive styles
-    │   └── lib/
-    │       └── supabase.ts            ← Supabase client + query functions
+    │   └── globals.css                ← design tokens + every component layer
     ├── package.json                   ← Next.js 14.2, React 18.3, Supabase JS 2.43
     ├── tailwind.config.ts
-    ├── next.config.mjs
+    ├── next.config.mjs                ← redirects for the routes that moved
     ├── vercel.json
     ├── SETUP.md                       ← local dev + Vercel deployment guide
     └── .env.local                     ← Supabase URL + anon key (gitignored)
@@ -357,7 +364,7 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
 | InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
 | Resolver | ✅ Settles trades + calculates CLV |
-| Public website | ✅ Live at [nopredictions.com](https://nopredictions.com) |
+| Public website | ✅ SaaS app at [nopredictions.com](https://nopredictions.com) — Scout · Lab · Agent · Wallet |
 | Git repo | ✅ Remote: github.com/davidhmsilva/nopredictions |
 | X / Twitter launch | ⏳ Pending first edge results |
 
@@ -1065,6 +1072,82 @@ blacklist, the PM-listed cache and the stats carry-forward). This one is bounded
 on both ends by construction: consulted only inside 15-40' on a fixture still
 0-0, dropped by `prune()`, and never a substitute for a live reading anywhere it
 is recorded.
+
+## The site is two products now — SaaS + the agent (2026-09-06)
+
+`nopredictions.com` was a waitlist landing plus a public record of a paper
+agent. It is now an app with four tabs, and the agent is one of them, framed as
+what it is: **paper, not live, no arm near its verdict gate**.
+
+| tab | route | what it is |
+|---|---|---|
+| **Scout** | `/` | Today's Polymarket football, biggest markets first |
+| **Lab** | `/lab` | Write a theory in English, backtested over 111,475 games |
+| **Agent** | `/agent` | The paper record, behind an IN TESTING banner |
+| **Wallet** | `/wallet` | Any Polymarket trader's whole record, rebuilt |
+| Game Center | `/game/<slug>` | Reached by clicking a fixture, never a tab |
+
+Deleted with the user's confirmation: the landing page and waitlist, the
+scanner and its `/api/analyze` + `lib/edge` + `lib/dc_model` cascade, the
+already-dead `/api/scan` and LeaderboardSection, the Newsletter and About
+sections, `site_prototype.html`. `/dashboard` → `/agent`, `/test` → `/lab` and
+`/scanner` → `/` redirect, because both of the first two were in links we do
+not control.
+
+🔑 **What the board ranks on is a product decision that reversed once.** It
+first led on book quality — the one thing the 100-game review found separating
+— and that is a research finding, not a reason anyone opens a betting site. It
+now ranks on **money traded**, which settles the quality question by itself: a
+fixture with millions through it has a real two-sided book by construction. The
+grade survives as a column. The ranking bug that exposed this: "in play first"
+put a $13k J-League board above Everton v Manchester United at $5.4M.
+
+### Gamma's four traps, each of which produced a plausible board
+
+Every one of these looked like data rather than like a failure:
+
+| | |
+|---|---|
+| `limit` | is **capped at 100** however large a value you send, and `offset` is honoured. A 300-step loop returned **26 fixtures out of 344**. |
+| `startDate` | is the **listing** time, not kick-off — usually the same morning. Filtering kick-off with `start_date_min` returns an empty board. Kick-off is `startTime` (event) / `gameStartTime` (market). |
+| `endDate` | **EQUALS `startTime`** on a fixture event, so `end_date_min=now` drops every match the moment it kicks off — the exact set a matchday board exists to show. Filter back over the whole window and bound it client-side. |
+| question text | is not a market family. `"… : Everton FC O/U 2.5 Corners"` matches an "O/U 2.5" pattern perfectly, which graded **Arsenal v Chelsea as a blown book on $1.18M of volume**. `sportsMarketType` is exact: match goals are `totals` and nothing else (`first_half_totals`, `soccer_team_totals`, `total_corners`, `spreads`, `moneyline`, `both_teams_to_score` all carry their own). |
+
+Also free on the listing and worth knowing: `bestBid`, `bestAsk`, `spread`,
+`liquidityNum`, `volume`. The base book grade therefore costs **no** CLOB round
+trip and every fixture gets one; only the busiest dozen are re-read live,
+because Gamma's prices lag the book. Each card says which source it used.
+
+⚠️ **An unfunded ladder quotes every rung at a placeholder extreme**, which is
+indistinguishable from a settled one. Without a clock guard that read as a
+fixture LIVE seven hours before kick-off and another FINISHED nine and a half
+hours before it. The clock is now **necessary** and only ever rules out; where
+it is all we have the card says `KICKED OFF?` rather than `LIVE`.
+
+`lib/scoutCache.ts` holds one sweep behind a 45s TTL with in-flight coalescing,
+because the tape runs on every page and a visit to `/lab` must not pay for a
+Gamma sweep plus twelve CLOB calls to print seven numbers. A failed sweep
+returns the previous board rather than emptying the page.
+
+### Three claims removed because they were not true
+
+- The dashboard hero said **LIVE** directly above a banner saying the agent is
+  not live.
+- `HomeSection`'s newsletter form set local state and showed a tick. It sent
+  **nowhere**.
+- `TradeCard` printed the edge as `` `+${edgePp}%` `` with a hard-coded plus, so
+  a **negative edge rendered as `+-1.8%` in green** — a losing pick shown as a
+  winning one.
+
+⚠️ **Log in / Sign up / Alerts are rendered but not wired**, by request. They
+are not inert: a click says accounts are not live rather than swallowing it,
+which is the difference between a control awaiting a backend and the newsletter
+form above. Replace `notYet` in `AppShell.tsx` and nothing else changes.
+
+⚠️ **The Lab's verdict is computed from yield and p-value alone.** "Draws are
+underpriced in Serie B" returns EDGE FOUND on +4.66% yield with CLV −0.07%,
+which rule 5 of this file calls luck. The results panel now says so when the
+two arms disagree; the verdict logic itself is untouched.
 
 ## Live stats coverage — measured 2026-08-19
 
