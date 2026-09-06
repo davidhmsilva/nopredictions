@@ -85,11 +85,10 @@ const GRADE: Record<BookGrade, { label: string; cls: string; title: string }> = 
 
 // ── sorting ──────────────────────────────────────────────────────────────────
 
-type SortKey = 'default' | 'volume' | 'kickoff' | 'spread' | 'markets'
+type SortKey = 'default' | 'kickoff' | 'spread' | 'markets'
 
 const SORTS: { id: SortKey; label: string }[] = [
-  { id: 'default', label: 'In play first' },
-  { id: 'volume', label: 'Volume' },
+  { id: 'default', label: 'Biggest markets' },
   { id: 'kickoff', label: 'Kick-off' },
   { id: 'spread', label: 'Tightest book' },
   { id: 'markets', label: 'Most markets' },
@@ -105,8 +104,6 @@ function sortFixtures(fs: ScoutFixture[], key: SortKey): ScoutFixture[] {
   if (key === 'default') return fs
   const out = fs.slice()
   switch (key) {
-    case 'volume':
-      return out.sort((a, b) => b.volumeUsd - a.volumeUsd)
     case 'markets':
       return out.sort((a, b) => b.markets - a.markets)
     case 'kickoff':
@@ -349,31 +346,13 @@ export default function ScoutPage() {
       .map(([name, n]) => ({ name, n }))
   }, [fixtures])
 
-  /** What the four cards above the table stand on. Every one of these is
-   *  counted off the same board the table renders — nothing here is a separate
-   *  feed that could disagree with the rows underneath it. */
-  const cards = useMemo(() => {
-    const open = fixtures.filter((f) => !f.finished)
-    const busiest = open.slice().sort((a, b) => b.volumeUsd - a.volumeUsd).slice(0, 3)
-    const liveNow = fixtures.filter((f) => f.live)
-    const topLive = liveNow.slice().sort((a, b) => b.volumeUsd - a.volumeUsd)[0] ?? null
-    // The busiest boards are also the tightest — on a normal card all three
-    // quote 1.0pp — so a plain "tightest" list is the "busiest" list again.
-    // What is worth surfacing is a clean book on a fixture you would not
-    // otherwise have looked at, so the boards already named above are excluded
-    // and ties on spread go to the QUIETER game rather than the louder one.
-    const named = new Set(busiest.map((f) => f.slug))
-    const tightest = open
-      .filter((f) => !named.has(f.slug) && f.book?.grade === 'clean' && f.book.spreadPp != null)
-      .sort(
-        (a, b) =>
-          (a.book!.spreadPp ?? 99) - (b.book!.spreadPp ?? 99) || a.volumeUsd - b.volumeUsd
-      )
-      .slice(0, 3)
-    const clean = fixtures.filter((f) => f.book?.grade === 'clean').length
-    const cleanPct = fixtures.length ? (clean / fixtures.length) * 100 : 0
-    return { busiest, liveNow, topLive, tightest, clean, cleanPct }
-  }, [fixtures])
+  /** The games leading the page. Same board the table renders, taken from the
+   *  top of it — nothing here is a separate feed that could disagree with the
+   *  rows underneath. */
+  const headline = useMemo(
+    () => fixtures.filter((f) => !f.finished).slice(0, 3),
+    [fixtures]
+  )
 
   return (
     <AppShell>
@@ -430,116 +409,68 @@ export default function ScoutPage() {
         <div className="sc-head">
           <h1 className="sc-h1">All of today&apos;s football, priced</h1>
           <p className="sc-h1-sub">
-            Every fixture with a live market, in play first — and every board marked with
-            whether there is a real price behind the quote.
+            The games everyone is on, biggest first — live prices in decimal odds, and every
+            other fixture Polymarket has open underneath.
           </p>
         </div>
 
-        {/* ── the four cards ── */}
-        {!loading && !error && fixtures.length > 0 && (
-          <div className="sc-cards">
-            {/* Busiest, which is where a price exists at all — not where an edge is. */}
-            <div className="sc-card">
-              <div className="sc-card-head">
-                <span className="sc-card-title">BUSIEST BOARDS</span>
-                <button className="sc-card-more" onClick={() => setSort('volume')}>
-                  Sort by volume →
-                </button>
-              </div>
-              <ol className="sc-card-list">
-                {cards.busiest.map((f, i) => (
-                  <li key={f.slug}>
-                    <span className="sc-card-rank np-num">{i + 1}</span>
-                    <Link href={`/game/${f.slug}`} className="sc-card-link">
-                      {f.home} v {f.away}
-                    </Link>
-                    <span className="sc-card-val np-num">{money(f.volumeUsd)}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
+        {/* ── the games leading the card ── */}
+        {!loading && !error && headline.length > 0 && (
+          <div className="sc-big">
+            {headline.map((f) => {
+              const g = GRADE[f.book?.grade ?? 'unknown']
+              return (
+                <Link
+                  key={f.slug}
+                  href={`/game/${f.slug}`}
+                  className={`sc-big-card${f.live ? ' is-live' : ''}`}
+                >
+                  <div className="sc-big-top">
+                    <span className="sc-big-comp">{f.competition ?? 'Football'}</span>
+                    {f.liveSource === 'board' ? (
+                      <span className="np-badge is-live">● LIVE</span>
+                    ) : f.liveSource === 'clock' ? (
+                      <span className="np-badge is-warn">KICKED OFF?</span>
+                    ) : (
+                      <span className="sc-big-in np-num">{clock(f.kickoff)}</span>
+                    )}
+                  </div>
 
-            {/* One live fixture, big — the thing you came to look at. */}
-            <div className={`sc-card sc-card-live${cards.topLive ? '' : ' is-empty'}`}>
-              <div className="sc-card-head">
-                <span className="sc-card-title">
-                  <span className="sc-dot">●</span> LIVE NOW
-                </span>
-                {cards.liveNow.length > 1 && (
-                  <button className="sc-card-more" onClick={() => setFilter('live')}>
-                    All {cards.liveNow.length} →
-                  </button>
-                )}
-              </div>
-              {cards.topLive ? (
-                <Link href={`/game/${cards.topLive.slug}`} className="sc-live-body">
-                  <span className="sc-live-teams">
-                    {cards.topLive.home} v {cards.topLive.away}
-                  </span>
-                  <span className="sc-live-meta">
-                    {cards.topLive.competition ?? 'Football'} ·{' '}
-                    <span className="np-num">{money(cards.topLive.volumeUsd)}</span> traded
-                  </span>
-                  <span className="sc-live-odds np-num">
-                    {odds(cards.topLive.oneX2.home)} · {odds(cards.topLive.oneX2.draw)} ·{' '}
-                    {odds(cards.topLive.oneX2.away)}
-                  </span>
-                </Link>
-              ) : (
-                <div className="sc-live-body sc-live-none">
-                  Nothing in play right now. The next board opens above.
-                </div>
-              )}
-            </div>
+                  <div className="sc-big-teams">
+                    <span>{f.home}</span>
+                    <span className="sc-big-v">v</span>
+                    <span>{f.away}</span>
+                  </div>
 
-            {/* The differentiator: where a price can actually be paid. */}
-            <div className="sc-card">
-              <div className="sc-card-head">
-                <span className="sc-card-title">CLEAN BOOK, QUIETER GAME</span>
-                <button className="sc-card-more" onClick={() => setSort('spread')}>
-                  Sort by book →
-                </button>
-              </div>
-              <ol className="sc-card-list">
-                {cards.tightest.map((f, i) => (
-                  <li key={f.slug}>
-                    <span className="sc-card-rank np-num">{i + 1}</span>
-                    <Link href={`/game/${f.slug}`} className="sc-card-link">
-                      {f.home} v {f.away}
-                    </Link>
-                    <span className="sc-card-val np-num sc-card-val-good">
-                      {f.book!.spreadPp!.toFixed(1)}pp
+                  <div className="sc-big-odds">
+                    <span className="sc-big-odd">
+                      <em>1</em>
+                      <b className="np-num">{odds(f.oneX2.home)}</b>
                     </span>
-                  </li>
-                ))}
-                {cards.tightest.length === 0 && (
-                  <li className="sc-card-none">
-                    No clean book outside the boards above right now.
-                  </li>
-                )}
-              </ol>
-            </div>
+                    <span className="sc-big-odd">
+                      <em>X</em>
+                      <b className="np-num">{odds(f.oneX2.draw)}</b>
+                    </span>
+                    <span className="sc-big-odd">
+                      <em>2</em>
+                      <b className="np-num">{odds(f.oneX2.away)}</b>
+                    </span>
+                    <span className="sc-big-odd sc-big-odd-alt">
+                      <em>O2.5</em>
+                      <b className="np-num">{odds(f.over25)}</b>
+                    </span>
+                  </div>
 
-            {/* An index of the board's own health, with the caveat attached to
-                it rather than left for the reader to supply. */}
-            <div className="sc-card sc-card-index">
-              <div className="sc-card-head">
-                <span className="sc-card-title">BOOK HEALTH</span>
-              </div>
-              <div className="sc-index-val np-num">
-                {cards.cleanPct.toFixed(0)}
-                <span className="sc-index-unit">%</span>
-              </div>
-              <div className="sc-index-bar" aria-hidden="true">
-                <span style={{ width: `${Math.min(100, cards.cleanPct)}%` }} />
-              </div>
-              <div className="sc-index-key">
-                <span className="np-num">{cards.clean}</span> of{' '}
-                <span className="np-num">{fixtures.length}</span> boards quote both sides
-                inside 6pp
-              </div>
-              <div className="sc-index-note">A clean book is not an edge. It is a price you can pay.</div>
-            </div>
+                  <div className="sc-big-foot">
+                    <span className="np-num sc-big-vol">{money(f.volumeUsd)} traded</span>
+                    <span className="np-num sc-big-mkts">{f.markets} markets</span>
+                    <span className={`sc-grade ${g.cls}`} title={g.title}>
+                      {g.label}
+                    </span>
+                  </div>
+                </Link>
+              )
+            })}
           </div>
         )}
 

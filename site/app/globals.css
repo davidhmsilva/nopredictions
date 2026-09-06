@@ -2693,63 +2693,63 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-cat-more { color: var(--blue); }
 
 /* ===========================================================================
-   CARDS  (.sc-cards)
+   BIG MATCH CARDS  (.sc-big)
+   The games leading the card get a card each, not a line in a list — this is
+   the first thing anyone opening the page on a matchday is looking for.
    =========================================================================== */
 
-.sc-cards {
+.sc-big {
   display: grid; gap: 12px; margin-bottom: 22px;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-.sc-card {
+.sc-big-card {
+  display: flex; flex-direction: column; gap: 11px;
   background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
-  padding: 12px 14px; display: flex; flex-direction: column; min-height: 132px;
+  padding: 13px 15px 12px; text-decoration: none;
+  transition: border-color .12s, background .12s;
 }
-.sc-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
-.sc-card-title {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--grey);
+.sc-big-card:hover { border-color: var(--grey2); background: var(--bg3); }
+.sc-big-card.is-live {
+  border-color: rgba(239,68,68,.3);
+  background: linear-gradient(165deg, rgba(239,68,68,.09), transparent 55%), var(--bg2);
 }
-.sc-dot { color: var(--red); }
-.sc-card-more {
-  margin-left: auto; background: none; border: none; cursor: pointer;
-  font-family: var(--font); font-size: 11px; color: var(--blue); padding: 0;
-}
-.sc-card-more:hover { text-decoration: underline; }
 
-.sc-card-list { list-style: none; display: flex; flex-direction: column; gap: 7px; }
-.sc-card-list li { display: flex; align-items: baseline; gap: 7px; font-size: 12.5px; }
-.sc-card-rank { color: var(--grey2); font-size: 10.5px; width: 9px; flex-shrink: 0; }
-.sc-card-link {
-  color: var(--white); text-decoration: none; flex: 1; min-width: 0;
+.sc-big-top { display: flex; align-items: center; gap: 8px; }
+.sc-big-comp {
+  font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--grey2); font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.sc-card-link:hover { color: var(--green); }
-.sc-card-val { color: var(--grey); font-size: 11.5px; flex-shrink: 0; }
-.sc-card-val-good { color: var(--green); }
-.sc-card-none { color: var(--grey2); font-size: 12px; }
+.sc-big-top .np-badge, .sc-big-in { margin-left: auto; flex-shrink: 0; }
+.sc-big-in { font-size: 12px; color: var(--grey); }
 
-.sc-card-live {
-  background: linear-gradient(160deg, rgba(239,68,68,.13), rgba(239,68,68,.02) 60%), var(--bg2);
-  border-color: rgba(239,68,68,.30);
+.sc-big-teams {
+  display: flex; flex-direction: column; gap: 1px;
+  font-size: 16px; font-weight: 650; color: var(--white); line-height: 1.25;
 }
-.sc-card-live.is-empty { background: var(--bg2); border-color: var(--border); }
-.sc-live-body {
-  display: flex; flex-direction: column; gap: 3px; text-decoration: none;
-  margin-top: auto;
-}
-.sc-live-teams { font-size: 14px; font-weight: 600; color: var(--white); line-height: 1.25; }
-.sc-live-meta { font-size: 11px; color: var(--grey); }
-.sc-live-odds { font-size: 12.5px; color: var(--white); margin-top: 3px; }
-.sc-live-none { font-size: 12.5px; color: var(--grey2); }
+.sc-big-v { font-size: 11px; font-weight: 400; color: var(--grey2); line-height: 1; }
 
-.sc-card-index { justify-content: flex-start; }
-.sc-index-val { font-size: 30px; font-weight: 650; color: var(--green); line-height: 1; }
-.sc-index-unit { font-size: 15px; color: var(--grey); margin-left: 2px; }
-.sc-index-bar {
-  height: 4px; border-radius: 999px; background: var(--bg3); margin: 9px 0 8px; overflow: hidden;
+.sc-big-odds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.sc-big-odd {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 4px; border-radius: var(--r-sm);
+  background: var(--bg3); border: 1px solid transparent;
 }
-.sc-index-bar span { display: block; height: 100%; background: var(--green); border-radius: 999px; }
-.sc-index-key { font-size: 11.5px; color: var(--grey); line-height: 1.45; }
-.sc-index-note { margin-top: auto; padding-top: 8px; font-size: 10.5px; color: var(--grey2); font-style: italic; }
+.sc-big-card:hover .sc-big-odd { background: var(--bg-hover); border-color: var(--border2); }
+.sc-big-odd em {
+  font-style: normal; font-size: 9.5px; letter-spacing: .06em;
+  color: var(--grey2); font-weight: 600;
+}
+.sc-big-odd b { font-size: 14.5px; font-weight: 600; color: var(--white); }
+.sc-big-odd-alt em { color: var(--grey); }
+
+.sc-big-foot {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding-top: 10px; border-top: 1px solid var(--border);
+}
+.sc-big-vol { font-size: 11.5px; color: var(--white); font-weight: 600; }
+.sc-big-mkts { font-size: 11px; color: var(--grey2); }
+.sc-big-foot .sc-grade { margin-left: auto; }
 
 /* ── list controls ── */
 .sc-bar-left { display: flex; align-items: center; gap: 10px; }
@@ -2762,14 +2762,18 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-count { font-size: 11.5px; color: var(--grey2); }
 
 @media (max-width: 1080px) {
-  .sc-cards { grid-template-columns: repeat(2, 1fr); }
+  .sc-big { grid-template-columns: repeat(2, 1fr); }
+  .sc-big-card:nth-child(3) { display: none; }
 }
 @media (max-width: 760px) {
   .np-tape-strip { gap: 20px; }
   .np-search { display: none; }
   .sc-cats-inner { height: 40px; padding: 0 14px; }
-  .sc-cards { grid-template-columns: 1fr; }
-  .sc-card { min-height: 0; }
+  /* One card on a phone. Three stacked is most of a screen before the board
+     starts, and the other two are a scroll away in the table anyway. */
+  .sc-big { grid-template-columns: 1fr; }
+  .sc-big-card:nth-child(n + 2) { display: none; }
+  .sc-h1 { font-size: 19px; line-height: 1.25; }
   .sc-bar-left { width: 100%; }
 }
 

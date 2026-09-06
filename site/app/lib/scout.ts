@@ -566,16 +566,28 @@ export function buildFixtures(
   return { fixtures, marketsBySlug }
 }
 
-/** Fixtures a bettor should look at first: live before pre-match, finished
- *  last, then the busiest board. Volume is not an edge — it is where a price
- *  exists at all. */
+/** The order the board opens in: the games people are actually betting.
+ *
+ *  This used to lead with anything in play, which put a $13k J-League board
+ *  above Everton v Manchester United at $4.9M — backwards for anyone opening
+ *  the page to see what is on today. Money traded is the honest proxy for
+ *  "hot", and it also settles the quality question by itself: a fixture with
+ *  millions through it has a real two-sided book by construction, so the book
+ *  grade can go back to being a column rather than the pitch.
+ *
+ *  A live game still gets a nudge, not a promotion — a tenth of the board's
+ *  volume is enough to lift an in-play fixture past a slightly bigger one that
+ *  has not kicked off, and nowhere near enough to lift a small one past a big
+ *  one. Finished games sort last whatever they traded. */
+const LIVE_BOOST = 1.1
+
+export function heatOf(f: ScoutFixture): number {
+  return f.volumeUsd * (f.live ? LIVE_BOOST : 1)
+}
+
 export function rankFixtures(fixtures: ScoutFixture[]): ScoutFixture[] {
   return fixtures.slice().sort((a, b) => {
     if (a.finished !== b.finished) return a.finished ? 1 : -1
-    if (a.live !== b.live) return a.live ? -1 : 1
-    // A fixture we know is in play outranks one we only infer from the clock.
-    const conf = (f: ScoutFixture) => (f.liveSource === 'board' ? 0 : 1)
-    if (a.live && b.live && conf(a) !== conf(b)) return conf(a) - conf(b)
-    return b.volumeUsd - a.volumeUsd
+    return heatOf(b) - heatOf(a)
   })
 }
