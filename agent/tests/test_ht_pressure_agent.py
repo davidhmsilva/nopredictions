@@ -252,6 +252,17 @@ def _pressing(minute: int, **kw) -> PressureSignals:
                 away_possession=36.0, **kw)
 
 
+def _gone_quiet(minute: int, **kw) -> PressureSignals:
+    """A real rolling reading of a match that has stopped happening. `has_window`
+    matters: without it the reading is None, which is a different row and a
+    different skip reason."""
+    return _sig(minute=minute, has_window=True,
+                home_shots_on_window=0, home_shots_inside_window=0,
+                home_xg_window=0.0, home_corners_window=0,
+                home_possession=51.0, away_possession=49.0,
+                home_xg_total=0.1, **kw)
+
+
 def test_a_pressed_goalless_opening_enters(board):
     state = ht.HTState()
     rows = ht.observe({1: _pressing(16)}, fht.load(), board, state)
@@ -340,16 +351,15 @@ def test_a_dead_window_is_not_a_reading(board):
     assert not rows[0]["would_enter"]
 
 
-def test_an_armed_fixture_may_enter_on_a_reading_that_has_since_died(board, quote):
-    """The deliberate consequence of obs_version 4, spelled out so it cannot be
-    mistaken for the bug above.
+def test_an_armed_fixture_does_not_enter_without_a_live_reading(board, quote):
+    """obs_version 5. This asserted the opposite until 2026-09-06.
 
-    The latch does NOT invent a pressure reading — it enters on one that was
-    really measured, at 16', and recorded. What it stops requiring is that the
-    reading still be available at the minute the PRICE arrives, because the
-    price arrives on the market's clock and the stats arrive on api-football's.
-    The row says exactly which: entry_trigger 'armed', with armed_pressure
-    carrying the number the decision was actually made on.
+    v4 entered on `(pressing or armed)`, so a fixture that pressed once could be
+    bought minutes later purely because the price had walked out — with the game
+    already quiet. Measured on v4's own 11 entries: 2 were bought with the
+    reading COLLAPSED below the gate (Henan v Chengdu armed at 26' on 19.6, in
+    at 34' on 12.7). The latch keeps a fixture under observation; it is not a
+    reading.
     """
     state = ht.HTState()
     quote["best_ask"], quote["best_bid"] = 0.62, 0.60      # 1.61 — under the bar
@@ -359,10 +369,25 @@ def test_an_armed_fixture_may_enter_on_a_reading_that_has_since_died(board, quot
     quote["best_ask"], quote["best_bid"] = 0.54, 0.52      # 1.85 — the price lands
     rows = ht.observe({1: _pressing(30, has_window=False)}, fht.load(), board, state)
     assert rows[0]["pressure_now"] is None                 # no live reading
-    assert rows[0]["would_enter"]
+    assert not rows[0]["would_enter"]
+    # The arming is still on the record — the two rules have to stay comparable
+    # on the same tape.
     assert rows[0]["entry_trigger"] == "armed"
     assert rows[0]["armed_at_minute"] == 16
     assert rows[0]["armed_pressure"] >= ht.MIN_PRESSURE
+
+
+def test_an_armed_fixture_whose_pressure_died_says_so(board, quote):
+    """The population v5 gives up, and it has to be countable in the histogram
+    rather than folded into the generic pressure line."""
+    state = ht.HTState()
+    quote["best_ask"], quote["best_bid"] = 0.62, 0.60      # short: arms only
+    ht.observe({1: _pressing(16)}, fht.load(), board, state)
+
+    quote["best_ask"], quote["best_bid"] = 0.54, 0.52      # price arrives
+    rows = ht.observe({1: _gone_quiet(30)}, fht.load(), board, state)
+    assert not rows[0]["would_enter"]
+    assert "pressure has gone" in rows[0]["skip_reason"]
 
 
 # ── obs_version 4: the price gate and the monitoring state ───────────────────

@@ -140,7 +140,7 @@ log = logging.getLogger("ht_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure HT Over 0.5"
-OBS_VERSION = 4
+OBS_VERSION = 5
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -203,6 +203,24 @@ ENTRY_MAX_MINUTE = 40
 # 19 still means "busier than three fixtures in four" on the new axis: 23.2% of
 # rolling readings clear it. No threshold was refitted to an outcome.
 MIN_PRESSURE = 19.0
+# ── the pressure must still be there — obs_version 5, 2026-09-06 ────────────
+# v4 entered on `(pressing or armed)`, so a fixture that pressed ONCE could be
+# bought minutes later purely because the price had arrived, with the game
+# already quiet. That is not the hypothesis this arm exists to test.
+#
+# Measured on v4's own 11 entries before the change: 9 were `live` (pressure
+# 23.1 at entry) and 2 were `armed` with the reading COLLAPSED below the gate —
+# Henan v Chengdu armed at 26' on 19.6 and entered at 34' on 12.7; Cracovia v
+# Gornik armed at 15' on 21.3 and entered at 18' on 14.0. Both bought a quiet
+# match at a price that had merely drifted.
+#
+# From v5 the gate is re-applied at the moment of entry. Arming survives, and
+# it survives for the reason it was built: it keeps a fixture under observation
+# while the book walks out to MIN_ODDS, and `armed_at_minute` /
+# `armed_pressure` stay on every row so "pressed at 15', still pressing at 25'"
+# remains answerable. What it no longer does is stand in for a reading.
+#
+# ⚠️ Never pool v5 with v1-v4. The entry rule changed, not a threshold.
 # ── the minimum price — obs_version 4, 2026-09-06 ───────────────────────────
 # The user's rule: do not take this line at less than 1.75. A fixture that
 # presses while the book is still shorter than that is NOT dropped — it is
@@ -618,19 +636,22 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         if armed:
             row["armed_at_minute"] = armed["minute"]
             row["armed_pressure"] = armed["pressure"]
-        # 'live'  — pressure is passing at this very poll
-        # 'armed' — it passed earlier and the fixture has been monitored since,
-        #           which is the case the price gate exists to create. Recorded
-        #           because an entry made on a reading that has since cooled is
-        #           not the same bet, and the two must stay separable.
+        # 'live'  — pressure is passing at this very poll. From obs_version 5
+        #           this is the ONLY value an entry can carry.
+        # 'armed'  — it passed at an earlier poll and is not passing now. Still
+        #           recorded on the row, because "armed then went quiet" is the
+        #           population v4 was buying and v5 refuses; leaving it visible
+        #           is what makes the two rules comparable on the same tape.
         row["entry_trigger"] = ("live" if pressing else "armed") if armed else None
 
         odds_ok = book["best_ask"] <= MAX_ENTRY_PRICE + _PRICE_EPS
         row["would_enter"] = bool(
             goals == 0
             and ENTRY_MIN_MINUTE <= sig.minute <= ENTRY_MAX_MINUTE
-            # Either pressing now, or armed by an earlier poll and still 0-0.
-            and (pressing or armed is not None)
+            # obs_version 5: pressure must be passing AT THIS POLL. Arming
+            # only keeps a fixture under watch while the price arrives; it is
+            # no longer a substitute for a live reading.
+            and pressing
             and sig.has_stats
             # obs_version 4: never shorter than MIN_ODDS. Below it the fixture
             # keeps being observed and stays armed; it is not an entry.
@@ -664,12 +685,21 @@ def _why_not(row: dict, book: dict, sig: PressureSignals,
             return (f"armed at {armed['minute']}' — window closed at "
                     f"{ENTRY_MAX_MINUTE}' without reaching {MIN_ODDS:.2f}")
         return f"minute {sig.minute} > {ENTRY_MAX_MINUTE}"
-    # The price gate is reported BEFORE the pressure gate for an armed fixture:
-    # the reason it did not enter is the price, and the reading is allowed to
-    # have cooled while it waited. This is the monitoring state, not a failure.
+    # For an armed fixture the price gate is still reported first — waiting for
+    # the book to walk out is the state arming exists to create, not a failure.
     if armed and book["best_ask"] > MAX_ENTRY_PRICE + _PRICE_EPS:
         return (f"armed at {armed['minute']}' (pressure {armed['pressure']:.0f}) "
                 f"— monitoring: {1 / book['best_ask']:.2f} < {MIN_ODDS:.2f}")
+    # obs_version 5: an armed fixture whose price HAS arrived but whose pressure
+    # has since gone is the case v4 bought and this version refuses. It gets its
+    # own reason rather than the generic pressure line, because the histogram is
+    # how we will see the size of the population the rule change gave up.
+    if (armed and row["pressure_now"] is not None
+            and row["pressure_now"] < MIN_PRESSURE
+            and book["best_ask"] <= MAX_ENTRY_PRICE + _PRICE_EPS):
+        return (f"armed at {armed['minute']}' on {armed['pressure']:.0f} — "
+                f"price arrived but pressure has gone ({row['pressure_now']:.0f} "
+                f"< {MIN_PRESSURE})")
     if row["pressure_now"] is None:
         return (f"no {FIRST15_MIN}-minute window at {sig.minute}' "
                 f"(fixture picked up late)")
@@ -807,19 +837,19 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
             span = (f"the first {r['pressure_minute']} minutes"
                     if r["pressure_source"] == "opening"
                     else f"the 15 minutes to {r['pressure_minute']}'")
-            if r["entry_trigger"] == "armed":
-                press_txt = (
-                    f"Armed at {r['armed_at_minute']}' on a pressure reading of "
-                    f"{r['armed_pressure']:.0f}/100 and monitored since — this is "
-                    f"the poll at which the price finally reached {MIN_ODDS:.2f}. "
-                    f"The reading NOW is "
-                    + (f"{r['pressure_now']:.0f}/100 over {span}. "
-                       if r['pressure_now'] is not None else "unavailable. ")
-                )
-            else:
-                press_txt = (
-                    f"Pressure {r['pressure_now']:.0f}/100 over {span} "
-                    f"(danger H={r['home_danger']:.0f} A={r['away_danger']:.0f}). "
+            # From obs_version 5 every entry is a live reading, so the text
+            # below always states one. Where the fixture had also armed earlier
+            # that is worth saying — it has been pressing for a while rather
+            # than for one poll — but it is context, never the reason.
+            press_txt = (
+                f"Pressure {r['pressure_now']:.0f}/100 over {span} "
+                f"(danger H={r['home_danger']:.0f} A={r['away_danger']:.0f}). "
+            )
+            if r["armed_at_minute"] is not None and r["armed_at_minute"] != r["minute"]:
+                press_txt += (
+                    f"First cleared the gate at {r['armed_at_minute']}' on "
+                    f"{r['armed_pressure']:.0f}/100 and has been watched since, "
+                    f"waiting for the price to reach {MIN_ODDS:.2f}. "
                 )
             reasoning = (
                 f"{r['home']} 0-0 {r['away']} {r['minute']}' — Over 0.5 first half "

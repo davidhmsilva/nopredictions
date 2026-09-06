@@ -124,8 +124,14 @@ def _row(**kw) -> dict:
     return row
 
 
-def _book(ask=0.50, depth=500.0) -> dict:
-    return {"best_ask": ask, "ask_depth_usd": depth}
+def _book(ask=0.50, depth=2000.0, bid=None) -> dict:
+    """A book that CLEARS every v4 gate by default, so a test asserting one gate
+    is not silently satisfied by another. The defaults drifted when obs_version 4
+    added the bid, the spread and a $1000 depth floor: `depth=500` had been
+    passing until the floor moved past it, and `best_bid` was simply absent,
+    which made _why_not raise KeyError instead of naming a gate."""
+    return {"best_ask": ask, "ask_depth_usd": depth,
+            "best_bid": bid if bid is not None else round(ask - 0.02, 4)}
 
 
 def test_why_not_names_the_binding_gate():
@@ -213,9 +219,11 @@ def _board(monkeypatch):
         mkt("Manchester City vs. Liverpool: O/U 1.5", ["0.44", "0.56"]),
         mkt("Manchester City vs. Liverpool: O/U 2.5", ["0.18", "0.82"]),
     ]}
+    # $500 predates obs_version 4's $1000 depth floor — the end-to-end test was
+    # asserting an entry against a book that can no longer produce one.
     monkeypatch.setattr(pa, "_fetch_book", lambda tok: {
         **tok, "best_bid": 0.42, "best_ask": 0.44,
-        "bid_depth_usd": 500.0, "ask_depth_usd": 500.0})
+        "bid_depth_usd": 2000.0, "ask_depth_usd": 2000.0})
     return [fx]
 
 
@@ -636,6 +644,7 @@ def test_xg_coverage_is_read_off_the_totals_not_the_window():
 
 
 def test_obs_version_was_bumped_with_the_axis():
-    """v2 and v3 measure the same quantity differently — the split has to exist
-    in the data or the two populations pool into one meaningless yield."""
-    assert pa.OBS_VERSION == 3
+    """Each version measures the same quantity differently — the split has to
+    exist in the data or the populations pool into one meaningless yield.
+    v3 moved the axis (xG renormalised); v4 added the book gates."""
+    assert pa.OBS_VERSION == 4
