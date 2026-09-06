@@ -2488,23 +2488,11 @@ button { font-family: var(--font); }
    =========================================================================== */
 
 /* ── head ── */
-.sc-head { padding: 24px 0 18px; }
+.sc-head { padding: 26px 0 16px; }
 .sc-h1 { font-size: 23px; font-weight: 650; letter-spacing: -.02em; color: var(--white); }
-
-/* What the product is, in the space the page title used to take. Three items
-   on one row on a wide screen, stacked on a phone. */
-.sc-pitch {
-  display: grid; gap: 8px 26px; margin-top: 9px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-.sc-pitch-item { display: block; text-decoration: none; min-width: 0; }
-.sc-pitch-k {
-  display: block; font-size: 12.5px; font-weight: 650; color: var(--white); margin-bottom: 1px;
-}
-a.sc-pitch-item .sc-pitch-k { color: var(--green); }
-a.sc-pitch-item:hover .sc-pitch-k { text-decoration: underline; }
-.sc-pitch-item.is-here .sc-pitch-k { color: var(--white); }
-.sc-pitch-v { display: block; font-size: 12px; color: var(--grey); line-height: 1.45; }
+.sc-h1-sub { margin-top: 4px; font-size: 13px; color: var(--grey); }
+.sc-method-link { color: var(--blue); text-decoration: none; }
+.sc-method-link:hover { text-decoration: underline; }
 
 /* ── controls ── */
 .sc-bar {
@@ -2782,8 +2770,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .sc-cats-inner { height: 40px; padding: 0 14px; }
   .sc-cards { grid-template-columns: 1fr; }
   .sc-card { min-height: 0; }
-  .sc-pitch { grid-template-columns: 1fr; gap: 7px; }
-  .sc-h1 { font-size: 19px; line-height: 1.25; }
   .sc-bar-left { width: 100%; }
 }
 

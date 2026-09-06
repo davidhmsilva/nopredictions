@@ -427,36 +427,11 @@ export default function ScoutPage() {
       </div>
 
       <div className="np-wrap">
-        {/* This space used to label the page — "Football boards" over a line
-            restating the tab you already clicked. It now says what the product
-            is, in three verbs that map to the three tools, and each one is the
-            way into that tool. The board itself is named but not linked: you
-            are standing on it. */}
         <div className="sc-head">
-          <h1 className="sc-h1">See the board. Test your theory. Read the traders.</h1>
-          <div className="sc-pitch">
-            <span className="sc-pitch-item is-here">
-              <span className="sc-pitch-k">The board</span>
-              <span className="sc-pitch-v">
-                every Polymarket football fixture, graded on whether a real book stands
-                behind the quote
-              </span>
-            </span>
-            <Link href="/lab" className="sc-pitch-item">
-              <span className="sc-pitch-k">The Lab →</span>
-              <span className="sc-pitch-v">
-                write a betting theory in plain English, replayed over{' '}
-                <span className="np-num">111,475</span> real games against the closing odds
-              </span>
-            </Link>
-            <Link href="/wallet" className="sc-pitch-item">
-              <span className="sc-pitch-k">The Wallet →</span>
-              <span className="sc-pitch-v">
-                any Polymarket trader&apos;s whole record, rebuilt fill by fill into round
-                trips
-              </span>
-            </Link>
-          </div>
+          <h1 className="sc-h1">Football boards</h1>
+          <p className="sc-h1-sub">
+            Every Polymarket football board open in the next 36 hours, in play first.
+          </p>
         </div>
 
         {/* ── the four cards ── */}
