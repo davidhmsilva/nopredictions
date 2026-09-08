@@ -1,14 +1,14 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AppShell } from './components/AppShell'
 import {
   IconAll,
   IconBook,
   IconClock,
+  IconInsights,
   IconLive,
-  IconRuler,
   IconStar,
 } from './components/icons'
 import type { BookGrade, ScoutFixture } from './lib/scout'
@@ -130,7 +130,7 @@ function sortFixtures(fs: ScoutFixture[], key: SortKey): ScoutFixture[] {
 
 // ── filters ──────────────────────────────────────────────────────────────────
 
-type Filter = 'all' | 'live' | 'soon' | 'clean' | 'measured' | 'watchlist'
+type Filter = 'all' | 'live' | 'soon' | 'clean' | 'watchlist'
 
 const FILTERS: {
   id: Filter
@@ -142,9 +142,16 @@ const FILTERS: {
   { id: 'live', label: 'In play', Icon: IconLive, cls: 'is-live-icn' },
   { id: 'soon', label: 'Starting soon', Icon: IconClock },
   { id: 'clean', label: 'Clean books', Icon: IconBook },
-  { id: 'measured', label: 'Measured', Icon: IconRuler },
   { id: 'watchlist', label: 'Watchlist', Icon: IconStar },
 ]
+
+/** Insights sits in this row, in the slot the "Measured" filter used to hold.
+ *
+ *  ⚠️ It is the odd one out and is drawn that way on purpose. Every other chip
+ *     here narrows the list below; this one leaves the page. A link that looks
+ *     exactly like a filter is a link people click by accident, so it gets its
+ *     own class, an arrow, and it never takes the selected state. */
+const INSIGHTS_AFTER: Filter = 'clean'
 
 /** "Starting soon" is the next two hours. Long enough to cover a build-up,
  *  short enough that the list is still a list. */
@@ -360,8 +367,6 @@ export default function ScoutPage() {
         }
         case 'clean':
           return f.book?.grade === 'clean'
-        case 'measured':
-          return f.hasFirstHalf && f.hasTotals
         case 'watchlist':
           return watchlist.includes(f.slug)
         default:
@@ -400,17 +405,29 @@ export default function ScoutPage() {
         <div className="sc-cats-inner">
           <div className="sc-cat-group">
             {FILTERS.map((f) => (
-              <button
-                key={f.id}
-                className={`sc-cat${filter === f.id ? ' is-on' : ''}`}
-                onClick={() => setFilter(f.id)}
-              >
-                <f.Icon className={`sc-cat-icn ${f.cls ?? ''}`} />
-                {f.label}
-                {f.id === 'watchlist' && watchlist.length > 0 && (
-                  <span className="sc-cat-n np-num">{watchlist.length}</span>
+              <Fragment key={f.id}>
+                <button
+                  className={`sc-cat${filter === f.id ? ' is-on' : ''}`}
+                  onClick={() => setFilter(f.id)}
+                >
+                  <f.Icon className={`sc-cat-icn ${f.cls ?? ''}`} />
+                  {f.label}
+                  {f.id === 'watchlist' && watchlist.length > 0 && (
+                    <span className="sc-cat-n np-num">{watchlist.length}</span>
+                  )}
+                </button>
+                {f.id === INSIGHTS_AFTER && (
+                  <Link
+                    href="/insights"
+                    className="sc-cat is-link"
+                    title="What we measured, and what it said — including the results that went the wrong way"
+                  >
+                    <IconInsights className="sc-cat-icn" />
+                    Insights
+                    <span className="sc-cat-go" aria-hidden="true">→</span>
+                  </Link>
                 )}
-              </button>
+              </Fragment>
             ))}
           </div>
 

@@ -82,6 +82,10 @@ export interface ScoutFixture {
    *  fixture title, never by market order. */
   oneX2: { home: number | null; draw: number | null; away: number | null }
   over25: number | null
+  // ⓘ Nothing reads these since the "Measured" board filter was retired for the
+  //   Insights link (2026-09-08). They are kept because they are true, cheap,
+  //   and the honest answer to "which markets does this fixture even have" —
+  //   but treat them as available rather than load-bearing.
   hasTotals: boolean
   hasFirstHalf: boolean
   book: BookQuality | null

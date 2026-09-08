@@ -3317,3 +3317,151 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .np-wallet-gate { max-width: 520px; margin: 40px auto; padding: 26px; }
 .np-wallet-gate h2 { font-size: 18px; font-weight: 650; margin: 0 0 10px; }
 .np-wallet-gate p  { color: var(--grey); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Insights — articles and the newsletter
+   Added 2026-09-08. The Insights entry lives in the Scout board's chip row,
+   in the slot the "Measured" filter used to hold.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* The odd chip: it navigates, the others filter. A left divider and an arrow
+   say so before the click, and it never takes the selected state. */
+.sc-cat.is-link {
+  text-decoration: none;
+  color: var(--green);
+  position: relative;
+  margin-left: 9px;
+  padding-left: 15px;
+}
+.sc-cat.is-link::before {
+  content: ''; position: absolute; left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 1px; height: 15px; background: var(--border2);
+}
+.sc-cat.is-link:hover { color: #29d669; background: var(--bg-hover); }
+.sc-cat-go { opacity: .55; font-size: 11px; }
+
+/* ── index ─────────────────────────────────────────────────────────────────── */
+
+.np-insights { max-width: 780px; margin: 0 auto; padding: 40px 20px 80px; }
+.np-insights-head { margin-bottom: 26px; }
+.np-insights-head h1 { font-size: 28px; font-weight: 680; margin: 0 0 10px; }
+.np-insights-head p { color: var(--grey); font-size: 14px; line-height: 1.7; margin: 0; }
+
+.np-insights-list { display: flex; flex-direction: column; gap: 12px; }
+
+.np-post {
+  display: block; text-decoration: none; color: inherit; padding: 20px;
+  transition: border-color .12s, background .12s;
+}
+.np-post:hover { border-color: var(--border2); background: var(--bg3); }
+
+.np-post-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 11px; color: var(--grey);
+  margin-bottom: 10px;
+}
+.np-post-mins { color: var(--grey2); }
+.np-post-title { font-size: 18px; font-weight: 640; line-height: 1.35; margin: 0 0 8px; }
+.np-post:hover .np-post-title { color: var(--green); }
+.np-post-sum { color: var(--grey); font-size: 13.5px; line-height: 1.6; margin: 0; }
+.np-post-src {
+  margin: 10px 0 0; color: var(--grey2);
+  font-family: var(--font-mono); font-size: 11px;
+}
+
+/* ── one article ───────────────────────────────────────────────────────────── */
+
+.np-article { max-width: 720px; margin: 0 auto; padding: 32px 20px 80px; }
+.np-article-back {
+  display: inline-block; margin-bottom: 22px; color: var(--grey);
+  font-size: 12.5px; text-decoration: none;
+}
+.np-article-back:hover { color: var(--white); }
+
+.np-article-head { margin-bottom: 28px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
+.np-article-head h1 {
+  font-size: 30px; font-weight: 700; line-height: 1.22;
+  letter-spacing: -.015em; margin: 0 0 12px;
+}
+.np-article-sum { color: var(--grey); font-size: 15.5px; line-height: 1.65; margin: 0; }
+.np-article-src {
+  margin: 14px 0 0; color: var(--grey2);
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+}
+.np-article-src strong { color: var(--grey); font-weight: 550; }
+
+.np-article-foot {
+  margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border);
+  color: var(--grey2); font-size: 12.5px; line-height: 1.6;
+}
+.np-article-foot a { color: var(--grey); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── the prose itself ──────────────────────────────────────────────────────── */
+
+.np-prose { font-size: 15.5px; line-height: 1.75; color: #d3d7de; }
+.np-prose > *:first-child { margin-top: 0; }
+.np-prose p { margin: 0 0 18px; }
+.np-prose h2 {
+  font-size: 20px; font-weight: 650; color: var(--white);
+  margin: 34px 0 14px; letter-spacing: -.01em;
+}
+.np-prose h3 { font-size: 16px; font-weight: 620; color: var(--white); margin: 26px 0 10px; }
+.np-prose strong { color: var(--white); font-weight: 620; }
+.np-prose a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+.np-prose ul, .np-prose ol { margin: 0 0 18px; padding-left: 22px; }
+.np-prose li { margin-bottom: 7px; }
+.np-prose code {
+  font-family: var(--font-mono); font-size: 13px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px;
+}
+.np-prose pre {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 14px; overflow-x: auto; margin: 0 0 18px;
+}
+.np-prose pre code { background: none; border: 0; padding: 0; }
+.np-prose blockquote {
+  margin: 0 0 18px; padding: 2px 0 2px 16px;
+  border-left: 3px solid var(--border2); color: var(--grey);
+}
+.np-prose hr { border: 0; border-top: 1px solid var(--border); margin: 30px 0; }
+
+/* A wide table must scroll inside itself, never push the page sideways. */
+.np-prose table {
+  display: block; width: 100%; overflow-x: auto;
+  border-collapse: collapse; margin: 0 0 20px; font-size: 13.5px;
+}
+.np-prose th, .np-prose td {
+  border-bottom: 1px solid var(--border); padding: 8px 14px 8px 0;
+  text-align: left; white-space: nowrap;
+}
+.np-prose th {
+  color: var(--grey); font-family: var(--font-mono);
+  font-size: 11px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase;
+}
+.np-prose td { font-variant-numeric: tabular-nums; }
+
+/* ── newsletter ────────────────────────────────────────────────────────────── */
+
+.np-news {
+  margin-top: 40px; padding: 24px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r-lg);
+}
+.np-news-copy h2 { font-size: 17px; font-weight: 650; margin: 0 0 7px; }
+.np-news-copy p { color: var(--grey); font-size: 13.5px; line-height: 1.6; margin: 0 0 16px; }
+
+.np-news-form { display: flex; gap: 9px; flex-wrap: wrap; }
+.np-news-form .np-input { flex: 1 1 240px; width: auto; }
+.np-news-form .np-btn { flex: 0 0 auto; }
+
+.np-news-done {
+  padding: 11px 13px; border-radius: var(--r-sm);
+  border: 1px solid rgba(34,197,94,.35); background: rgba(34,197,94,.08);
+  font-size: 13px; line-height: 1.55;
+}
+.np-news-error { margin: 10px 0 0; color: var(--red); font-size: 12.5px; }
+.np-news-note {
+  margin: 14px 0 0; color: var(--grey2); font-size: 11.5px; line-height: 1.65;
+}
+.np-news-note strong { color: var(--grey); font-weight: 600; }

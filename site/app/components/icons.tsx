@@ -136,6 +136,18 @@ export function IconRuler({ className }: P) {
   )
 }
 
+/** Insights — a page with a line of text and a rule under it. Deliberately not
+ *  a newspaper or a lightbulb: this section is measurements, not opinion. */
+export function IconInsights({ className }: P) {
+  return (
+    <svg {...box} className={className}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4" />
+      <path d="M9 12h6M9 16h4" />
+    </svg>
+  )
+}
+
 export function IconStar({ className }: P) {
   return (
     <svg {...box} className={className}>
