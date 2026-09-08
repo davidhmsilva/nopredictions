@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import { getSql } from '../../lib/db'
+import { currentUser } from '../../lib/supabaseAuth'
+import { claimUse, refundUse, refusalMessage } from '../../lib/plan'
 import {
   LEAGUES,
   LEAGUE_CODES,
@@ -159,6 +161,18 @@ export async function POST(request: Request) {
     )
   }
 
+  // The gate sits here on purpose: after the checks that cost nothing, before
+  // the model call that costs money. A refused request must not spend one.
+  const user = await currentUser()
+  const use = await claimUse(user?.id ?? null, 'lab')
+  if (!use.allowed) {
+    return NextResponse.json(
+      { ok: false, error: refusalMessage(use), entitlement: use },
+      { status: use.reason === 'signed_out' ? 401 : 402 },
+    )
+  }
+  const refund = () => refundUse(user?.id ?? null, 'lab')
+
   // 1 · Parse the plain-English theory into a spec (or an honest refusal)
   let parsed
   try {
@@ -173,6 +187,7 @@ export async function POST(request: Request) {
     if (!parsed) throw new Error('empty parse result')
   } catch (err) {
     console.error('parse error', err)
+    await refund()
     return NextResponse.json(
       { ok: false, error: 'The agent failed to parse this hypothesis. Try rephrasing.' },
       { status: 502 },
@@ -185,6 +200,7 @@ export async function POST(request: Request) {
       supported: false,
       reason: parsed.reason || 'This theory needs data we do not have yet.',
       suggestion: parsed.suggestion || null,
+      entitlement: use,
     })
   }
 
@@ -201,6 +217,7 @@ export async function POST(request: Request) {
     raw = rows[0].r as RawBacktest
   } catch (err) {
     console.error('backtest error', err)
+    await refund()
     return NextResponse.json({ ok: false, error: 'Backtest engine error.' }, { status: 502 })
   }
 
@@ -230,5 +247,6 @@ export async function POST(request: Request) {
     seasons: raw.seasons,
     monthly: raw.monthly,
     caveats,
+    entitlement: use,
   })
 }

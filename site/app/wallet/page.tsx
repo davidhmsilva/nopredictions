@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { AppNav, AppFooter } from '../components/AppShell'
+import { QuotaStrip } from '../components/QuotaStrip'
+import { useSession } from '../lib/useSession'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
 
@@ -50,6 +52,7 @@ const REPORT_SECTIONS: { k: string; v: string }[] = [
 export default function WalletIndexPage() {
   const router = useRouter()
   const [value, setValue] = useState('')
+  const { me } = useSession()
 
   const raw = value.trim()
   // Accept a pasted profile URL as readily as a bare address — that is how
@@ -73,6 +76,12 @@ export default function WalletIndexPage() {
         </div>
 
         <section className="scan-section">
+          <QuotaStrip
+            quota={me?.wallet ?? null}
+            signedIn={Boolean(me?.user)}
+            feature="wallet read"
+            next="/wallet"
+          />
           <div className="analyze-input-row">
             <input
               type="text"

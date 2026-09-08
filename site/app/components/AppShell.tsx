@@ -6,13 +6,13 @@ import { useEffect, useState, type FormEvent } from 'react'
 import {
   IconAccount,
   IconAgent,
-  IconBell,
   IconBoard,
   IconLab,
   IconMenu,
   IconSearch,
   IconWallet,
 } from './icons'
+import { invalidateSession, useSession } from '../lib/useSession'
 
 /** The tabs, in the order a bettor uses them on a matchday:
  *  where is the edge → can I test my own idea → what is the agent doing →
@@ -165,27 +165,21 @@ function NavSearch({
   )
 }
 
-/** Accounts and alerts, built but not wired.
+/** Who is signed in, and the controls that change it.
  *
- *  These are here so the shell is visually finished; there is no auth behind
- *  them yet. A click therefore SAYS so rather than doing nothing — a button
- *  that silently swallows the click is the pattern this repo already removed
- *  once, in a newsletter form that set local state and showed a tick without
- *  sending anywhere. Replace `notYet` with the real handlers when accounts
- *  exist and nothing else here has to change. */
+ *  These were rendered but inert until accounts existed — a click said so
+ *  rather than swallowing itself. They are wired now, and the only thing that
+ *  did NOT survive the wiring is the bell: alerts have a table (db/044) and no
+ *  delivery, and a bell that opens nothing is the newsletter form this site
+ *  already deleted once.
+ */
 function AccountActions() {
-  const [notice, setNotice] = useState<string | null>(null)
+  const { me, loading } = useSession()
   const [sheet, setSheet] = useState(false)
   const [mobileSearch, setMobileSearch] = useState(false)
+  const pathname = usePathname() ?? '/'
+  const router = useRouter()
 
-  useEffect(() => {
-    if (!notice) return
-    const id = setTimeout(() => setNotice(null), 3200)
-    return () => clearTimeout(id)
-  }, [notice])
-
-  // The sheet is a phone affordance and has no business surviving a jump to a
-  // wide window, where the tabs it duplicates are visible again.
   useEffect(() => {
     if (!sheet) return
     const close = () => setSheet(false)
@@ -193,23 +187,55 @@ function AccountActions() {
     return () => window.removeEventListener('resize', close)
   }, [sheet])
 
-  const notYet = (what: string) => () => {
+  // Coming back to where you were is the difference between a sign-in and an
+  // interruption. `/login` and `/account` are excluded: returning to the login
+  // page after logging in is a loop.
+  const next =
+    pathname.startsWith('/login') || pathname.startsWith('/account')
+      ? '/'
+      : pathname
+  const loginHref = `/login?next=${encodeURIComponent(next)}`
+
+  async function signOut() {
     setSheet(false)
-    setNotice(`${what} isn't live yet — the site runs without accounts for now.`)
+    // ⚠️ Imported here, not at the top of the file. This header renders on
+    //    every page, so a static import pulls the whole Supabase client into
+    //    the shared bundle — measured at +70kB of First Load JS on the board,
+    //    paid by every visitor to carry a button most of them never press.
+    //    Signing out can afford a round trip; opening the board cannot.
+    const { supabaseBrowser } = await import('../lib/supabaseBrowser')
+    await supabaseBrowser().auth.signOut()
+    invalidateSession()
+    router.push('/')
+    router.refresh()
   }
+
+  const signedIn = Boolean(me?.user)
+  const isPro = me?.plan === 'pro'
+  // Before the first answer lands, render the signed-out shape rather than a
+  // spinner: it is right for most visitors and it does not shift the layout
+  // when it resolves.
+  const showAccount = !loading && signedIn
 
   return (
     <div className="np-account">
-      {/* Wide screens: bell, Log in, Sign up. */}
-      <button className="np-icon-btn np-wide-only" onClick={notYet('Alerts')} aria-label="Alerts" title="Alerts">
-        <IconBell className="np-icn" />
-      </button>
-      <button className="np-btn-ghost np-wide-only" onClick={notYet('Log in')}>
-        Log in
-      </button>
-      <button className="np-btn-signup np-wide-only" onClick={notYet('Sign up')}>
-        Sign up
-      </button>
+      {/* Wide screens. */}
+      {showAccount ? (
+        <>
+          {!isPro && (
+            <Link href="/pricing" className="np-btn-ghost np-wide-only">Pro</Link>
+          )}
+          <Link href="/account" className="np-btn-signup np-wide-only" title={me?.user?.email ?? undefined}>
+            {isPro ? 'PRO' : 'Account'}
+          </Link>
+        </>
+      ) : (
+        <>
+          <Link href="/pricing" className="np-btn-ghost np-wide-only">Pricing</Link>
+          <Link href={loginHref} className="np-btn-ghost np-wide-only">Log in</Link>
+          <Link href={loginHref} className="np-btn-signup np-wide-only">Sign up</Link>
+        </>
+      )}
 
       {/* Phones: search, account, menu — the three that fit beside a logo. */}
       <button
@@ -220,13 +246,13 @@ function AccountActions() {
       >
         <IconSearch className="np-icn" />
       </button>
-      <button
+      <Link
         className="np-icon-btn np-narrow-only"
-        onClick={notYet('Your account')}
-        aria-label="Account"
+        href={showAccount ? '/account' : loginHref}
+        aria-label={showAccount ? 'Your account' : 'Sign in'}
       >
         <IconAccount className="np-icn" />
-      </button>
+      </Link>
       <button
         className="np-icon-btn np-narrow-only"
         onClick={() => setSheet((v) => !v)}
@@ -246,20 +272,37 @@ function AccountActions() {
         <>
           <button className="np-sheet-scrim" aria-label="Close menu" onClick={() => setSheet(false)} />
           <div className="np-sheet" role="dialog" aria-label="Menu">
-            <button className="np-sheet-item" onClick={notYet('Log in')}>Log in</button>
-            <button className="np-sheet-item is-primary" onClick={notYet('Sign up')}>Sign up</button>
-            <button className="np-sheet-item" onClick={notYet('Alerts')}>Alerts</button>
-            <div className="np-sheet-note">
-              Accounts are not live yet. Everything on the site works without one.
-            </div>
+            {showAccount ? (
+              <>
+                <Link className="np-sheet-item" href="/account" onClick={() => setSheet(false)}>
+                  Account
+                </Link>
+                {!isPro && (
+                  <Link className="np-sheet-item is-primary" href="/pricing" onClick={() => setSheet(false)}>
+                    Upgrade to Pro
+                  </Link>
+                )}
+                <button className="np-sheet-item" onClick={signOut}>Sign out</button>
+                <div className="np-sheet-note">{me?.user?.email}</div>
+              </>
+            ) : (
+              <>
+                <Link className="np-sheet-item" href={loginHref} onClick={() => setSheet(false)}>
+                  Log in
+                </Link>
+                <Link className="np-sheet-item is-primary" href={loginHref} onClick={() => setSheet(false)}>
+                  Sign up
+                </Link>
+                <Link className="np-sheet-item" href="/pricing" onClick={() => setSheet(false)}>
+                  Pricing
+                </Link>
+                <div className="np-sheet-note">
+                  Scout, Agent and the Game Center work without an account.
+                </div>
+              </>
+            )}
           </div>
         </>
-      )}
-
-      {notice && (
-        <div className="np-notice" role="status">
-          {notice}
-        </div>
       )}
     </div>
   )

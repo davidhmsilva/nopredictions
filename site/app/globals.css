@@ -3128,3 +3128,192 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 /* The live score in place of the "v" — only where a feed actually knows it. */
 .sc-big-score { font-size: 15px; font-weight: 700; color: var(--white); letter-spacing: -.02em; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Accounts, plans and billing
+   Added 2026-09-08 with the paid tier. Same tokens, same card, same button as
+   everything else — a signed-in page must not look like a different product.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── sign in / sign up ─────────────────────────────────────────────────────── */
+
+.np-auth { display: flex; justify-content: center; padding: 48px 20px 80px; }
+.np-auth-card {
+  width: 100%; max-width: 420px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 28px;
+}
+.np-auth-title { font-size: 22px; font-weight: 650; margin: 0 0 6px; }
+.np-auth-sub   { color: var(--grey); font-size: 13.5px; line-height: 1.55; margin: 0 0 22px; }
+.np-auth-wide  { width: 100%; }
+
+.np-auth-or {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--grey2); font-size: 11px; letter-spacing: .08em;
+  text-transform: uppercase; margin: 18px 0;
+}
+.np-auth-or::before, .np-auth-or::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+.np-auth-form { display: flex; flex-direction: column; gap: 7px; }
+.np-auth-label {
+  font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--grey); margin-top: 8px;
+}
+.np-auth-form .np-btn { margin-top: 18px; }
+
+.np-auth-link {
+  display: block; width: 100%; margin-top: 14px; padding: 0;
+  background: none; border: 0; cursor: pointer;
+  color: var(--grey); font-family: var(--font); font-size: 13px;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.np-auth-link:hover:not(:disabled) { color: var(--white); }
+.np-auth-link:disabled { opacity: .5; cursor: not-allowed; }
+
+.np-auth-notice {
+  margin-top: 16px; padding: 11px 13px; border-radius: var(--r-sm);
+  border: 1px solid rgba(34,197,94,.35); background: rgba(34,197,94,.08);
+  color: var(--white); font-size: 13px; line-height: 1.5;
+}
+.np-auth-notice.is-error {
+  border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.08);
+}
+
+.np-auth-switch { margin-top: 20px; font-size: 13.5px; color: var(--grey); }
+.np-auth-switch button {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--green); font-family: var(--font); font-size: 13.5px; font-weight: 550;
+}
+.np-auth-switch button:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.np-auth-foot {
+  margin: 22px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
+  color: var(--grey2); font-size: 12px; line-height: 1.6;
+}
+.np-auth-foot a { color: var(--grey); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── pricing ───────────────────────────────────────────────────────────────── */
+
+.np-pricing { max-width: 940px; margin: 0 auto; padding: 40px 20px 80px; }
+.np-pricing-head { text-align: center; margin-bottom: 28px; }
+.np-pricing-head h1 { font-size: 28px; font-weight: 680; margin: 0 0 10px; }
+.np-pricing-head p {
+  max-width: 560px; margin: 0 auto; color: var(--grey);
+  font-size: 14px; line-height: 1.65;
+}
+
+.np-pricing-toggle {
+  display: flex; justify-content: center; gap: 4px; margin: 0 auto 26px;
+  padding: 4px; width: max-content;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 999px;
+}
+.np-pricing-toggle button {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 18px; border: 0; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--grey);
+  font-family: var(--font); font-size: 13px; font-weight: 550;
+  transition: background .12s, color .12s;
+}
+.np-pricing-toggle button.is-on { background: var(--bg3); color: var(--white); }
+.np-pricing-save {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .05em;
+  color: var(--green); border: 1px solid rgba(34,197,94,.4);
+  background: rgba(34,197,94,.08); border-radius: 999px; padding: 1px 6px;
+}
+
+.np-pricing-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;
+}
+@media (max-width: 720px) { .np-pricing-grid { grid-template-columns: 1fr; } }
+
+.np-plan { display: flex; flex-direction: column; padding: 24px; }
+.np-plan.is-pro { border-color: rgba(34,197,94,.35); }
+.np-plan-name {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 15px; font-weight: 650; margin: 0 0 12px;
+}
+.np-plan-price { display: flex; align-items: baseline; gap: 5px; }
+.np-plan-price span { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+.np-plan-price small { color: var(--grey); font-size: 14px; }
+.np-plan-note { color: var(--grey); font-size: 12.5px; margin: 7px 0 18px; }
+
+.np-plan-rows { list-style: none; margin: 0 0 18px; padding: 0; flex: 1; }
+.np-plan-rows li {
+  display: flex; align-items: baseline; gap: 9px;
+  padding: 7px 0; font-size: 13.5px; line-height: 1.45;
+  border-bottom: 1px solid var(--border);
+}
+.np-plan-rows li:last-child { border-bottom: 0; }
+.np-plan-rows li.is-off { color: var(--grey2); }
+.np-plan-mark { width: 12px; flex: none; color: var(--green); font-size: 12px; }
+.np-plan-rows li.is-off .np-plan-mark { color: var(--grey2); }
+.np-plan-qty { margin-left: auto; color: var(--grey); font-size: 12px; white-space: nowrap; }
+
+.np-plan-next {
+  margin: 0 0 18px; padding: 10px 12px; border-radius: var(--r-sm);
+  border: 1px dashed var(--border2); color: var(--grey);
+  font-size: 12.5px; line-height: 1.55;
+}
+.np-plan-next b { color: var(--grey); font-weight: 650; }
+
+.np-plan-cta  { width: 100%; }
+.np-plan-error { margin: 10px 0 0; color: var(--red); font-size: 12.5px; }
+
+.np-pricing-honest { margin-top: 28px; font-size: 13px; line-height: 1.7; }
+.np-pricing-honest a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── account ───────────────────────────────────────────────────────────────── */
+
+.np-acct { max-width: 560px; margin: 0 auto; padding: 40px 20px 80px; }
+.np-acct h1 { font-size: 24px; font-weight: 680; margin: 0 0 8px; }
+.np-acct-sub { color: var(--grey); font-size: 13.5px; line-height: 1.6; margin: 0 0 20px; }
+.np-acct-loading { color: var(--grey); font-size: 13.5px; }
+.np-acct-card { margin-top: 18px; padding: 22px; }
+
+.np-acct-ok {
+  margin: 14px 0 0; padding: 11px 13px; border-radius: var(--r-sm);
+  border: 1px solid rgba(34,197,94,.35); background: rgba(34,197,94,.08);
+  font-size: 13px; line-height: 1.55;
+}
+
+.np-acct-dl {
+  display: grid; grid-template-columns: 90px 1fr; gap: 10px 14px;
+  margin: 0 0 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border);
+}
+.np-acct-dl dt {
+  font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--grey);
+}
+.np-acct-dl dd { margin: 0; font-size: 13.5px; }
+
+.np-acct-quotas { list-style: none; margin: 0; padding: 0; }
+.np-acct-quota {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 0; font-size: 13.5px; border-bottom: 1px solid var(--border);
+}
+.np-acct-quota:last-child { border-bottom: 0; }
+.np-acct-quota a { color: var(--white); text-decoration: none; font-weight: 550; }
+.np-acct-quota a:hover { color: var(--green); }
+.np-acct-quota b { color: var(--grey); font-size: 12.5px; font-weight: 500; }
+.np-acct-quota b.c-red { color: var(--red); }
+
+.np-acct-reset { margin: 12px 0 0; color: var(--grey2); font-size: 12px; }
+.np-acct-actions { display: flex; gap: 9px; margin-top: 20px; flex-wrap: wrap; }
+
+/* ── the quota strip the Lab and Wallet show above their input ─────────────── */
+
+.np-quota {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding: 9px 13px; margin-bottom: 14px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg2); font-size: 12.5px; color: var(--grey);
+}
+.np-quota.is-out { border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.06); }
+.np-quota a { color: var(--green); font-weight: 550; text-decoration: none; }
+.np-quota a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.np-quota .np-num { color: var(--white); }
+
+.np-wallet-gate { max-width: 520px; margin: 40px auto; padding: 26px; }
+.np-wallet-gate h2 { font-size: 18px; font-weight: 650; margin: 0 0 10px; }
+.np-wallet-gate p  { color: var(--grey); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; }

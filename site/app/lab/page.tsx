@@ -4,6 +4,8 @@ import { useRef, useState, type FormEvent } from 'react'
 
 import { isNbaMarket } from '../lib/backtest'
 import { AppShell } from '../components/AppShell'
+import { QuotaStrip } from '../components/QuotaStrip'
+import { useSession } from '../lib/useSession'
 
 // ── types mirrored from the API route ───────────────────────────────────────
 
@@ -163,6 +165,10 @@ export default function LabPage() {
   const [result, setResult] = useState<ApiResult | null>(null)
   const [, setLastHypothesis] = useState('')
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  // The counter above the box has to move when a run spends one, without a
+  // page reload — so the session is re-read after every attempt, refused ones
+  // included (a refusal is how you find out the count is already zero).
+  const { me, refresh } = useSession()
 
   function pushLine(text: string, cls = 'lp-term-dim') {
     setTermLines(prev => [...prev, { text, cls }])
@@ -193,6 +199,7 @@ export default function LabPage() {
       })
       const data: ApiResult = await res.json()
       timers.current.forEach(clearTimeout)
+      refresh()
 
       if (!data.ok) {
         pushLine(`✗ ERROR — ${data.error ?? 'something went wrong'}`, 'lp-term-warn')
@@ -251,6 +258,12 @@ export default function LabPage() {
             nothing, which it usually is.
           </p>
         </div>
+        <QuotaStrip
+          quota={me?.lab ?? null}
+          signedIn={Boolean(me?.user)}
+          feature="Lab test"
+          next="/lab"
+        />
         <form className="bt-form" onSubmit={handleSubmit}>
           <input
             className="lp-input bt-input"

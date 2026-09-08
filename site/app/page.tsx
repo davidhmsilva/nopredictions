@@ -12,8 +12,8 @@ import {
   IconStar,
 } from './components/icons'
 import type { BookGrade, ScoutFixture } from './lib/scout'
-
-const WATCHLIST_KEY = 'np_watchlist'
+import { useSession } from './lib/useSession'
+import { useWatchlist } from './lib/useWatchlist'
 
 // ── formatting ───────────────────────────────────────────────────────────────
 //
@@ -305,15 +305,12 @@ export default function ScoutPage() {
   const [query, setQuery] = useState('')
   const [comp, setComp] = useState<string | null>(null)
   const [allComps, setAllComps] = useState(false)
-  const [watchlist, setWatchlist] = useState<string[]>([])
+  const { me } = useSession()
+  // Local for everyone, mirrored to Postgres for Pro. The Supabase client is
+  // only loaded when there is a Pro session to load it for.
+  const { slugs: watchlist, toggle: toggleWatch, synced } = useWatchlist(me?.plan === 'pro')
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(WATCHLIST_KEY)
-      if (raw) setWatchlist(JSON.parse(raw))
-    } catch {
-      /* a blocked or empty store is not an error — the page works without it */
-    }
     // The nav search sends a team here as ?q=. Read from the URL directly
     // rather than through useSearchParams, which would opt this statically
     // rendered page into a Suspense boundary for one string.
@@ -347,17 +344,6 @@ export default function ScoutPage() {
     }
   }, [])
 
-  function toggleWatch(slug: string) {
-    setWatchlist((prev) => {
-      const next = prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
-      try {
-        localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next))
-      } catch {
-        /* per-viewer convenience only */
-      }
-      return next
-    })
-  }
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -586,7 +572,9 @@ export default function ScoutPage() {
         {!loading && !error && shown.length === 0 && (
           <div className="np-empty">
             {filter === 'watchlist'
-              ? 'Nothing starred yet. Tap the ☆ on any fixture to keep it here.'
+              ? synced
+                ? 'Nothing starred yet. Tap the ☆ on any fixture — your list follows you to any device you sign in on.'
+                : 'Nothing starred yet. Tap the ☆ on any fixture to keep it here, in this browser.'
               : 'No board matches that filter right now.'}
           </div>
         )}

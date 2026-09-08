@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { AppNav, AppFooter } from '../../components/AppShell'
 import { WalletReport } from '../../components/WalletReport'
@@ -23,6 +24,10 @@ export default function WalletPage() {
   const address = String(params?.address || '')
   const [profile, setProfile] = useState<WalletProfile | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // 401 = no account, 402 = the day is spent. Neither is a failure to analyse
+  // the wallet, and showing them under "Could not analyse this wallet" would
+  // blame the address for a decision about the plan.
+  const [gate, setGate] = useState<'signed_out' | 'quota' | null>(null)
   const [stage, setStage] = useState(0)
   const started = useRef(0)
   const [elapsed, setElapsed] = useState(0)
@@ -34,6 +39,7 @@ export default function WalletPage() {
     started.current = Date.now()
     setProfile(null)
     setError(null)
+    setGate(null)
 
     const tick = setInterval(() => {
       const secs = Math.floor((Date.now() - started.current) / 1000)
@@ -44,10 +50,14 @@ export default function WalletPage() {
     fetch(`/api/wallet?address=${address}`)
       .then(async (r) => {
         const body = await r.json()
+        if (r.status === 401 || r.status === 402) {
+          if (!cancelled) setGate(r.status === 401 ? 'signed_out' : 'quota')
+          return null
+        }
         if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`)
         return body as WalletProfile
       })
-      .then((p) => !cancelled && setProfile(p))
+      .then((p) => { if (p && !cancelled) setProfile(p) })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'Unknown error'))
       .finally(() => clearInterval(tick))
 
@@ -66,7 +76,31 @@ export default function WalletPage() {
           ← ANALYSE ANOTHER WALLET
         </button>
 
-        {!profile && !error && (
+        {gate && (
+          <div className="np-card np-wallet-gate">
+            <h2>{gate === 'signed_out' ? 'This one needs an account' : "That is today's three"}</h2>
+            <p>
+              {gate === 'signed_out'
+                ? 'Rebuilding a trader’s whole record is the expensive half of this site. A free account gets three a day, and takes an email and a password.'
+                : 'Free accounts get three wallet reads a day. The count resets at 00:00 UTC — or Pro removes the limit.'}
+            </p>
+            <div className="np-acct-actions">
+              {gate === 'signed_out' ? (
+                <Link
+                  className="np-btn np-btn-primary"
+                  href={`/login?next=${encodeURIComponent(`/wallet/${address}`)}`}
+                >
+                  Sign in — it is free
+                </Link>
+              ) : (
+                <Link className="np-btn np-btn-primary" href="/pricing">See Pro</Link>
+              )}
+              <Link className="np-btn" href="/wallet">Back</Link>
+            </div>
+          </div>
+        )}
+
+        {!profile && !error && !gate && (
           <div className="wallet-loading">
             <span className="scan-spinner" />
             <div>
