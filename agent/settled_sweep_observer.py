@@ -87,6 +87,7 @@ logging.basicConfig(level=logging.INFO, force=True,
 log = logging.getLogger("sweep")
 
 import af_budget
+import db_txn
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY", "")
@@ -154,7 +155,11 @@ def acquire_lock():
 
 
 def _conn():
-    return psycopg2.connect(DATABASE_URL)
+    # autocommit, via db_txn — a SELECT on a psycopg2 default connection opens a
+    # transaction that stays open until something commits, and this process then
+    # sleeps on it. See db_txn.py for the 8-minute one that was found in
+    # production. Writes that must land together use db_txn.atomic().
+    return db_txn.connect(DATABASE_URL)
 
 
 def _f(v, default=None):

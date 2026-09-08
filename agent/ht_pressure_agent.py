@@ -122,6 +122,7 @@ from late_goals_observer import (                                  # noqa: E402
     pm_over25,
 )
 import af_budget
+import db_txn
 from live_tracker import LiveMatchTracker, PressureSignals, danger_index  # noqa: E402
 from pressure_agent import (                                       # noqa: E402
     _no_stats_reason,
@@ -975,7 +976,13 @@ def settle(conn) -> int:
         for fid, minute, goals in cur.fetchall():
             tape.setdefault(fid, []).append((minute, goals))
 
-    api_cache: dict[int, tuple[int | None, int | None]] = {}
+    # Every api-football call FIRST, with no transaction open. Fetching inside
+    # the write loop is how a read transaction came to be held for eight
+    # minutes while Python did HTTP — see db_txn.py.
+    api_cache: dict[int, tuple[int | None, int | None]] = {
+        fid: _first_half_goals_api(fid) for fid in fixture_ids
+    }
+
     settled = 0
     with conn.cursor() as cur:
         for r in pending:
@@ -984,9 +991,7 @@ def settle(conn) -> int:
             last_minute = max((m for m, _ in obs), default=r["minute"])
             tape_goals = max((g for m, g in obs if m <= 45), default=0)
 
-            if fid not in api_cache:
-                api_cache[fid] = _first_half_goals_api(fid)
-            api_goals, api_minute = api_cache[fid]
+            api_goals, api_minute = api_cache.get(fid, (None, None))
 
             if api_goals is not None:
                 ht_goals, goal_minute, src = api_goals, api_minute, "api"
@@ -1000,31 +1005,34 @@ def settle(conn) -> int:
                 continue                      # not settleable yet, and not guessed
 
             won = ht_goals > 0
-            cur.execute(
-                """UPDATE ht_pressure_observations
-                      SET ht_goals = %s, goal_before_ht = %s, goal_minute = %s,
-                          goal_minute_source = %s, settled_at = now()
-                    WHERE id = %s""",
-                (ht_goals, won, goal_minute, src, r["id"]),
-            )
-            settled += 1
-
-            # payout_units is GROSS by project convention: lost = 0,
-            # won = stake * entry_odds. The odds are read back from the trade
-            # rather than recomputed, which is what stops the NET-style bug that
-            # had to be repaired across 38 rows in May from coming back.
-            if r["paper_trade_id"]:
+            # Both writes or neither — a settled observation whose trade never
+            # resolved is invisible to the next run, because `pending` filters
+            # on settled_at. No network call may enter this block.
+            with db_txn.atomic(conn):
                 cur.execute(
-                    """UPDATE paper_trades
-                          SET result = %s,
-                              payout_units = CASE WHEN %s
-                                                  THEN stake_units * entry_odds
-                                                  ELSE 0 END,
-                              resolved_at = now()
-                        WHERE id = %s AND result IS NULL""",
-                    ("won" if won else "lost", won, r["paper_trade_id"]),
+                    """UPDATE ht_pressure_observations
+                          SET ht_goals = %s, goal_before_ht = %s, goal_minute = %s,
+                              goal_minute_source = %s, settled_at = now()
+                        WHERE id = %s""",
+                    (ht_goals, won, goal_minute, src, r["id"]),
                 )
-    conn.commit()
+
+                # payout_units is GROSS by project convention: lost = 0,
+                # won = stake * entry_odds. The odds are read back from the
+                # trade rather than recomputed, which is what stops the
+                # NET-style bug repaired across 38 rows in May coming back.
+                if r["paper_trade_id"]:
+                    cur.execute(
+                        """UPDATE paper_trades
+                              SET result = %s,
+                                  payout_units = CASE WHEN %s
+                                                      THEN stake_units * entry_odds
+                                                      ELSE 0 END,
+                                  resolved_at = now()
+                            WHERE id = %s AND result IS NULL""",
+                        ("won" if won else "lost", won, r["paper_trade_id"]),
+                    )
+            settled += 1
     return settled
 
 
@@ -1286,7 +1294,11 @@ def enrich_priority(tracker: LiveMatchTracker, pm_fixtures: list[dict]):
 
 
 def _conn():
-    return psycopg2.connect(DATABASE_URL)
+    # autocommit, via db_txn — a SELECT on a psycopg2 default connection opens a
+    # transaction that stays open until something commits, and this process then
+    # sleeps on it. See db_txn.py for the 8-minute one that was found in
+    # production. Writes that must land together use db_txn.atomic().
+    return db_txn.connect(DATABASE_URL)
 
 
 def main() -> None:

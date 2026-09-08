@@ -61,6 +61,8 @@ from psycopg2.extras import Json, execute_batch
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../ingest/.env"))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import db_txn                                                       # noqa: E402
 import late_goals_table as lgt  # noqa: E402
 from edge_engine import taker_fee_pp  # noqa: E402
 
@@ -172,7 +174,11 @@ _SUFFIX_RE = re.compile(r"\s+-\s+[A-Z][A-Za-z0-9 /'&.]*$")
 
 
 def _conn():
-    return psycopg2.connect(DATABASE_URL)
+    # autocommit, via db_txn — a SELECT on a psycopg2 default connection opens a
+    # transaction that stays open until something commits, and this process then
+    # sleeps on it. See db_txn.py for the 8-minute one that was found in
+    # production. Writes that must land together use db_txn.atomic().
+    return db_txn.connect(DATABASE_URL)
 
 
 def _f(v, default=None):

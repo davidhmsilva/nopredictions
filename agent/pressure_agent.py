@@ -82,6 +82,7 @@ from late_goals_observer import (                                   # noqa: E402
     pm_over25,
 )
 import af_budget
+import db_txn
 from live_tracker import (                                          # noqa: E402
     DAILY_EXHAUSTED,
     PRESSURE_WINDOW_MIN,
@@ -231,7 +232,11 @@ SETTLE_HORIZON_MIN = 10         # the "goal is coming" horizon
 
 
 def _conn():
-    return psycopg2.connect(DATABASE_URL)
+    # autocommit, via db_txn — a SELECT on a psycopg2 default connection opens a
+    # transaction that stays open until something commits, and this process then
+    # sleeps on it. See db_txn.py for the 8-minute one that was found in
+    # production. Writes that must land together use db_txn.atomic().
+    return db_txn.connect(DATABASE_URL)
 
 
 # A dropped socket is not an error here, it is the normal cost of this Mac
@@ -951,6 +956,20 @@ def settle(conn) -> int:
     api_final = _final_goals_api(sorted({r["fixture_id"] for r in pending}))
 
     settled = 0
+    # Every remaining network call, before a single write. `_goal_minute_api`
+    # used to run inside the write loop; the decision it depends on is cheap to
+    # recompute, and recomputing it is what keeps HTTP out of a transaction.
+    # See db_txn.py for the eight-minute idle transaction this shape produced.
+    minute_cache: dict[int, int | None] = {}
+    for r in pending:
+        if not r["entered"]:
+            continue
+        true_final = api_final.get(r["fixture_id"])
+        if true_final is None:
+            continue
+        if true_final > r["goals_total"]:          # i.e. goal_before_ft
+            minute_cache[r["id"]] = _goal_minute_api(r["fixture_id"], r["minute"])
+
     with conn.cursor() as cur:
         for r in pending:
             obs = series.get(r["fixture_id"], [])
@@ -988,9 +1007,12 @@ def settle(conn) -> int:
 
             # WHEN the goal came, not just whether — but only for a bet that
             # actually won, so this stays a couple of dozen API calls a day.
+            # The call itself happened in the pre-pass above; this only reads
+            # the answer, because a network round trip here would hold the row
+            # lock open across it.
             goal_minute = goal_src = None
             if r["entered"] and goal_before_ft:
-                goal_minute = _goal_minute_api(r["fixture_id"], r["minute"])
+                goal_minute = minute_cache.get(r["id"])
                 goal_src = "api" if goal_minute is not None else None
                 if goal_minute is None:
                     # Fall back to our own tape: the first later observation
@@ -1001,42 +1023,45 @@ def settle(conn) -> int:
                     if scored:
                         goal_minute, goal_src = min(scored), "poll"
 
-            cur.execute(
-                """UPDATE pressure_observations
-                      SET goals_at_plus_10 = %s, goal_next_10 = %s,
-                          final_goals = %s, goal_before_ft = %s,
-                          final_goals_source = %s,
-                          goal_minute = %s, goal_minute_source = %s,
-                          settled_at = now()
-                    WHERE id = %s""",
-                (at_plus_10, goal_next_10, final_goals, goal_before_ft,
-                 final_src, goal_minute, goal_src, r["id"]),
-            )
-            settled += 1
-
-            # payout_units is GROSS by project convention — lost = 0,
-            # won = stake * entry_odds. Booking it net is the bug that had to be
-            # repaired across 38 rows on 2026-05-27 and recurred once since, so
-            # the odds are read back from the trade rather than recomputed here.
-            # The TRADE settles on the line it was bought on, not on whether
-            # the score moved off what we happened to read at entry. If the
-            # tape was wrong at entry the line is wrong too, and comparing the
-            # final total against the line is the only reading that matches
-            # what the token actually pays.
-            if final_goals is not None and r["paper_trade_id"]:
-                won = (final_goals > float(r["target_line"])
-                       if r["target_line"] is not None else goal_before_ft)
+            # Both writes or neither — a settled observation whose trade never
+            # resolved is invisible to the next run, because `pending` filters
+            # on settled_at. No network call may enter this block.
+            with db_txn.atomic(conn):
                 cur.execute(
-                    """UPDATE paper_trades
-                          SET result = %s,
-                              payout_units = CASE WHEN %s
-                                                  THEN stake_units * entry_odds
-                                                  ELSE 0 END,
-                              resolved_at = now()
-                        WHERE id = %s AND result IS NULL""",
-                    ("won" if won else "lost", won, r["paper_trade_id"]),
+                    """UPDATE pressure_observations
+                          SET goals_at_plus_10 = %s, goal_next_10 = %s,
+                              final_goals = %s, goal_before_ft = %s,
+                              final_goals_source = %s,
+                              goal_minute = %s, goal_minute_source = %s,
+                              settled_at = now()
+                        WHERE id = %s""",
+                    (at_plus_10, goal_next_10, final_goals, goal_before_ft,
+                     final_src, goal_minute, goal_src, r["id"]),
                 )
-    conn.commit()
+
+                # payout_units is GROSS by project convention — lost = 0,
+                # won = stake * entry_odds. Booking it net is the bug that had
+                # to be repaired across 38 rows on 2026-05-27 and recurred once
+                # since, so the odds are read back from the trade rather than
+                # recomputed here. The TRADE settles on the line it was bought
+                # on, not on whether the score moved off what we happened to
+                # read at entry. If the tape was wrong at entry the line is
+                # wrong too, and comparing the final total against the line is
+                # the only reading that matches what the token actually pays.
+                if final_goals is not None and r["paper_trade_id"]:
+                    won = (final_goals > float(r["target_line"])
+                           if r["target_line"] is not None else goal_before_ft)
+                    cur.execute(
+                        """UPDATE paper_trades
+                              SET result = %s,
+                                  payout_units = CASE WHEN %s
+                                                      THEN stake_units * entry_odds
+                                                      ELSE 0 END,
+                                  resolved_at = now()
+                            WHERE id = %s AND result IS NULL""",
+                        ("won" if won else "lost", won, r["paper_trade_id"]),
+                    )
+            settled += 1
     return settled
 
 
@@ -1188,6 +1213,21 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
 
     while True:
         t0 = time.time()
+
+        # The alarm for the bug in db_txn.py. With autocommit this cannot fire;
+        # if it ever does, something opened a transaction and walked away, and
+        # the next thing this process does is sleep on it — holding locks and
+        # pinning a snapshot against VACUUM on tables that write every cycle.
+        # Roll it back and say so, rather than discovering it in pg_stat_activity
+        # a month later.
+        if conn is not None and not conn.closed and db_txn.in_transaction(conn):
+            log.error("connection was left INSIDE a transaction at the top of a "
+                      "cycle — rolling back; this is the db_txn.py bug returning")
+            try:
+                conn.rollback()
+            except psycopg2.Error:
+                conn = _reconnect(conn)
+
         if t0 - last_markets > REFRESH_MARKETS_S or not pm_fixtures:
             pm_fixtures = _fetch_events()
             last_markets = t0
