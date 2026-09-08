@@ -1343,9 +1343,53 @@ return rows, `/agent` still shows all 245 settled bets, and
 ⚠️ **Applying it needs care.** `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` takes
 an ACCESS EXCLUSIVE lock, so a batched migration dies on a statement timeout
 while the daemons write. One table at a time with `set lock_timeout` got 17 of
-18; the last was blocked by the pressure agent holding a transaction **idle for
-8+ minutes** on one SELECT (psycopg2 defaults to `autocommit = False`). That
-leak also blocks VACUUM on tables taking constant writes and is still open.
+18; the last was blocked by the transaction leak below.
+
+## A transaction held open across HTTP — fixed 2026-09-08
+
+The thing that blocked that last table: a backend `idle in transaction` for
+**8 minutes** on `SELECT fixture_id, minute, home_goals, away_goals FROM
+fav_ht_observations` — `fav_pressure_agent.settle()`. It survived 120 retries
+over six minutes, and it does something quieter every day: an 8-minute-old
+snapshot stops VACUUM reclaiming dead tuples newer than it, on tables taking
+writes every cycle (`pressure_observations` is 761k rows and climbing).
+
+🔑 **psycopg2 defaults to `autocommit = False`, so a bare SELECT opens a
+transaction that outlives the read.** Two bugs of that one shape:
+
+1. **Network I/O inside the transaction.** All three `settle()` functions read,
+   then looped calling api-football once per pending fixture with the read
+   transaction still open. `pressure_agent` was worse — `_goal_minute_api` sat
+   inside the WRITE loop, one round trip per winning entry while holding row
+   locks.
+2. **Early returns that skip the commit.** `settle()` returns 0 when nothing is
+   pending; `open_trades()` `continue`s past its own `conn.commit()` when a
+   fixture was already entered; and `_db_alive()`'s `SELECT 1` opened one every
+   single cycle.
+
+`agent/db_txn.py` fixes the class rather than the two paths: `connect()` returns
+an autocommit connection and every daemon's `_conn()` now goes through it —
+pressure, ht, fav, settled-sweep, late-goals. `commit()` and `rollback()` stay
+safe no-ops under autocommit (verified against this database), so the existing
+calls scattered through those modules needed no edit.
+
+`db_txn.atomic(conn)` gives back the one thing autocommit takes away. Settling
+an observation without paying out its paper trade leaves a trade that never
+resolves **and that the next run cannot see**, because `pending` filters on
+`settled_at`. It is now per row rather than per batch, which is also the better
+shape: a failure loses one row instead of every settlement in the batch.
+⚠️ **No network call may go inside `atomic()`** — that is the entire bug.
+
+There is an alarm at the top of `pressure_agent`'s main loop: a connection found
+inside a transaction there is logged as this bug returning, and rolled back.
+
+`agent/tests/test_db_txn.py`, 12 cases. The three asserting that no fetch
+happens inside a write loop were checked against the pre-fix code and fail there
+— one offending call site in each of the three agents. Full suite: 339 passed.
+After restarting both daemons, `pg_stat_activity` shows **zero** backends in
+`idle in transaction`.
+
+⚠️ **A restart was required for any of it to apply**, as always in this repo.
 
 ## Polymarket already carried the clock (2026-09-06)
 
