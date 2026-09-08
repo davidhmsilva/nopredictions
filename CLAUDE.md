@@ -107,11 +107,21 @@ riding the AI + prediction-markets wave simultaneously.
 │       ├── prompts/
 │       └── tools/runner.py
 └── site/                              ← Next.js SaaS app ✅ LIVE (split 2026-09-06)
+    ├── middleware.ts                  ← refreshes the Supabase session on page routes
     ├── app/
     │   ├── page.tsx                   ← SCOUT — the matchday board (home)
     │   ├── lab/page.tsx               ← LAB — hypothesis tester (was /test)
     │   ├── agent/page.tsx             ← AGENT — the paper record (was /dashboard)
     │   ├── wallet/                    ← WALLET — analyser, now a public tab
+    │   ├── login · account · pricing  ← accounts and the paid plan ✅ NEW
+    │   ├── auth/callback/route.ts     ← OAuth / magic-link code exchange
+    │   ├── api/me · api/stripe/{checkout,portal,webhook}
+    │   ├── lib/plan.ts                ← tiers + the quota gate (server only)
+    │   ├── lib/stripe.ts              ← inert without keys, by design
+    │   ├── lib/supabaseEnv.ts         ← url + anon key, shared, with fallback
+    │   ├── lib/supabaseBrowser.ts     ← client half — NEVER merge with the server half
+    │   ├── lib/supabaseAuth.ts        ← server half (imports next/headers)
+    │   ├── lib/useSession.ts · lib/useWatchlist.ts
     │   ├── game/[slug]/page.tsx       ← GAME CENTER — reached by clicking a fixture
     │   ├── api/scout/route.ts         ← the board  ·  api/pulse → the tape's 7 numbers
     │   ├── api/game · api/backtest · api/wallet
@@ -1235,6 +1245,107 @@ Falling back does not clear the quota latch — the outage is still an outage.
 put the whole box-score apparatus at **+0.0008 pseudo-R²** over free state and
 [[finding-ask-move-no-signal]] at **−0.00042 CI[−0.00104,+0.00019]** — a zero.
 Swapping feeds removes a failure mode. It does not make the signal work.
+
+## The site has accounts and a paid plan (2026-09-08)
+
+`nopredictions.com` was four free tabs. It is now a product with a free tier
+and a paid one, and `main` is what production runs.
+
+| | |
+|---|---|
+| no account | Scout · Agent · Game Center — unlimited, never asked to sign in |
+| free | + Lab **3/day** and Wallet **3/day**, watchlist in this browser |
+| pro | + both unlimited, watchlist synced. **$19/mo · $190/yr** |
+
+🔑 **`usage_events` (db/044) has RLS ON with NO policies.** Not "read-only for
+the owner" — nothing is granted, so anon and authenticated cannot read a count,
+forge one, or delete one to start the day again. Every read and write goes over
+`DATABASE_URL` in `app/lib/plan.ts`. A quota the client can reach is not a
+quota. The same reasoning gives `profiles` a SELECT-own policy and **no
+UPDATE**: a client that could update its own row could set `plan = 'pro'`. The
+Stripe webhook is the only thing that grants or removes Pro.
+
+`claimUse()` counts and inserts inside ONE transaction behind
+`pg_advisory_xact_lock(hashtextextended(user_id, 0))`. Check-then-insert lets
+two simultaneous requests both read `used = 2` and both run — at three a day
+that is a third of the tier. Both gates sit AFTER the free validation and
+BEFORE the expensive call, so a refusal never spends an Anthropic call or a
+33-page walk of PM's feed; `refundUse()` returns the use on a 5xx that is ours.
+
+⚠️ **Alerts are schema-only.** `public.alerts` exists and nothing sends
+anything. The pricing page names them as *next for Pro*, never as included —
+this repo already deleted a newsletter form that set local state, showed a
+tick, and sent nowhere.
+
+**Still needs a console you have to be logged into** (`site/SETUP.md`):
+Supabase email-confirmation OFF or SMTP, redirect URLs, and the Stripe account
++ prices + webhook. All of it degrades honestly — the upgrade button says paid
+plans are not switched on yet rather than erroring.
+
+### Three things that were quietly wrong
+
+- **`NEXT_PUBLIC_SUPABASE_URL` was never set on Vercel** — only the anon key
+  was. Nothing had broken because `supabase.ts` carried the URL as a literal,
+  but the auth code read the variable and asserted it with `!`. Fixed on both
+  sides: the variable is set, and the fallback moved to `app/lib/supabaseEnv.ts`
+  where all four callers share it.
+- **The browser and server Supabase clients cannot live in one module.** The
+  server one imports `next/headers`, and Next refuses to compile any
+  `'use client'` graph that reaches it — the build fails outright. The split
+  into `supabaseBrowser.ts` / `supabaseAuth.ts` is load-bearing.
+- **Importing that client into `AppShell` cost +70kB of First Load JS on every
+  page** (the board went 104 → 174kB) to carry a sign-out button most visitors
+  never press. It is `await import(...)`ed inside `signOut` and inside the
+  watchlist sync; the board is back to 105kB.
+
+## The board's cache is shared between instances (2026-09-08)
+
+`lib/scoutCache.ts` was module-level, which on Vercel means **per serverless
+INSTANCE**. Measured on production: **8.3s cold, 0.4s warm** — so the 0.4s
+number described an experience almost nobody had, because most visitors land on
+an instance that has never swept. The fix is not a longer TTL; it is a cache the
+instances share. The sweep now sits behind `unstable_cache` (Vercel's Data
+Cache, shared across every instance and region) with the module cache kept in
+front as L1. **Worst of 20 cold requests afterwards: 0.55s.**
+
+Also raised: `typescript.ignoreBuildErrors` is now **false**. It was hiding two
+real errors — a `Set` the unset (therefore ES5) target could not iterate, and
+`avg_clv` typed as absent when the view returns null. Lint still does not block
+a deploy; there was no eslint config at all, and one was added only so
+`npm run lint` runs.
+
+⚠️ **Git auto-deploy is still not on.** `vercel git connect` returns 400 — the
+Vercel account has no GitHub login connection. Until someone authorises that in
+the Vercel dashboard, deploys stay `cd site && vercel --prod --yes`.
+
+## The anon key could TRUNCATE the research — closed 2026-09-08
+
+A Supabase advisory during the accounts work: **18 tables had RLS disabled**,
+and `anon` was granted `DELETE, INSERT, TRUNCATE, UPDATE` on every one of them.
+The anon key ships inside the site's JavaScript, as anon keys do. So anyone
+could have truncated 761,088 rows of `pressure_observations`, 371k of
+`pm_ticks`, 106k of `settled_market_observations`, and fifteen more.
+
+🔑 **These are the rows the project cannot buy back.** The pressure model can
+only ever be fitted on data recorded FORWARD — a truncate is not an outage, it
+is every fixture-minute since 2026-07-22 and the restart of a verdict gate that
+is already months away.
+
+`db/045_rls_lockdown.sql`: RLS on, **no policies**. Safe by inspection, and the
+inspection is the point — the site reads exactly six things with the anon key
+(`leagues`, `match_odds`, `matches`, `paper_trades`, `strategies`,
+`v_strategy_performance`, all already RLS-on), while the Lab (`app/lib/db.ts`)
+and every Python agent (`agent/tools/db.py`) connect over `DATABASE_URL`, which
+bypasses RLS. Verified after: research tables return `[]` to anon, the six still
+return rows, `/agent` still shows all 245 settled bets, and
+`pressure_observations` took a new write 13 seconds later.
+
+⚠️ **Applying it needs care.** `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` takes
+an ACCESS EXCLUSIVE lock, so a batched migration dies on a statement timeout
+while the daemons write. One table at a time with `set lock_timeout` got 17 of
+18; the last was blocked by the pressure agent holding a transaction **idle for
+8+ minutes** on one SELECT (psycopg2 defaults to `autocommit = False`). That
+leak also blocks VACUUM on tables taking constant writes and is still open.
 
 ## Polymarket already carried the clock (2026-09-06)
 
