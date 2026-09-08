@@ -30,6 +30,7 @@
  *     to work out which they are looking at.
  */
 
+import { unstable_cache } from 'next/cache'
 import type { ScoutFixture } from './scout'
 
 /** Below this, a "mover" is two people rather than a market. */
@@ -58,6 +59,10 @@ export interface Mover extends ScoutFixture {
   move: NonNullable<ScoutFixture['move']>
   /** Hours until kickoff. Negative should not occur here; see `movers()`. */
   hoursToKickoff: number | null
+  /** The backed side's price path over the window, oldest first, as
+   *  probabilities. Empty when the CLOB had nothing to say — the row still
+   *  renders, without a line, because a missing chart is not a missing move. */
+  spark: number[]
 }
 
 function hoursTo(iso: string | null): number | null {
@@ -91,7 +96,15 @@ export function movers(fixtures: ScoutFixture[]): Mover[] {
       const h = hoursTo(f.kickoff)
       return h != null && h > 0
     })
-    .map((f) => ({ ...f, move: f.move!, hoursToKickoff: hoursTo(f.kickoff) }))
+    .map((f) => ({ ...f, move: f.move!, hoursToKickoff: hoursTo(f.kickoff), spark: [] }))
+    // Sorted by PROBABILITY POINTS, not by the percentage the odds fell.
+    // ⚠️ Those rank differently and the difference is not cosmetic: 11.87 →
+    //    10.20 is a 14.1% drop in the odds and only 1.4pp of probability,
+    //    while 2.68 → 2.40 is 10.4% and 4.1pp. Sorting on the percentage puts
+    //    longshots at the top of every board, because the same probability
+    //    move is a bigger fraction of a bigger number. The percentage is still
+    //    shown, because it is what "dropping odds" means to a reader — it is
+    //    just not what decides the order.
     .sort((a, b) => b.move.pp - a.move.pp)
 }
 
@@ -132,3 +145,53 @@ export function moversMeta(fixtures: ScoutFixture[], shown: number): MoversMeta 
     minMovePp: MIN_MOVE_PP,
   }
 }
+
+
+// ── the price path ───────────────────────────────────────────────────────────
+
+const CLOB_HISTORY = 'https://clob.polymarket.com/prices-history'
+
+/** Hours of history behind each sparkline. Matches the 24h the move is
+ *  measured over, so the line and the number describe the same window. */
+const SPARK_HOURS = 24
+
+/** At most this many points; hourly is plenty for a 24-hour line. */
+const SPARK_FIDELITY = 60
+
+async function pathOf(tokenId: string): Promise<number[]> {
+  const now = Math.floor(Date.now() / 1000)
+  const url =
+    `${CLOB_HISTORY}?market=${tokenId}` +
+    `&startTs=${now - SPARK_HOURS * 3600}&endTs=${now}&fidelity=${SPARK_FIDELITY}`
+  try {
+    const r = await fetch(url, { cache: 'no-store' })
+    if (!r.ok) return []
+    const b = (await r.json()) as { history?: { t: number; p: number }[] }
+    return (b.history ?? []).map((h) => h.p).filter((p) => Number.isFinite(p))
+  } catch {
+    // A line we could not draw is a line we do not draw. The row keeps its
+    // numbers, which are the part that matters.
+    return []
+  }
+}
+
+/** Attach the backed side\'s price path to each mover.
+ *
+ *  One request per mover — measured at 8 in parallel in 0.14s, 25 points each.
+ *  Cheap enough to do for the whole board, which is why it is not limited to
+ *  the top few. Behind the shared Data Cache so a page load pays for it once
+ *  across every serverless instance. */
+async function fetchSparks(rows: Mover[]): Promise<Mover[]> {
+  const paths = await Promise.all(
+    rows.map((m) => (m.move.tokenId ? pathOf(m.move.tokenId) : Promise.resolve([])))
+  )
+  return rows.map((m, i) => ({ ...m, spark: paths[i] }))
+}
+
+export const withSparklines = unstable_cache(
+  fetchSparks,
+  ['movers-sparklines-v1'],
+  // Longer than the board\'s own 45s: a 24-hour line does not visibly change
+  // in a minute, and this is the only part of the page that costs requests.
+  { revalidate: 300, tags: ['movers-sparklines'] }
+)

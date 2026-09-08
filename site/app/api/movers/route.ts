@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server'
 import { getBoard } from '../../lib/scoutCache'
-import { moverBoard, moversMeta } from '../../lib/movers'
+import { moverBoard, moversMeta, withSparklines } from '../../lib/movers'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
@@ -16,10 +16,13 @@ export async function GET() {
   try {
     const board = await getBoard()
     const { funded, thin } = moverBoard(board.fixtures)
+    // Both boards in one call, so the two lists share the cache entry rather
+    // than racing each other for the same tokens.
+    const withPaths = await withSparklines([...funded, ...thin])
     return NextResponse.json({
       ok: true,
-      funded,
-      thin,
+      funded: withPaths.slice(0, funded.length),
+      thin: withPaths.slice(funded.length),
       meta: moversMeta(board.fixtures, funded.length + thin.length),
       generatedAt: board.generatedAt,
     })

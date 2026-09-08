@@ -2,95 +2,171 @@
 
 /** Dropping odds — where the market moved, before anyone kicked a ball.
  *
- *  Cards in the same shape as Scout's, because it is the same board seen
- *  through one question: which side did money come for in the last day.
+ *  Laid out the way a line-movement page is usually laid out, because the shape
+ *  works: a hero that leads with the single biggest move, then a dense table
+ *  where each row is one fixture and the price path is a sparkline. Cards were
+ *  the wrong container — they give eight equally sized boxes to a list whose
+ *  whole point is that the top of it matters most.
  *
- *  🔑 "Dropping odds" is the decimal falling, which is the probability rising.
- *     So the card leads with the side that SHORTENED, in decimal, with what it
- *     was before — and a board where everything drifted out has no movers
- *     rather than a least-bad one.
+ *  🔑 The board is SORTED by probability points, not by the percentage the odds
+ *     fell. Those rank differently and the difference is not cosmetic: 11.87 →
+ *     10.20 is a 14.1% drop and 1.4pp, while 2.68 → 2.40 is 10.4% and 4.1pp.
+ *     Sorting on the percentage puts longshots at the top of every board,
+ *     because the same probability move is a larger fraction of a larger
+ *     number. Both are shown — the percentage is what "dropping odds" means to
+ *     a reader — but only one of them decides the order.
  *
- *  ⚠️ It shows what moved. It does not claim that following the move pays. The
- *     nearest thing this project has measured says the opposite: ask movement
- *     carries nothing beyond the ask level (−0.00042 pseudo-R², CI
- *     [−0.00104, +0.00019]), and pre-match Polymarket football did not survive
- *     the spread floor. The footer says so, because a page that shows arrows
- *     and stays quiet about that is making a claim by implication.
+ *  ⚠️ The page shows what moved. It does not claim that following the move
+ *     pays; this project's own measurements point the other way, and the footer
+ *     says so rather than leaving the arrows to imply otherwise.
  */
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
-import { IconLive } from '../components/icons'
 import type { Mover, MoversMeta } from '../lib/movers'
 
+// ── formatting ───────────────────────────────────────────────────────────────
+
 function odds(p: number | null | undefined): string {
-  if (p == null || p <= 0.01 || p >= 0.99) return '—'
+  if (p == null || p <= 0.005 || p >= 0.995) return '—'
   return (1 / p).toFixed(2)
 }
 
-function money(v: number | null | undefined): string {
-  if (v == null || v <= 0) return '—'
+function money(v: number): string {
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}k`
   return `$${v.toFixed(0)}`
 }
 
-/** How far out the match is. The whole point of showing it: an 8pp move at
- *  T-2h and the same move at T-40h are different events. */
-function toKick(h: number | null): string {
-  if (h == null) return '—'
-  if (h < 1) return `${Math.round(h * 60)}m`
-  if (h < 24) return `${h.toFixed(0)}h`
-  return `${Math.floor(h / 24)}d ${Math.round(h % 24)}h`
+/** How far the DECIMAL fell, as a percentage of what it was — the visceral
+ *  number, and the one the phrase "dropping odds" actually describes. */
+function dropPct(m: Mover['move']): number {
+  const was = 1 / m.before
+  const now = 1 / m.now
+  return was > 0 ? ((was - now) / was) * 100 : 0
 }
 
-/** One card. Extracted because the funded board and the thin board draw the
- *  same thing — the only difference between them is which list they are in,
- *  and that difference belongs in the heading rather than in the card. */
-function MoverCard({ f }: { f: Mover }) {
+function kickoff(iso: string | null, hours: number | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  // ⚠️ Pinned to en-GB rather than the browser's locale. The site is English
+  //    throughout, and an empty locale array renders "quarta, 9/09" on a
+  //    Portuguese machine and "Wed, 9 Sep" on an English one — the same page
+  //    reading differently to two people, in a column of times they might
+  //    compare. 24-hour clock for the same reason: these are kickoff times.
+  const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const rel =
+    hours == null ? '' : hours < 1 ? ` · ${Math.round(hours * 60)}m` : ` · T−${hours.toFixed(0)}h`
+  return `${day} ${time}${rel}`
+}
+
+// ── the price path ───────────────────────────────────────────────────────────
+
+/** A sparkline of the backed side, plotted as the DECIMAL so the line falls
+ *  the same way the number beside it does.
+ *
+ *  ⚠️ Scaled to its own minimum and maximum, so every line fills its box. That
+ *     makes the SHAPE readable and the HEIGHT meaningless between rows — the
+ *     numbers carry magnitude, this carries the path. */
+function Spark({ points, w = 96, h = 26 }: { points: number[]; w?: number; h?: number }) {
+  if (points.length < 2) {
+    return (
+      <span className="do-spark-none" title="Polymarket published no price history for this token">
+        —
+      </span>
+    )
+  }
+  const ys = points.map((p) => (p > 0.005 ? 1 / p : 0))
+  const lo = Math.min(...ys)
+  const hi = Math.max(...ys)
+  const span = hi - lo || 1
+  const step = w / (ys.length - 1)
+  const d = ys
+    .map(
+      (y, i) =>
+        `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(h - ((y - lo) / span) * h).toFixed(1)}`
+    )
+    .join(' ')
+  const fell = ys[ys.length - 1] < ys[0]
+
   return (
-    <Link href={`/game/${f.slug}`} className="do-card">
-      <div className="do-card-top">
-        <span className="do-comp">{f.competition ?? 'Football'}</span>
-        <span className="do-kick">
-          <IconLive className="do-kick-icn" />
-          T−{toKick(f.hoursToKickoff)}
+    <svg
+      className={`do-spark${fell ? ' is-down' : ' is-up'}`}
+      viewBox={`0 0 ${w} ${h}`}
+      width={w}
+      height={h}
+      aria-hidden="true"
+    >
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+// ── one row ──────────────────────────────────────────────────────────────────
+
+function Row({ f }: { f: Mover }) {
+  return (
+    <Link href={`/game/${f.slug}`} className="do-row">
+      <div className="do-c-match">
+        <div className="do-teams">
+          <span className={f.move.side === 'home' ? 'is-backed' : ''}>{f.home}</span>
+          <span className="do-vs">v</span>
+          <span className={f.move.side === 'away' ? 'is-backed' : ''}>{f.away}</span>
+        </div>
+        <div className="do-when">{kickoff(f.kickoff, f.hoursToKickoff)}</div>
+      </div>
+
+      <div className="do-c-league">
+        <span className="np-badge">{f.competition ?? 'Football'}</span>
+      </div>
+
+      <div className="do-c-backed">
+        <span className={`do-chip is-${f.move.side}`}>
+          {f.move.side === 'draw' ? 'X' : f.move.side === 'home' ? '1' : '2'}
         </span>
+        <span className="do-backed-name">{f.move.label}</span>
       </div>
 
-      <div className="do-teams">
-        <span className={f.move.side === 'home' ? 'is-backed' : ''}>{f.home}</span>
-        <span className="do-v">v</span>
-        <span className={f.move.side === 'away' ? 'is-backed' : ''}>{f.away}</span>
+      <div className="do-c-move">
+        <b className="np-num do-pct">↓{dropPct(f.move).toFixed(1)}%</b>
+        <span className="np-num do-pp">{f.move.pp.toFixed(1)}pp</span>
       </div>
 
-      <div className="do-move">
-        <div className="do-move-side">
-          <span className="do-move-label">SHORTENED</span>
-          <b>{f.move.label}</b>
-        </div>
-        <div className="do-move-odds">
-          <span className="np-num do-was">{odds(f.move.before)}</span>
-          <span className="do-arrow" aria-hidden="true">→</span>
-          <span className="np-num do-now">{odds(f.move.now)}</span>
-        </div>
-        <div className="do-move-pp np-num">−{f.move.pp.toFixed(1)}pp</div>
+      <div className="do-c-was np-num">{odds(f.move.before)}</div>
+      <div className="do-c-now np-num">{odds(f.move.now)}</div>
+
+      <div className="do-c-trend">
+        <Spark points={f.spark} />
       </div>
 
-      <div className="do-foot">
-        <span className="np-num">{money(f.volumeUsd)} traded</span>
-        {f.move.pp1h != null && Math.abs(f.move.pp1h) >= 0.5 && (
-          <span className={`np-num do-1h${f.move.pp1h > 0 ? ' is-up' : ''}`}>
-            {f.move.pp1h > 0 ? '+' : ''}
-            {f.move.pp1h.toFixed(1)}pp last hour
-          </span>
-        )}
-        <span className="do-go">Open →</span>
-      </div>
+      <div className="do-c-vol np-num">{money(f.volumeUsd)}</div>
     </Link>
   )
 }
+
+function Table({ rows }: { rows: Mover[] }) {
+  return (
+    <div className="do-table">
+      <div className="do-head-row">
+        <span>Match</span>
+        <span>League</span>
+        <span>Backed</span>
+        <span>Move</span>
+        <span>24h ago</span>
+        <span>Now</span>
+        <span>Trend</span>
+        <span>Volume</span>
+      </div>
+      {rows.map((f) => (
+        <Row key={f.slug} f={f} />
+      ))}
+    </div>
+  )
+}
+
+// ── page ─────────────────────────────────────────────────────────────────────
 
 export default function DroppingOddsPage() {
   const [funded, setFunded] = useState<Mover[] | null>(null)
@@ -121,17 +197,82 @@ export default function DroppingOddsPage() {
     }
   }, [])
 
+  const top = funded?.[0] ?? null
+
   return (
     <AppShell>
       <div className="do-page">
-        <header className="do-head">
-          <h1>Dropping odds</h1>
-          <p>
-            Polymarket football, ranked by the side that shortened most in the last
-            24 hours. Pre-match only, and only where enough money has gone through
-            for the move to mean anything.
-          </p>
-        </header>
+        {/* ── hero: what this is, and the single biggest move ── */}
+        <section className="do-hero">
+          <div className="do-hero-copy">
+            <h1>
+              Watch the money.
+              <br />
+              Not the tip.
+            </h1>
+            <p>
+              Every Polymarket football board, ranked by the side that shortened most
+              in the last 24 hours. Pre-match only, and only where enough has traded
+              for the move to mean anything.
+            </p>
+            <div className="do-hero-cta">
+              <Link href="/" className="np-btn np-btn-primary">
+                See today&apos;s full board
+              </Link>
+              <Link href="/insights" className="np-btn">
+                Why these are not tips
+              </Link>
+            </div>
+          </div>
+
+          <div className="do-hero-panel">
+            {top ? (
+              <Link href={`/game/${top.slug}`} className="do-top">
+                <div className="do-top-head">
+                  <span className="do-top-label">Biggest move now</span>
+                  <b className="np-num do-top-pct">↓{dropPct(top.move).toFixed(1)}%</b>
+                </div>
+
+                <div className="do-top-sel">
+                  <span className="do-top-sel-label">BACKED SELECTION</span>
+                  <b>{top.move.label}</b>
+                  <span className="do-top-fixture">
+                    {top.home} <em>v</em> {top.away}
+                  </span>
+                </div>
+
+                <div className="do-top-odds">
+                  <span>
+                    <em>24H AGO</em>
+                    <b className="np-num do-top-was">{odds(top.move.before)}</b>
+                  </span>
+                  <span className="do-top-arrow" aria-hidden="true">→</span>
+                  <span>
+                    <em>NOW</em>
+                    <b className="np-num do-top-now">{odds(top.move.now)}</b>
+                  </span>
+                </div>
+
+                <div className="do-top-spark">
+                  <Spark points={top.spark} w={300} h={72} />
+                </div>
+
+                <div className="do-top-foot">
+                  {top.competition ?? 'Football'} · {kickoff(top.kickoff, top.hoursToKickoff)} ·{' '}
+                  {money(top.volumeUsd)} traded
+                </div>
+              </Link>
+            ) : (
+              <div className="do-top is-empty">
+                {error
+                  ? 'Could not read the board.'
+                  : funded
+                    ? 'Nothing on a funded book has moved today. That is a normal answer, not an outage.'
+                    : 'Reading the board…'}
+              </div>
+            )}
+          </div>
+        </section>
 
         {error && (
           <div className="np-note do-error">
@@ -139,57 +280,50 @@ export default function DroppingOddsPage() {
           </div>
         )}
 
-        {!funded && !error && <div className="np-empty">Reading the board…</div>}
-
-        {funded && funded.length === 0 && (
-          <div className="np-empty">
-            Nothing on a funded book moved more than {meta?.minMovePp ?? 2}pp today.
-            That is a normal answer, not an outage.
-          </div>
-        )}
-
         {funded && funded.length > 0 && (
-          <div className="do-grid">
-            {funded.map((f) => (
-              <MoverCard key={f.slug} f={f} />
-            ))}
-          </div>
+          <section className="do-section">
+            <div className="do-section-head">
+              <h2>Market movers</h2>
+              <span>
+                SHORTENERS · LAST 24H · BOOKS OVER $
+                {(meta?.fundedVolumeUsd ?? 5000).toLocaleString('en-US')}
+              </span>
+            </div>
+            <Table rows={funded} />
+          </section>
         )}
 
         {thin.length > 0 && (
-          <section className="do-thin">
+          <section className="do-section do-thin">
             <button
               className="do-thin-toggle"
               onClick={() => setShowThin((v) => !v)}
               aria-expanded={showThin}
             >
               <span>
-                Thin books · <b className="np-num">{thin.length}</b> more moved, on under{' '}
-                ${(meta?.fundedVolumeUsd ?? 5000).toLocaleString('en-US')}
+                Thin books · <b className="np-num">{thin.length}</b> more moved, on under $
+                {(meta?.fundedVolumeUsd ?? 5000).toLocaleString('en-US')}
               </span>
-              <span className="do-thin-chev" aria-hidden="true">{showThin ? '▲' : '▼'}</span>
+              <span className="do-thin-chev" aria-hidden="true">
+                {showThin ? '▲' : '▼'}
+              </span>
             </button>
 
             {showThin && (
               <>
                 <p className="do-thin-why">
-                  Kept apart rather than hidden, and not allowed to lead the board.
-                  A big number on a thin book is usually two orders, not a market
-                  changing its mind — and the two are indistinguishable from the
-                  percentage alone.{' '}
+                  Kept apart rather than hidden, and not allowed to lead the board. A big
+                  number on a thin book is usually two orders, not a market changing its
+                  mind — and the two are indistinguishable from the percentage alone.
                   <span className="do-thin-cite">
-                    Measured on one live board, 8 September 2026: the median move was
-                    the same in every volume band (3.0pp under $5k, 3.0pp at $5–10k,
-                    2.5pp above), but only the thin band had a tail — a 23pp swing on
-                    $2,672, against a 4pp maximum on everything funded. Same middle,
-                    fat tail on one side, is what noise looks like.
+                    Measured on one live board, 8 September 2026: the median move was the
+                    same in every volume band (3.0pp under $5k, 3.0pp at $5–10k, 2.5pp
+                    above), but only the thin band had a tail — a 23pp swing on $2,672,
+                    against a 4pp maximum on everything funded. Same middle, fat tail on
+                    one side, is what noise looks like.
                   </span>
                 </p>
-                <div className="do-grid">
-                  {thin.map((f) => (
-                    <MoverCard key={f.slug} f={f} />
-                  ))}
-                </div>
+                <Table rows={thin} />
               </>
             )}
           </section>
@@ -200,21 +334,26 @@ export default function DroppingOddsPage() {
             <b className="np-num">{meta.shown}</b> shown of{' '}
             <b className="np-num">{meta.candidates}</b> pre-match fixtures ·{' '}
             <b className="np-num">{meta.droppedForSmallMove}</b> moved less than{' '}
-            {meta.minMovePp}pp · <b className="np-num">{meta.droppedForVolume}</b> moved
-            but had under ${meta.minVolumeUsd.toLocaleString('en-US')} through them ·{' '}
-            <b className="np-num">{meta.noChangePublished}</b> had no 24h change
-            published — a market listed today has no yesterday.
+            {meta.minMovePp}pp · <b className="np-num">{meta.droppedForVolume}</b> moved but
+            had under ${meta.minVolumeUsd.toLocaleString('en-US')} through them ·{' '}
+            <b className="np-num">{meta.noChangePublished}</b> had no 24h change published —
+            a market listed today has no yesterday.
           </div>
         )}
 
         <div className="np-note do-honest">
-          <strong>This is what moved, not what to back.</strong> A shortening price
-          is money arriving, and money arriving is not the same as money being
-          right. Our own measurements point the other way: ask movement carried
-          nothing beyond the ask level, and pre-match Polymarket football did not
-          survive the spread floor. Both are written up in{' '}
-          <Link href="/insights">Insights</Link>. Treat this board as a place to
-          look, not a signal to follow.
+          <strong>This is what moved, not what to back.</strong> A shortening price is
+          money arriving, and money arriving is not the same as money being right. Our own
+          measurements point the other way: ask movement carried nothing beyond the ask
+          level, and pre-match Polymarket football did not survive the spread floor. Both
+          are written up in <Link href="/insights">Insights</Link>.
+          <br />
+          <br />
+          The board is ordered by <strong>probability points</strong>, not by the
+          percentage the odds fell. They disagree, and the disagreement matters: 11.87 to
+          10.20 is 14.1% of the price and 1.4 points of probability, while 2.68 to 2.40 is
+          10.4% and 4.1 points. Ranking on the percentage would put longshots at the top of
+          every board for no reason other than their arithmetic.
         </div>
       </div>
     </AppShell>

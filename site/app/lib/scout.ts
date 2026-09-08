@@ -424,6 +424,9 @@ export interface OddsMove {
   pp: number
   /** The last hour, when Gamma carries it. Null is "not known". */
   pp1h: number | null
+  /** The CLOB token for the side that shortened, so its price path can be
+   *  drawn. Null when Gamma published no token for that market. */
+  tokenId: string | null
 }
 
 /** The outcome that shortened most over 24 hours.
@@ -449,6 +452,7 @@ function moveOf(markets: Mkt[], home: string, away: string): OddsMove | null {
       before: Math.min(1, Math.max(0, m.yes - m.chg24h)),
       pp,
       pp1h: m.chg1h == null ? null : m.chg1h * 100,
+      tokenId: m.yesTokenId,
     }
   }
 
