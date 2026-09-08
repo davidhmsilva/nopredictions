@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { AppShell } from './components/AppShell'
 import {
   IconAll,
@@ -45,51 +46,14 @@ function clock(iso: string | null): string {
 
 // ── book grade ───────────────────────────────────────────────────────────────
 //
-// The case for grading on book quality lives in these tooltips and nowhere
-// else on the page. A trader opening this on a matchday wants the board, not
-// the reasoning — but each tooltip still carries the measurement it stands on,
-// so a grade is checkable without an essay above the table.
-
-const GRADE: Record<BookGrade, { label: string; cls: string; title: string }> = {
-  clean: {
-    label: 'CLEAN',
-    cls: 'is-good',
-    title:
-      'Both sides quoted, spread at or under 6pp. Across 6,449 measured rows this is the ' +
-      'only bucket where the ask was not systematically worse than what happened.',
-  },
-  wide: {
-    label: 'WIDE',
-    cls: 'is-warn',
-    title:
-      'Spread over 6pp. Measured at −4.26pp of realised value in the 6-10pp bucket — the ' +
-      'price is worse than it looks before you have any view at all.',
-  },
-  blown: {
-    label: 'NO BOOK',
-    cls: 'is-bad',
-    title:
-      'Spread over 20pp — a lone order parked far from any bid, not a market. Measured at ' +
-      '−38pp. The mid here means nothing.',
-  },
-  'one-sided': {
-    label: '1-SIDED',
-    cls: 'is-warn',
-    title: 'Only one side of the book is quoted. You can hit it, but nothing prices it.',
-  },
-  settled: {
-    label: 'DECIDED',
-    cls: 'is-dim',
-    title:
-      'Already settled — quoted tight around nothing. A 0.001/0.009 book has a 0.8pp spread ' +
-      'and no bet in it.',
-  },
-  unknown: {
-    label: '—',
-    cls: 'is-dim',
-    title: 'No usable quote came back for this board.',
-  },
-}
+// The grade no longer has a column or a badge. It was a research reading on a
+// board people open to see what is on today, and the measurement it stood on
+// did not go anywhere: the Game Center shows the spread and the depth of every
+// market on a fixture, which says more than one word ever did.
+//
+// What survives here is the RANK, because "tightest book" is still a sort and
+// it has to know that a decided market quoting 0.001/0.009 is not the tightest
+// book on the card just because that arithmetic is 0.8pp.
 
 // ── sorting ──────────────────────────────────────────────────────────────────
 
@@ -255,14 +219,25 @@ function Row({
   watched: boolean
   onToggleWatch: (slug: string) => void
 }) {
-  const g = GRADE[f.book?.grade ?? 'unknown']
+  const router = useRouter()
   return (
-    <tr className={f.live ? 'is-live' : f.finished ? 'is-done' : undefined}>
+    /* The whole row navigates, not just the two links inside it. Those links
+       stay, and they are what makes this reachable from a keyboard — the row
+       handler is a convenience for a pointer, never the only way through. */
+    <tr
+      className={`is-clickable${f.live ? ' is-live' : f.finished ? ' is-done' : ''}`}
+      onClick={() => router.push(`/game/${f.slug}`)}
+    >
       <td className="sc-c-n np-num">{n}</td>
       <td className="sc-c-star">
         <button
           className={`sc-star${watched ? ' is-on' : ''}`}
-          onClick={() => onToggleWatch(f.slug)}
+          onClick={(e) => {
+            // Starring is not opening. Without this the row handler fires too
+            // and the click both stars the fixture and leaves the page.
+            e.stopPropagation()
+            onToggleWatch(f.slug)
+          }}
           aria-label={watched ? 'Remove from watchlist' : 'Add to watchlist'}
         >
           {watched ? '★' : '☆'}
@@ -290,29 +265,10 @@ function Row({
       <td className="sc-c-odd np-num">{odds(f.oneX2.away)}</td>
       <td className="sc-c-odd sc-c-o25 np-num">{odds(f.over25)}</td>
 
-      <td className="sc-c-book">
-        <span className={`sc-grade ${g.cls}`} title={g.title}>
-          {g.label}
-        </span>
-        {f.book?.spreadPp != null && (
-          <span
-            className="sc-spread np-num"
-            title={
-              f.book.source === 'clob'
-                ? `Read live from the order book on: ${f.book.market}`
-                : `Polymarket's own quote, which lags the book, on: ${f.book.market}`
-            }
-          >
-            {f.book.spreadPp.toFixed(1)}
-            {f.book.source === 'gamma' && <span className="sc-stale">·</span>}
-          </span>
-        )}
-      </td>
-
       <td className="sc-c-vol np-num">{money(f.volumeUsd)}</td>
       <td className="sc-c-go">
         <Link href={`/game/${f.slug}`} className="sc-go">
-          Open
+          View report <span aria-hidden="true">→</span>
         </Link>
       </td>
     </tr>
@@ -488,7 +444,6 @@ export default function ScoutPage() {
         {!loading && !error && headline.length > 0 && (
           <div className="sc-big">
             {headline.map((f) => {
-              const g = GRADE[f.book?.grade ?? 'unknown']
               return (
                 <Link
                   key={f.slug}
@@ -536,8 +491,13 @@ export default function ScoutPage() {
                   <div className="sc-big-foot">
                     <span className="np-num sc-big-vol">{money(f.volumeUsd)} traded</span>
                     <span className="np-num sc-big-mkts">{f.markets} markets</span>
-                    <span className={`sc-grade ${g.cls}`} title={g.title}>
-                      {g.label}
+                    {/* This slot held the book grade. A grade is a research
+                        reading; what someone looking at a card needs to know is
+                        that the card goes somewhere. The measurement is not
+                        lost — the Game Center shows the spread and the depth
+                        per market, which is more than a one-word grade said. */}
+                    <span className="sc-report">
+                      View report <span aria-hidden="true">→</span>
                     </span>
                   </div>
                 </Link>
@@ -626,18 +586,6 @@ export default function ScoutPage() {
                     title="Over 2.5 goals — decimal odds at Polymarket's mid"
                   >
                     O2.5
-                  </th>
-                  <th
-                    className="sc-c-book"
-                    title={
-                      "The spread on this board's Over 2.5 book, in points, or the draw where " +
-                      'that line is not listed. On 6,449 measured rows the ask was fair to ' +
-                      'slightly cheap at 0-3pp of spread and ran −38pp past 20pp. Depth is not ' +
-                      'the tell: one book quoted bid 0.55 / ask 0.99 behind $30,117 of depth and ' +
-                      'traded at 0.56 two minutes later. A dot means the quote is cached, not live.'
-                    }
-                  >
-                    Book <span className="sc-info">ⓘ</span>
                   </th>
                   <th className="sc-c-vol" title="Traded volume across every market on this fixture">
                     Volume

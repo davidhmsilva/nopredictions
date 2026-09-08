@@ -2564,20 +2564,22 @@ button { font-family: var(--font); }
   padding: 10px 8px; border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
-.sc-info { color: var(--grey2); font-size: 9px; cursor: help; }
 
 .sc-table tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
 .sc-table tbody tr:hover { background: var(--bg2); }
+/* The whole row navigates. The two links inside it still work and are what
+   makes this reachable from a keyboard — this is the pointer affordance. */
+.sc-table tbody tr.is-clickable { cursor: pointer; }
 .sc-table tbody tr.is-live td:first-child { box-shadow: inset 2px 0 0 var(--red); }
 .sc-table tbody tr.is-done { opacity: .5; }
 .sc-table td { padding: 9px 8px; vertical-align: middle; }
 
 .sc-c-n    { width: 34px; color: var(--grey2); font-size: 11px; }
 .sc-c-star { width: 26px; }
-.sc-c-state, .sc-c-book, .sc-c-vol { white-space: nowrap; }
+.sc-c-state, .sc-c-vol { white-space: nowrap; }
 .sc-c-odd  { width: 58px; text-align: right; white-space: nowrap; }
 .sc-c-vol  { width: 74px; text-align: right; color: var(--grey); }
-.sc-c-go   { width: 56px; text-align: right; }
+.sc-c-go   { width: 118px; text-align: right; }
 th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-c-o25 { border-left: 1px solid var(--border); padding-left: 12px; }
 
@@ -2599,24 +2601,17 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 .sc-in { color: var(--grey); font-size: 12px; }
 
-.sc-grade {
-  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em;
-  padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border2);
-  color: var(--grey); cursor: help;
-}
-.sc-grade.is-good { color: var(--green); border-color: rgba(34,197,94,.4);  background: rgba(34,197,94,.08); }
-.sc-grade.is-warn { color: var(--amber); border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.08); }
-.sc-grade.is-bad  { color: var(--red);   border-color: rgba(239,68,68,.4);  background: rgba(239,68,68,.08); }
-.sc-grade.is-dim  { color: var(--grey2); }
-.sc-spread { margin-left: 6px; font-size: 11px; color: var(--grey2); cursor: help; }
-.sc-stale { color: var(--grey2); }
 
 .sc-go {
-  font-size: 12px; color: var(--grey); text-decoration: none;
-  padding: 4px 9px; border: 1px solid var(--border2); border-radius: var(--r-sm);
-  transition: all .12s; display: inline-block;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 11.5px; color: var(--grey); text-decoration: none;
+  padding: 4px 10px; border: 1px solid var(--border2); border-radius: var(--r-sm);
+  transition: color .12s, border-color .12s, background .12s, gap .12s;
 }
-.sc-table tbody tr:hover .sc-go { color: var(--white); border-color: var(--grey2); }
+.sc-table tbody tr:hover .sc-go {
+  color: var(--green); border-color: rgba(34,197,94,.45);
+  background: rgba(34,197,94,.08); gap: 8px;
+}
 
 @media (max-width: 760px) {
   .sc-head { padding: 20px 0 14px; }
@@ -2624,20 +2619,28 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .sc-bar-right { margin-left: 0; width: 100%; }
   .sc-search { flex: 1; width: auto; }
   .sc-table thead th { position: static; }
-  /* No horizontal scroll on a phone. The columns that survive are the ones the
-     row exists for — which fixture, whether it has started, and whether there
-     is a real book behind the quote. The odds ladder is one tap away on the
-     fixture page, and a Book column parked off-screen behind a scroll is the
-     same as no Book column. */
-  .sc-c-odd, .sc-c-vol, .sc-c-go, .sc-c-n { display: none; }
+  /* No horizontal scroll on a phone. What survives is the row itself —
+     fixture, when it starts, how much has traded — and a way in. The odds
+     ladder is one tap away on the fixture page, and a column parked
+     off-screen behind a scroll is the same as no column. */
+  .sc-c-odd, .sc-c-n { display: none; }
   .sc-fixture { min-width: 0; }
   .sc-table { table-layout: auto; }
   .sc-table td, .sc-table thead th { padding: 9px 4px; }
-  .sc-c-state, .sc-c-book { width: 1%; text-align: right; }
-  th.sc-c-state, th.sc-c-book { text-align: right; }
-  /* The market count and the spread figure are what push the row past the
-     viewport. Both are detail; the grade and the fixture are the row. */
-  .sc-mkts, .sc-spread { display: none; }
+  .sc-c-state { width: 1%; text-align: right; }
+  th.sc-c-state { text-align: right; }
+  .sc-c-vol { width: 1%; font-size: 11px; }
+
+  /* The row is clickable, but a phone gives no hover to discover that with —
+     so the affordance stays and shrinks to its arrow. "View report" in full
+     would take a third of the width of a 375px screen. */
+  .sc-c-go { width: 1%; }
+  .sc-go { padding: 4px 7px; gap: 0; font-size: 0; }
+  .sc-go span { font-size: 13px; }
+
+  /* The market count is what pushes the row past the viewport, and it is
+     detail — the fixture is the row. */
+  .sc-mkts { display: none; }
   .sc-comp { font-size: 10px; }
 }
 
@@ -2780,7 +2783,18 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .sc-big-vol { font-size: 11.5px; color: var(--white); font-weight: 600; }
 .sc-big-mkts { font-size: 11px; color: var(--grey2); }
-.sc-big-foot .sc-grade { margin-left: auto; }
+.sc-big-foot .sc-report { margin-left: auto; }
+
+/* Took the grade badge's slot. A grade told you about the book; this tells you
+   the card goes somewhere, which is what someone looking at a card needs to
+   know. Green and arrowed so it reads as a destination rather than a label. */
+.sc-report {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em;
+  color: var(--green); white-space: nowrap;
+  transition: gap .12s;
+}
+.sc-big-card:hover .sc-report { gap: 8px; }
 
 /* ── list controls ── */
 .sc-bar-left { display: flex; align-items: center; gap: 10px; }
