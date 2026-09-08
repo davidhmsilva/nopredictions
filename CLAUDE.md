@@ -1298,6 +1298,82 @@ plans are not switched on yet rather than erroring.
   never press. It is `await import(...)`ed inside `signOut` and inside the
   watchlist sync; the board is back to 105kB.
 
+## Dropping odds, and paying before there is an account (2026-09-08)
+
+Both came out of looking at `steamwatch.io`, a Pinnacle line-movement tracker
+that is the nearest adjacent product to this one.
+
+### `/dropping-odds` — the movers board
+
+It took the **"Clean books"** chip in the Scout row, beside the Insights link
+that had already taken "Measured". The grade survives as a column on every row;
+what went is the filter.
+
+🔑 **It costs no extra request.** Gamma publishes `oneDayPriceChange` and
+`oneHourPriceChange` on every market in the listing response the Scout sweep
+already downloads — the same shape as the live block. `moveOf()` in
+`lib/scout.ts` puts the biggest shortener on `ScoutFixture.move`, `lib/movers.ts`
+filters and splits, and `/api/movers` shares the board cache.
+
+⚠️ **Two people are not a market.** Ranked naively by move size, the top card
+was **23.0pp on $2,672** — which is the thing worth criticising in the tracker
+it was modelled on, whose own top card was 39pp on $5,324. Measured on a live
+board: the median move is the SAME in every volume band — 3.0pp under $5k,
+3.0pp at $5-10k, 2.5pp above — and only the thin band has a tail, against a 4pp
+maximum on everything funded. **Same middle, fat tail on one side, is what noise
+looks like.** So `MIN_VOLUME_USD = 1000` to appear at all, `FUNDED_VOLUME_USD =
+5000` splits the main board from a collapsed "thin books" section, and
+`MIN_MOVE_PP = 2`. Pre-match only: a price moving during a match is mostly the
+score, which Scout already shows.
+
+⚠️ **The horizon is 48 hours, and that is Polymarket's doing.** SteamWatch shows
+Friday movers on a Tuesday because Pinnacle prices a week out. Measured across a
+1,200-event Gamma sweep, the time to kickoff on this board runs **median 25h,
+maximum 52h** — a four-day-out mover essentially cannot appear here. The card
+prints T−kickoff anyway, because 8pp at T-40h and 8pp at T-2h are different
+events.
+
+⚠️ The change field is **null on ~35% of upcoming fixtures** (65% coverage,
+against 93% on finished ones): a market listed today has no yesterday. Null is
+"not known", never "did not move", and those rows are dropped rather than drawn
+at zero.
+
+The page states what it is not, citing this project's own measurements — ask
+movement carries nothing beyond the ask level, and pre-match PM football did not
+survive the spread floor. A board of arrows that stayed quiet about those would
+be making a claim by implication.
+
+### Pay first, sign up after
+
+`/pricing` takes an email and goes straight to Stripe; no account is required.
+
+🔑 **`pro_grants` (db/047) is the whole mechanism.** A payment can arrive for an
+email that has no `auth.users` row, and `profiles.id` references that table — so
+there is nowhere to write it, and creating the user from the webhook needs the
+Supabase service-role key this deployment does not hold. The webhook therefore
+always writes the grant **keyed by email**, and `handle_new_user()` claims it
+when the account is created. Pay then sign up, or sign up then pay: either
+order, any later time, same end state. Email is safe as the join key only
+because Supabase issues it — the grant goes to whoever proves control of the
+address through auth, never to whoever types it into a box.
+
+`/welcome` is the Stripe return URL rather than `/account`: most people arriving
+from checkout have no account, and an account page saying "not signed in"
+immediately after taking their money is the worst possible first screen.
+`/login` prefills the address from there, because using a different one puts the
+subscription on the wrong account.
+
+⚠️ **It has never been run end to end.** There is no Stripe account, and the
+checkout route refuses at the keys check before anything else executes. What IS
+verified is the half that decides who gets Pro: `active` and `trialing` grants
+resolve to `pro`, `canceled` and `past_due` to `free`, on four synthetic grants.
+The untested half is Stripe's own round trip.
+
+⚠️ **Never `rm -rf .next` while the preview server is running.** `next dev` and
+`next build` share that directory, and the collision surfaces as
+`Cannot find module './vendor-chunks/@swc.js'` or a 500 on a page that builds
+perfectly — it cost two false alarms in one session.
+
 ## The board's cache is shared between instances (2026-09-08)
 
 `lib/scoutCache.ts` was module-level, which on Vercel means **per serverless
