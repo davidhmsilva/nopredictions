@@ -1,15 +1,27 @@
-/** One sweep of the board, shared.
+/** One sweep of the board, shared — in two layers.
  *
- *  Building the board costs a paged Gamma sweep plus twelve CLOB round trips —
- *  about six seconds. The tape at the top of every page needs the same
- *  aggregates the table does, so without a cache a visit to /lab or /agent
- *  would pay for a full football sweep to render seven numbers.
+ *  Building the board costs a paged Gamma sweep plus twelve CLOB round trips.
+ *  Measured on production, 2026-09-08: **8.3s cold, 0.4s warm**. The tape at
+ *  the top of every page needs the same aggregates the table does, so without
+ *  a cache a visit to /lab or /agent would pay for a full football sweep to
+ *  render seven numbers.
  *
- *  This is a module-level cache, so it is per serverless instance and warms
- *  independently on each. That is fine: the worst case is the cost we already
- *  pay today, and nothing here is a write.
+ *  ⚠️ A module-level cache is per serverless INSTANCE. On a site with the
+ *  traffic this one has, most visitors land on an instance that has never
+ *  swept — so the module cache was a 0.4s number describing an 8.3s
+ *  experience. The fix is not a bigger TTL; it is a cache the instances share.
+ *
+ *  L1 — this module. Serves repeat hits on a warm instance with no round trip
+ *       at all, and coalesces concurrent callers onto one sweep.
+ *  L2 — Next's Data Cache (`unstable_cache`), which on Vercel is shared across
+ *       every instance and region. A cold instance reads a board someone
+ *       else's request already paid for.
+ *
+ *  Nothing here is a write, so a stale read costs a slightly old timestamp and
+ *  never anything else. Every board carries `generatedAt` and the page shows it.
  */
 
+import { unstable_cache } from 'next/cache'
 import {
   buildFixtures,
   fetchSoccerEvents,
@@ -43,6 +55,17 @@ let cachedAt = 0
 /** Concurrent callers await the same sweep rather than each starting one. */
 let inFlight: Promise<Board> | null = null
 
+/** The sweep, behind the cache the instances share.
+ *
+ *  `revalidate` matches the L1 TTL so the two layers do not disagree about how
+ *  old a board may be. The key is fixed because there is exactly one board —
+ *  it takes no arguments, and giving it one would fragment the cache that is
+ *  the entire point of this layer. */
+const sweepShared = unstable_cache(sweep, ['scout-board-v1'], {
+  revalidate: TTL_MS / 1000,
+  tags: ['scout-board'],
+})
+
 async function sweep(): Promise<Board> {
   // Both in parallel: they hit unrelated hosts, and ESPN is free so its cost is
   // latency alone. A failed ESPN sweep leaves the board exactly as it was
@@ -75,7 +98,7 @@ export async function getBoard(): Promise<Board> {
   if (cached && Date.now() - cachedAt < TTL_MS) return cached
   if (inFlight) return inFlight
 
-  inFlight = sweep()
+  inFlight = sweepShared()
     .then((board) => {
       cached = board
       cachedAt = Date.now()

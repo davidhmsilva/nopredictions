@@ -70,6 +70,9 @@ export interface ScoutFixture {
   liveSource: LiveSource | null
   /** From the feed only. Null when nothing authoritative knows the clock. */
   minute: number | null
+  /** Polymarket's period, when it gave one. Half time has no minute, so this
+   *  is the only thing that separates "at the break" from "clock unknown". */
+  phase: MatchPhase | null
   score: { home: number; away: number } | null
   finished: boolean
   markets: number
@@ -211,6 +214,11 @@ interface PmLive {
   finished: boolean
   minute: number | null
   score: { home: number; away: number } | null
+  /** Polymarket's own `period`, normalised. At `HT` the feed sends an EMPTY
+   *  `elapsed` — there is no minute at half time — so without this the card
+   *  falls back to a bare `LIVE` and looks like a fixture whose clock we lost.
+   *  Verified live on Brugge v Villa, 2026-09-08: period "HT", elapsed "". */
+  phase: MatchPhase | null
 }
 
 function pmLiveOf(ev: Raw): PmLive | null {
@@ -232,6 +240,7 @@ function pmLiveOf(ev: Raw): PmLive | null {
     finished,
     minute: live && Number.isFinite(elapsed) && elapsed > 0 ? elapsed : null,
     score,
+    phase: PHASES.includes(period as MatchPhase) ? (period as MatchPhase) : null,
   }
 }
 
@@ -406,6 +415,11 @@ const MATCH_WINDOW_MS = 2.5 * 3600_000
  *  claims — and since the feed landed, `clock` is what is left over rather than
  *  the usual answer. */
 export type LiveSource = 'pm' | 'feed' | 'board' | 'clock'
+
+/** The phases Polymarket names on a football event. `ET` and `PEN` are theirs
+ *  too; they are listed so a knockout does not read as an ordinary second half. */
+export type MatchPhase = '1H' | 'HT' | '2H' | 'ET' | 'PEN'
+const PHASES: MatchPhase[] = ['1H', 'HT', '2H', 'ET', 'PEN']
 
 function pastKickoff(kickoff: string | null): number | null {
   if (!kickoff) return null
@@ -614,6 +628,7 @@ export function buildFixtures(
       live: liveSource != null,
       liveSource,
       minute: pm?.live ? pm.minute : feedLive ? feed!.minute : null,
+      phase: pm?.live ? pm.phase : null,
       score: pm?.score ?? (feed ? { home: feed.homeGoals, away: feed.awayGoals } : null),
       finished,
       markets: markets.length,

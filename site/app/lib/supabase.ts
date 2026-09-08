@@ -33,9 +33,9 @@ export interface Strategy {
   wins?: number
   losses?: number
   win_rate?: number
-  avg_clv?: number
+  avg_clv?: number | null
   total_pnl?: number
-  yield_pct?: number
+  yield_pct?: number | null
 }
 
 /** Live Pressure Overs — full-match over N.5, bought on late in-game pressure. */

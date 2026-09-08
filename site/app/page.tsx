@@ -172,11 +172,20 @@ function LiveState({ f }: { f: ScoutFixture }) {
         className="np-badge is-live"
         title={
           f.liveSource === 'pm'
-            ? "Polymarket's own live data for this event — the same clock its page shows."
+            ? f.phase === 'HT'
+              ? "Half time, per Polymarket's own live data. There is no minute at the break."
+              : "Polymarket's own live data for this event — the same clock its page shows."
             : 'ESPN live feed. Polymarket has not tagged this fixture as live.'
         }
       >
-        ● {f.minute != null ? <span className="np-num">{f.minute}&apos;</span> : 'LIVE'}
+        {f.phase === 'HT' ? (
+          'HT'
+        ) : (
+          <>
+            ● {f.minute != null ? <span className="np-num">{f.minute}&apos;</span> : 'LIVE'}
+            {f.phase === 'ET' || f.phase === 'PEN' ? ` ${f.phase}` : ''}
+          </>
+        )}
       </span>
     )
   }
