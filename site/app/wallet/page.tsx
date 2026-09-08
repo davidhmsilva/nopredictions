@@ -2,7 +2,8 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { AppNav, AppFooter } from '../components/AppShell'
+import { AppShell } from '../components/AppShell'
+import { ToolChips, ToolFacts, ToolForm, ToolHead, ToolOutput } from '../components/ToolPage'
 import { QuotaStrip } from '../components/QuotaStrip'
 import { useSession } from '../lib/useSession'
 
@@ -49,6 +50,18 @@ const REPORT_SECTIONS: { k: string; v: string }[] = [
   },
 ]
 
+/** The same shape the Lab's stat row has, and for the same reason: a page
+ *  asking for a wallet address should say what it is about to do with it. Every
+ *  one of these is a real property of `lib/wallet.ts`, not a boast — the fill
+ *  count is the largest account rebuilt so far, and the six traps are the ones
+ *  documented in that file. */
+const FACTS: { v: string; k: string }[] = [
+  { v: 'FIFO', k: 'round trips, every fill' },
+  { v: '16,157', k: 'fills on the largest wallet read' },
+  { v: '6', k: 'feed traps handled' },
+  { v: 'Bootstrap', k: 'clustered by event' },
+]
+
 export default function WalletIndexPage() {
   const router = useRouter()
   const [value, setValue] = useState('')
@@ -61,78 +74,63 @@ export default function WalletIndexPage() {
   const valid = ADDRESS.test(addr)
 
   return (
-    <div className="scanner-page">
-      <AppNav />
+    <AppShell>
+      <div className="tp-page">
+        <ToolHead eyebrow="WALLET ANALYSER" title="See how a winning trader actually trades.">
+          Paste any Polymarket wallet. We rebuild every fill it has ever made into completed
+          positions and tell you what it really does — what it buys, when, where the profit
+          genuinely comes from, and whether the record holds up or is one lucky run.
+        </ToolHead>
 
-      <main className="scanner-main">
-        <div className="scanner-hero">
-          <span className="scanner-eyebrow">WALLET ANALYSER</span>
-          <h1 className="scanner-h1">See how a winning trader actually trades.</h1>
-          <p className="scanner-hero-sub">
-            Paste any Polymarket wallet. We rebuild every fill it has ever made into completed
-            positions and tell you what it really does — what it buys, when, where the profit
-            genuinely comes from, and whether the record holds up or is one lucky run.
-          </p>
-        </div>
+        <QuotaStrip
+          quota={me?.wallet ?? null}
+          signedIn={Boolean(me?.user)}
+          feature="wallet read"
+          next="/wallet"
+        />
 
-        <section className="scan-section">
-          <QuotaStrip
-            quota={me?.wallet ?? null}
-            signedIn={Boolean(me?.user)}
-            feature="wallet read"
-            next="/wallet"
+        <ToolForm
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (valid) router.push(`/wallet/${addr.toLowerCase()}`)
+          }}
+          cta="ANALYSE"
+          disabled={!valid}
+        >
+          <input
+            type="text"
+            className="tp-input"
+            placeholder="0x… or https://polymarket.com/profile/0x…"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="Wallet address"
           />
-          <div className="analyze-input-row">
-            <input
-              type="text"
-              className="analyze-input"
-              placeholder="0x… or https://polymarket.com/profile/0x…"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && valid && router.push(`/wallet/${addr.toLowerCase()}`)}
-            />
+        </ToolForm>
+
+        {raw && !valid && (
+          <div className="tp-warn">
+            That is not a wallet address — expected 0x followed by 40 hex characters.
+          </div>
+        )}
+
+        <ToolChips label="ALREADY STUDIED">
+          {KNOWN.map((k) => (
             <button
-              className="scan-btn"
-              disabled={!valid}
-              onClick={() => router.push(`/wallet/${addr.toLowerCase()}`)}
+              key={k.addr}
+              className="tp-chip is-two-line"
+              onClick={() => router.push(`/wallet/${k.addr}`)}
             >
-              ANALYSE
+              <strong>{k.label}</strong>
+              <span>{k.note}</span>
             </button>
-          </div>
-          {raw && !valid && (
-            <div className="wallet-inline-warn">
-              That is not a wallet address — expected 0x followed by 40 hex characters.
-            </div>
-          )}
+          ))}
+        </ToolChips>
 
-          <div className="wallet-known">
-            <div className="wallet-known-label">ALREADY STUDIED</div>
-            <div className="wallet-known-row">
-              {KNOWN.map((k) => (
-                <button key={k.addr} className="wallet-known-chip" onClick={() => router.push(`/wallet/${k.addr}`)}>
-                  <strong>{k.label}</strong>
-                  <span>{k.note}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="wl-what">
-            <div className="wl-what-head">What comes back</div>
-            <dl className="bt-out">
-              {REPORT_SECTIONS.map((r) => (
-                <div key={r.k} className="bt-out-row">
-                  <dt>{r.k}</dt>
-                  <dd>{r.v}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
+        <section className="tp-explain">
+          <ToolFacts facts={FACTS} />
+          <ToolOutput rows={REPORT_SECTIONS.map((r) => ({ k: r.k, v: r.v }))} />
         </section>
-      </main>
-
-
-      <AppFooter />
-    </div>
+      </div>
+    </AppShell>
   )
 }

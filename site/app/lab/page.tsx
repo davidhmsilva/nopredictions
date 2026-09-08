@@ -3,8 +3,10 @@
 import { useRef, useState, type FormEvent } from 'react'
 
 import { isNbaMarket } from '../lib/backtest'
+import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import { QuotaStrip } from '../components/QuotaStrip'
+import { ToolChips, ToolFacts, ToolForm, ToolHead, ToolOutput } from '../components/ToolPage'
 import { useSession } from '../lib/useSession'
 
 // ── types mirrored from the API route ───────────────────────────────────────
@@ -131,25 +133,9 @@ const OUTPUT_FACTS: { k: string; v: string }[] = [
 
 function WhatYouGet() {
   return (
-    <section className="bt-explain">
-      <div className="bt-facts">
-        {DATA_FACTS.map((f) => (
-          <div key={f.k} className="bt-fact">
-            <span className="bt-fact-v np-num">{f.v}</span>
-            <span className="bt-fact-k">{f.k}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="bt-explain-head">What comes back</div>
-      <dl className="bt-out">
-        {OUTPUT_FACTS.map((o) => (
-          <div key={o.k} className="bt-out-row">
-            <dt>{o.k}</dt>
-            <dd>{o.v}</dd>
-          </div>
-        ))}
-      </dl>
+    <section className="tp-explain">
+      <ToolFacts facts={DATA_FACTS} />
+      <ToolOutput rows={OUTPUT_FACTS} />
     </section>
   )
 }
@@ -163,6 +149,7 @@ export default function LabPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [termLines, setTermLines] = useState<{ text: string; cls: string }[]>([])
   const [result, setResult] = useState<ApiResult | null>(null)
+  const [gate, setGate] = useState<'signed_out' | 'quota' | null>(null)
   const [, setLastHypothesis] = useState('')
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   // The counter above the box has to move when a run spends one, without a
@@ -179,6 +166,7 @@ export default function LabPage() {
     timers.current.forEach(clearTimeout)
     timers.current = []
     setResult(null)
+    setGate(null)
     setPhase('running')
     setLastHypothesis(hypothesis)
     setTermLines([{ text: `> test "${hypothesis}"`, cls: 'lp-term-cmd' }])
@@ -200,6 +188,17 @@ export default function LabPage() {
       const data: ApiResult = await res.json()
       timers.current.forEach(clearTimeout)
       refresh()
+
+      // 401 = no account, 402 = the day is spent. Neither is an error, and
+      // printing "✗ ERROR" over a sign-in prompt tells someone their theory
+      // broke something when the only thing that happened is that they are
+      // not signed in.
+      if (res.status === 401 || res.status === 402) {
+        setGate(res.status === 401 ? 'signed_out' : 'quota')
+        setTermLines([])
+        setPhase('done')
+        return
+      }
 
       if (!data.ok) {
         pushLine(`✗ ERROR — ${data.error ?? 'something went wrong'}`, 'lp-term-warn')
@@ -248,25 +247,23 @@ export default function LabPage() {
 
   return (
     <AppShell>
-      <div className="np-wrap bt-wrap">
-        <div className="np-page-head">
-          <div className="np-eyebrow">Lab</div>
-          <h1 className="np-h1">You have a theory. Find out if it pays.</h1>
-          <p className="np-page-sub">
-            Write it the way you would say it out loud. We replay it over every game we
-            have and tell you what it would have made — including when the answer is
-            nothing, which it usually is.
-          </p>
-        </div>
+      <div className="tp-page">
+        <ToolHead eyebrow="LAB" title="You have a theory. Find out if it pays.">
+          Write it the way you would say it out loud. We replay it over every game we
+          have and tell you what it would have made — including when the answer is
+          nothing, which it usually is.
+        </ToolHead>
+
         <QuotaStrip
           quota={me?.lab ?? null}
           signedIn={Boolean(me?.user)}
           feature="Lab test"
           next="/lab"
         />
-        <form className="bt-form" onSubmit={handleSubmit}>
+
+        <ToolForm onSubmit={handleSubmit} cta={phase === 'running' ? 'TESTING…' : 'TEST IT'} disabled={phase === 'running'}>
           <input
-            className="lp-input bt-input"
+            className="tp-input"
             placeholder='e.g. "Draws are underpriced in Serie B"'
             value={input}
             maxLength={500}
@@ -274,17 +271,14 @@ export default function LabPage() {
             disabled={phase === 'running'}
             aria-label="Hypothesis"
           />
-          <button type="submit" className="lp-btn-primary bt-submit" disabled={phase === 'running'}>
-            {phase === 'running' ? 'TESTING…' : 'TEST IT'}
-          </button>
-        </form>
+        </ToolForm>
 
-        <div className="bt-examples">
+        <ToolChips label="TRY ONE">
           {EXAMPLES.map(ex => (
             <button
               key={ex}
               type="button"
-              className="bt-chip"
+              className="tp-chip"
               disabled={phase === 'running'}
               onClick={() => {
                 setInput(ex)
@@ -294,13 +288,34 @@ export default function LabPage() {
               {ex}
             </button>
           ))}
-        </div>
+        </ToolChips>
 
 
         {/* The terminal was the first thing on the page and, until you ran
             something, it was an empty grey box the height of a screen. It now
             appears when there is something in it; before that the space says
             what comes back instead. */}
+        {gate && (
+          <section className="tp-gate">
+            <h2>{gate === 'signed_out' ? 'This one needs an account' : "That is today's three"}</h2>
+            <p>
+              {gate === 'signed_out'
+                ? 'Replaying a theory over 111,475 games costs us a model call, so it sits behind a free account. Three a day, no card.'
+                : 'Free accounts get three Lab tests a day. The count resets at 00:00 UTC — or Pro removes the limit.'}
+            </p>
+            <div className="tp-gate-actions">
+              {gate === 'signed_out' ? (
+                <Link className="np-btn np-btn-primary" href="/login?next=%2Flab">
+                  Sign in — it is free
+                </Link>
+              ) : (
+                <Link className="np-btn np-btn-primary" href="/pricing">See Pro</Link>
+              )}
+              <Link className="np-btn" href="/insights">Read what we already tested</Link>
+            </div>
+          </section>
+        )}
+
         {termLines.length > 0 ? (
           <div className="lp-term bt-term">
             <div className="lp-term-head">

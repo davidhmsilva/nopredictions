@@ -3714,3 +3714,156 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .do-meta b { color: var(--grey); }
 .do-honest { margin-top: 16px; font-size: 13px; line-height: 1.7; }
 .do-honest a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Tool pages — the Lab and the Wallet analyser
+   One frame for both. They were built at different times and shared nothing:
+   the Lab's heading was two thirds the size of the Wallet's, its eyebrow grey
+   where the other was green, its container a different width — two pages of
+   visibly different scale sitting one tab apart. Scale and colour follow the
+   Wallet; the section rule follows Dropping Odds, so all three read as one
+   product.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.tp-page { max-width: 940px; margin: 0 auto; padding: 44px 20px 90px; }
+
+/* ── head ──────────────────────────────────────────────────────────────────── */
+
+.tp-head { margin-bottom: 26px; }
+.tp-eyebrow {
+  display: block; margin-bottom: 14px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--green);
+}
+.tp-h1 {
+  font-size: 44px; line-height: 1.1; font-weight: 720;
+  letter-spacing: -.026em; margin: 0 0 16px;
+}
+@media (max-width: 760px) { .tp-h1 { font-size: 32px; } }
+.tp-sub {
+  max-width: 62ch; margin: 0;
+  color: var(--grey); font-size: 15px; line-height: 1.72;
+}
+
+/* ── the paste box ─────────────────────────────────────────────────────────── */
+
+.tp-form { display: flex; gap: 10px; margin: 18px 0 14px; }
+@media (max-width: 620px) { .tp-form { flex-direction: column; } }
+
+.tp-input {
+  flex: 1; min-width: 0; padding: 15px 18px;
+  border-radius: var(--r); border: 1px solid var(--border2);
+  background: var(--bg); color: var(--white);
+  font-family: var(--font); font-size: 15px;
+  transition: border-color .12s;
+}
+.tp-input::placeholder { color: var(--grey2); }
+.tp-input:focus { outline: none; border-color: var(--green); }
+.tp-input:disabled { opacity: .55; }
+
+/* One idea of what a primary action looks like, instead of the Lab's loud
+   filled green and the Wallet's quiet outline being two. */
+.tp-go {
+  flex: none; padding: 15px 28px; cursor: pointer;
+  border-radius: var(--r); border: 1px solid var(--green);
+  background: var(--green); color: #05140b;
+  font-family: var(--font-mono); font-size: 12.5px; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  transition: background .12s, opacity .12s;
+}
+.tp-go:hover:not(:disabled) { background: #29d669; border-color: #29d669; }
+.tp-go:disabled { opacity: .35; cursor: not-allowed; }
+
+.tp-warn {
+  margin: -4px 0 14px; padding: 9px 13px;
+  border-radius: var(--r-sm); border: 1px solid rgba(245,158,11,.35);
+  background: rgba(245,158,11,.07); color: var(--amber); font-size: 12.5px;
+}
+
+/* ── shortcuts ─────────────────────────────────────────────────────────────── */
+
+.tp-chips { margin-bottom: 34px; }
+.tp-chips-label {
+  margin-bottom: 9px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--grey2);
+}
+.tp-chips-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.tp-chip {
+  padding: 8px 14px; cursor: pointer; text-align: left;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: var(--bg2); color: var(--grey);
+  font-family: var(--font); font-size: 12.5px; line-height: 1.4;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.tp-chip:hover:not(:disabled) {
+  color: var(--white); border-color: var(--border2); background: var(--bg3);
+}
+.tp-chip:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The Wallet's shortcuts are named accounts with a reason, so they get two
+   lines and square corners — a pill cannot hold a subtitle legibly. */
+.tp-chip.is-two-line {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 14px; border-radius: var(--r-sm); min-width: 132px;
+}
+.tp-chip.is-two-line strong { color: var(--white); font-size: 13px; font-weight: 620; }
+.tp-chip.is-two-line span {
+  font-family: var(--font-mono); font-size: 10px; color: var(--grey2);
+}
+.tp-chip.is-two-line:hover span { color: var(--grey); }
+
+/* ── the numbers, and the promise ──────────────────────────────────────────── */
+
+.tp-explain { margin-top: 6px; }
+
+.tp-facts {
+  display: grid; gap: 10px; margin-bottom: 30px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+.tp-fact {
+  display: flex; flex-direction: column; gap: 5px; padding: 18px 20px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+}
+.tp-fact-v {
+  font-size: 27px; font-weight: 700; letter-spacing: -.02em; color: var(--white);
+  line-height: 1.05;
+}
+.tp-fact-k {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em;
+  color: var(--grey2); line-height: 1.4;
+}
+
+/* The same green rule Dropping Odds uses for a section. */
+.tp-section-head {
+  padding-left: 11px; margin-bottom: 12px; border-left: 3px solid var(--green);
+}
+.tp-section-head h2 { font-size: 17px; font-weight: 660; margin: 0; }
+
+.tp-out {
+  margin: 0; border: 1px solid var(--border); border-radius: var(--r);
+  overflow: hidden; background: var(--bg2);
+}
+.tp-out-row {
+  display: grid; grid-template-columns: 190px 1fr; gap: 18px;
+  padding: 13px 18px; border-bottom: 1px solid var(--border);
+}
+.tp-out-row:last-child { border-bottom: 0; }
+.tp-out-row dt { font-size: 13.5px; font-weight: 600; color: var(--white); }
+.tp-out-row dd { margin: 0; color: var(--grey); font-size: 13.5px; line-height: 1.6; }
+@media (max-width: 640px) {
+  .tp-out-row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* The gate, on a tool page. Not an error panel: nothing broke, the person is
+   just not signed in — and the Lab used to print "✗ ERROR" over a sign-in
+   prompt, which reads as "your theory broke something". */
+.tp-gate {
+  margin: 4px 0 26px; padding: 24px;
+  background: var(--bg2); border: 1px solid rgba(34,197,94,.28);
+  border-radius: var(--r-lg);
+}
+.tp-gate h2 { font-size: 19px; font-weight: 660; margin: 0 0 9px; }
+.tp-gate p { color: var(--grey); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; max-width: 58ch; }
+.tp-gate-actions { display: flex; gap: 9px; flex-wrap: wrap; }
