@@ -89,6 +89,10 @@ export interface ScoutFixture {
   hasTotals: boolean
   hasFirstHalf: boolean
   book: BookQuality | null
+  /** The outcome that shortened most in the last 24 hours, if Gamma knows.
+   *  Null means the change was not published or nothing shortened — see the
+   *  coverage note on `Mkt.chg24h`. */
+  move: OddsMove | null
 }
 
 // ── raw Gamma access ─────────────────────────────────────────────────────────
@@ -268,6 +272,20 @@ export interface Mkt {
   yesTokenId: string | null
   liquidity: number
   volume: number
+  /** Gamma's own price change on the YES leg, in probability (0.045 = 4.5pp).
+   *  Positive = this outcome shortened.
+   *
+   *  🔑 Free. It is already in the bytes of the listing response the sweep
+   *     downloads — the same shape as the live block. A "dropping odds" board
+   *     therefore costs no extra round trip at all.
+   *
+   *  ⚠️ Null on about a third of upcoming fixtures (measured 2026-09-08: 65%
+   *     coverage on future kickoffs against 93% on finished ones), because a
+   *     market listed less than a day ago has no 24-hour change. Null means
+   *     "not known", never "did not move", and the movers board drops those
+   *     rows rather than showing them at zero. */
+  chg24h: number | null
+  chg1h: number | null
 }
 
 function normaliseMarket(raw: Raw): Mkt | null {
@@ -304,6 +322,8 @@ function normaliseMarket(raw: Raw): Mkt | null {
     yesTokenId: tokens[i] != null ? str(tokens[i]) : null,
     liquidity: num(raw.liquidityNum) ?? num(raw.liquidity) ?? 0,
     volume: num(raw.volumeNum) ?? num(raw.volume) ?? 0,
+    chg24h: num(raw.oneDayPriceChange),
+    chg1h: num(raw.oneHourPriceChange),
   }
 }
 
@@ -389,6 +409,68 @@ function oneX2Of(markets: Mkt[], home: string, away: string) {
     else out.away ??= m.yes
   }
   return out
+}
+
+export type Side = 'home' | 'draw' | 'away'
+
+export interface OddsMove {
+  side: Side
+  /** What to print: the team name, or "Draw". */
+  label: string
+  /** Probability now, and 24 hours ago. */
+  now: number
+  before: number
+  /** Change in probability POINTS. Positive = shortened = odds dropped. */
+  pp: number
+  /** The last hour, when Gamma carries it. Null is "not known". */
+  pp1h: number | null
+}
+
+/** The outcome that shortened most over 24 hours.
+ *
+ *  "Dropping odds" is the decimal falling, which is the probability rising —
+ *  so the mover is the biggest POSITIVE change, and a board where everything
+ *  drifted out has no mover at all rather than a least-bad one.
+ *
+ *  Side resolution is deliberately the same code path as `oneX2Of`: a side
+ *  error here does not blunt the card, it names the wrong team on it. */
+function moveOf(markets: Mkt[], home: string, away: string): OddsMove | null {
+  let best: OddsMove | null = null
+
+  const consider = (side: Side, label: string, m: Mkt) => {
+    if (m.chg24h == null || m.yes == null) return
+    const pp = m.chg24h * 100
+    if (pp <= 0) return
+    if (best && pp <= best.pp) return
+    best = {
+      side,
+      label,
+      now: m.yes,
+      before: Math.min(1, Math.max(0, m.yes - m.chg24h)),
+      pp,
+      pp1h: m.chg1h == null ? null : m.chg1h * 100,
+    }
+  }
+
+  for (const m of markets) {
+    if (!isMoneyline(m)) continue
+
+    if (DRAW_RE.test(m.question)) {
+      consider('draw', 'Draw', m)
+      continue
+    }
+
+    const team = moneylineTeam(m.question)
+    if (!team) continue
+    const sh = teamScore(team, home)
+    const sa = teamScore(team, away)
+    if (Math.max(sh, sa) < MIN_SIDE_SCORE) continue
+    if (Math.abs(sh - sa) < 0.05) continue
+    if (sh > sa) consider('home', home, m)
+    else consider('away', away, m)
+  }
+
+  return best
 }
 
 function over25Of(markets: Mkt[]): number | null {
@@ -643,6 +725,7 @@ export function buildFixtures(
       hasTotals: markets.some(isMatchTotal),
       hasFirstHalf: markets.some(isFirstHalfTotal),
       book: gammaBook(markets),
+      move: moveOf(markets, teams.home, teams.away),
     })
     marketsBySlug.set(slug, markets)
   }

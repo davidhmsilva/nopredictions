@@ -136,6 +136,19 @@ export function IconRuler({ className }: P) {
   )
 }
 
+/** Dropping odds — a line falling, with the arrowhead down. The one thing the
+ *  icon must not suggest is a recommendation, so it is a chart movement and
+ *  not a thumbs-up, a flame or a rocket. */
+export function IconDrop({ className }: P) {
+  return (
+    <svg {...box} className={className}>
+      <path d="M4 7l5 5 3-3 5 5" />
+      <path d="M17 10v4h-4" />
+      <path d="M4 19h16" />
+    </svg>
+  )
+}
+
 /** Insights — a page with a line of text and a rule under it. Deliberately not
  *  a newspaper or a lightbulb: this section is measurements, not opinion. */
 export function IconInsights({ className }: P) {

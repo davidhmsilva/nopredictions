@@ -8,7 +8,7 @@
  *     that is a real thing to sell and it is the only thing sold here.
  */
 
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import { useSession } from '../lib/useSession'
@@ -34,28 +34,34 @@ export default function PricingPage() {
   const [period, setPeriod] = useState<Period>('monthly')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [email, setEmail] = useState('')
 
   const isPro = me?.plan === 'pro'
   const signedIn = Boolean(me?.user)
 
-  async function upgrade() {
+  /** 🔑 No account is required to pay.
+   *
+   *  This used to bounce a signed-out visitor to /login and back — asking for
+   *  commitment before the product had been paid for. Now the email goes
+   *  straight into Stripe, the webhook records the subscription against that
+   *  address (db/047), and the account claims it whenever it is created.
+   *  Signing in first still works and takes precedence; it is just no longer
+   *  the toll gate. */
+  async function upgrade(e?: FormEvent) {
+    e?.preventDefault()
     setError(null)
-    if (!signedIn) {
-      window.location.href = '/login?next=%2Fpricing'
-      return
-    }
     setBusy(true)
     try {
       const r = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ period }),
+        body: JSON.stringify({ period, email: signedIn ? undefined : email }),
       })
       const body = await r.json()
       if (!r.ok) throw new Error(body?.error ?? 'Could not start checkout.')
       window.location.href = body.url
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start checkout.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start checkout.')
       setBusy(false)
     }
   }
@@ -147,10 +153,34 @@ export default function PricingPage() {
 
             {isPro ? (
               <Link href="/account" className="np-btn np-plan-cta">You are on Pro — manage billing</Link>
-            ) : (
-              <button className="np-btn np-btn-primary np-plan-cta" onClick={upgrade} disabled={busy}>
-                {busy ? 'Opening checkout…' : signedIn ? `Upgrade — $${price}${unit}` : 'Sign in to upgrade'}
+            ) : signedIn ? (
+              <button className="np-btn np-btn-primary np-plan-cta" onClick={() => upgrade()} disabled={busy}>
+                {busy ? 'Opening checkout…' : `Upgrade — $${price}${unit}`}
               </button>
+            ) : (
+              <form className="np-plan-buy" onSubmit={upgrade}>
+                <label className="np-auth-label" htmlFor="np-buy-email">
+                  Your email — no account needed
+                </label>
+                <input
+                  id="np-buy-email"
+                  className="np-input"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(ev) => setEmail(ev.target.value)}
+                  placeholder="you@example.com"
+                  disabled={busy}
+                />
+                <button className="np-btn np-btn-primary np-plan-cta" type="submit" disabled={busy}>
+                  {busy ? 'Opening checkout…' : `Continue to Stripe — $${price}${unit}`}
+                </button>
+                <p className="np-plan-buy-note">
+                  Pay first, pick a password after. Already have an account?{' '}
+                  <Link href="/login?next=%2Fpricing">Sign in</Link> and it goes on that one.
+                </p>
+              </form>
             )}
             {error && <p className="np-plan-error">{error}</p>}
           </section>

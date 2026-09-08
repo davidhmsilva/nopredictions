@@ -48,11 +48,15 @@ function periodEnd(sub: Stripe.Subscription): Date | null {
   return typeof secs === 'number' ? new Date(secs * 1000) : null
 }
 
+function customerIdOf(sub: Stripe.Subscription): string | null {
+  return typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null
+}
+
 async function userIdFor(sub: Stripe.Subscription): Promise<string | null> {
   const fromMeta = sub.metadata?.supabase_user_id
   if (fromMeta) return fromMeta
 
-  const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id
+  const customerId = customerIdOf(sub)
   if (!customerId) return null
 
   const sql = getSql()
@@ -62,21 +66,89 @@ async function userIdFor(sub: Stripe.Subscription): Promise<string | null> {
   return row?.id ?? null
 }
 
-async function applySubscription(sub: Stripe.Subscription): Promise<string> {
-  const userId = await userIdFor(sub)
-  if (!userId) return 'no matching profile'
+/** The email the subscription belongs to.
+ *
+ *  Checkout puts it in metadata, so that is the cheap path. A subscription
+ *  created by hand in the Stripe dashboard has none, and then the customer
+ *  object is asked — one extra round trip, only on the rare path. */
+async function emailFor(sub: Stripe.Subscription): Promise<string | null> {
+  const fromMeta = sub.metadata?.np_email
+  if (fromMeta) return fromMeta.toLowerCase()
 
+  const customerId = customerIdOf(sub)
+  if (!customerId) return null
+  try {
+    const customer = await stripe().customers.retrieve(customerId)
+    if (customer.deleted) return null
+    return customer.email?.toLowerCase() ?? null
+  } catch {
+    return null
+  }
+}
+
+async function applySubscription(sub: Stripe.Subscription): Promise<string> {
   const paid = PAID.has(sub.status)
   const sql = getSql()
-  await sql`
-    update public.profiles
-       set plan                   = ${paid ? 'pro' : 'free'},
-           plan_status            = ${sub.status},
-           stripe_subscription_id = ${sub.id},
-           current_period_end     = ${periodEnd(sub)}
-     where id = ${userId}
-  `
-  return `${userId} -> ${paid ? 'pro' : 'free'} (${sub.status})`
+  const notes: string[] = []
+
+  // 1 · The grant, keyed by email. Written FIRST and always, because the
+  //     account may not exist yet — that is the whole point of paying before
+  //     signing up (db/047). `handle_new_user` reads it when the account
+  //     arrives, whenever that is.
+  const email = await emailFor(sub)
+  if (email) {
+    await sql`
+      insert into public.pro_grants
+        (email, stripe_customer_id, stripe_subscription_id, plan_status, current_period_end)
+      values (${email}, ${customerIdOf(sub)}, ${sub.id}, ${sub.status}, ${periodEnd(sub)})
+      on conflict (email) do update
+        set stripe_customer_id     = excluded.stripe_customer_id,
+            stripe_subscription_id = excluded.stripe_subscription_id,
+            plan_status            = excluded.plan_status,
+            current_period_end     = excluded.current_period_end,
+            updated_at             = now()
+    `
+    notes.push(`grant ${email} (${sub.status})`)
+  } else {
+    notes.push('no email on the subscription — no grant written')
+  }
+
+  // 2 · The profile, if an account exists. Found by id, and failing that by
+  //     the email — someone who paid first and signed up later has a profile
+  //     that the customer id was never written to.
+  let userId = await userIdFor(sub)
+  if (!userId && email) {
+    const [row] = await sql<{ id: string }[]>`
+      select id from public.profiles where lower(email) = ${email}
+    `
+    userId = row?.id ?? null
+  }
+
+  if (userId) {
+    await sql`
+      update public.profiles
+         set plan                   = ${paid ? 'pro' : 'free'},
+             plan_status            = ${sub.status},
+             stripe_customer_id     = coalesce(stripe_customer_id, ${customerIdOf(sub)}),
+             stripe_subscription_id = ${sub.id},
+             current_period_end     = ${periodEnd(sub)}
+       where id = ${userId}
+    `
+    notes.push(`${userId} -> ${paid ? 'pro' : 'free'}`)
+    // The grant has done its job; mark it so a later sign-up with the same
+    // address cannot claim the same subscription a second time.
+    if (email) {
+      await sql`
+        update public.pro_grants
+           set claimed_by = ${userId}, claimed_at = coalesce(claimed_at, now())
+         where email = ${email}
+      `
+    }
+  } else {
+    notes.push('no account yet — waiting to be claimed')
+  }
+
+  return notes.join(' · ')
 }
 
 export async function POST(request: Request) {

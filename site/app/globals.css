@@ -3465,3 +3465,128 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   margin: 14px 0 0; color: var(--grey2); font-size: 11.5px; line-height: 1.65;
 }
 .np-news-note strong { color: var(--grey); font-weight: 600; }
+
+/* Pay-first checkout, on the Pro card. */
+.np-plan-buy { display: flex; flex-direction: column; gap: 7px; }
+.np-plan-buy .np-auth-label { margin-top: 0; }
+.np-plan-buy .np-btn { margin-top: 4px; }
+.np-plan-buy-note { margin: 4px 0 0; color: var(--grey2); font-size: 11.5px; line-height: 1.55; }
+.np-plan-buy-note a { color: var(--green); text-decoration: none; }
+.np-plan-buy-note a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* The screen after Stripe. */
+.np-welcome { display: flex; justify-content: center; padding: 56px 20px 90px; }
+.np-welcome-card { width: 100%; max-width: 470px; padding: 28px; }
+.np-welcome-card h1 { font-size: 24px; font-weight: 690; margin: 14px 0 12px; }
+.np-welcome-card p { color: var(--grey); font-size: 14px; line-height: 1.65; margin: 0 0 18px; }
+.np-welcome-card strong { color: var(--white); }
+.np-welcome-cta { width: 100%; }
+.np-welcome-note { margin: 16px 0 0 !important; font-size: 12px !important; color: var(--grey2) !important; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Dropping odds
+   Scout's cards, seen through one question: which side did money come for.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.do-page { max-width: 1180px; margin: 0 auto; padding: 32px 20px 80px; }
+.do-head { margin-bottom: 24px; }
+.do-head h1 { font-size: 26px; font-weight: 680; margin: 0 0 9px; }
+.do-head p { max-width: 640px; color: var(--grey); font-size: 14px; line-height: 1.65; margin: 0; }
+.do-error { margin-bottom: 18px; }
+
+.do-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.do-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px; text-decoration: none; color: inherit;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+  transition: border-color .12s, background .12s;
+}
+.do-card:hover { border-color: var(--border2); background: var(--bg3); }
+
+.do-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.do-comp {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--grey);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.do-kick {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--grey2);
+}
+.do-kick-icn { width: 11px; height: 11px; opacity: .6; }
+
+.do-teams {
+  display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px;
+  align-items: center; font-size: 13.5px; font-weight: 560; line-height: 1.3;
+}
+.do-teams > span:first-child { text-align: right; }
+.do-teams > span:last-child { text-align: left; }
+/* The side that shortened, named in the teams line as well as below it — the
+   card should be readable without reading the label. */
+.do-teams .is-backed { color: var(--green); }
+.do-v { color: var(--grey2); font-size: 11px; }
+
+.do-move {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
+  align-items: center; padding: 11px 12px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.do-move-side { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.do-move-label {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; color: var(--grey2);
+}
+.do-move-side b {
+  font-size: 13px; font-weight: 620; color: var(--green);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.do-move-odds {
+  grid-column: 2; display: inline-flex; align-items: baseline; gap: 6px;
+  font-size: 14px;
+}
+.do-was { color: var(--grey2); text-decoration: line-through; font-size: 12.5px; }
+.do-arrow { color: var(--grey2); font-size: 11px; }
+.do-now { color: var(--white); font-weight: 640; }
+.do-move-pp {
+  grid-column: 2; justify-self: end;
+  font-size: 11px; font-weight: 600; color: var(--green);
+}
+
+.do-foot {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--grey2);
+}
+.do-1h { color: var(--grey); }
+.do-1h.is-up { color: var(--green); }
+.do-go { margin-left: auto; color: var(--grey); }
+.do-card:hover .do-go { color: var(--green); }
+
+.do-meta {
+  margin-top: 20px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg2);
+  color: var(--grey2); font-size: 12px; line-height: 1.75;
+}
+.do-meta b { color: var(--grey); }
+
+.do-honest { margin-top: 16px; font-size: 13px; line-height: 1.7; }
+.do-honest a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The thin-book section: present, secondary, and never leading. */
+.do-thin { margin-top: 22px; }
+.do-thin-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; padding: 11px 14px; cursor: pointer;
+  background: var(--bg2); border: 1px dashed var(--border2); border-radius: var(--r-sm);
+  color: var(--grey); font-family: var(--font); font-size: 12.5px; text-align: left;
+}
+.do-thin-toggle:hover { color: var(--white); border-color: var(--grey2); }
+.do-thin-toggle b { color: var(--white); }
+.do-thin-chev { color: var(--grey2); font-size: 9px; }
+.do-thin-why {
+  margin: 12px 0 14px; color: var(--grey); font-size: 12.5px; line-height: 1.7;
+}
+.do-thin-why b { color: var(--white); }
+.do-thin-cite { display: block; margin-top: 6px; color: var(--grey2); font-size: 11.5px; }

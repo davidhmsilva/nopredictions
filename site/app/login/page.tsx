@@ -41,8 +41,13 @@ function LoginPageInner() {
   const params = useSearchParams()
   const next = safeNext(params.get('next'))
 
-  const [mode, setMode] = useState<Mode>('signin')
-  const [email, setEmail] = useState('')
+  const [mode, setMode] = useState<Mode>(
+    params.get('mode') === 'signup' ? 'signup' : 'signin'
+  )
+  // Prefilled by /welcome with the address the payment was made on. Using a
+  // different one here puts the subscription on the wrong account, so the
+  // field is filled rather than left for the reader to remember.
+  const [email, setEmail] = useState(params.get('email') ?? '')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(
@@ -129,9 +134,11 @@ function LoginPageInner() {
             {mode === 'signin' ? 'Sign in' : 'Create an account'}
           </h1>
           <p className="np-auth-sub">
-            {mode === 'signin'
-              ? 'Scout, Agent and the Game Center never needed one. This is for the Lab and the Wallet.'
-              : 'Free: three Lab tests and three wallet reads a day. No card.'}
+            {params.get('email')
+              ? 'Use this address — it is the one the subscription is held against.'
+              : mode === 'signin'
+                ? 'Scout, Agent and the Game Center never needed one. This is for the Lab and the Wallet.'
+                : 'Free: three Lab tests and three wallet reads a day. No card.'}
           </p>
 
           {GOOGLE_ON && (

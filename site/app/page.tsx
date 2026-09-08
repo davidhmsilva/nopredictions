@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { AppShell } from './components/AppShell'
 import {
   IconAll,
-  IconBook,
   IconClock,
+  IconDrop,
   IconInsights,
   IconLive,
   IconStar,
@@ -130,7 +130,7 @@ function sortFixtures(fs: ScoutFixture[], key: SortKey): ScoutFixture[] {
 
 // ── filters ──────────────────────────────────────────────────────────────────
 
-type Filter = 'all' | 'live' | 'soon' | 'clean' | 'watchlist'
+type Filter = 'all' | 'live' | 'soon' | 'watchlist'
 
 const FILTERS: {
   id: Filter
@@ -141,17 +141,35 @@ const FILTERS: {
   { id: 'all', label: 'All', Icon: IconAll },
   { id: 'live', label: 'In play', Icon: IconLive, cls: 'is-live-icn' },
   { id: 'soon', label: 'Starting soon', Icon: IconClock },
-  { id: 'clean', label: 'Clean books', Icon: IconBook },
   { id: 'watchlist', label: 'Watchlist', Icon: IconStar },
 ]
 
-/** Insights sits in this row, in the slot the "Measured" filter used to hold.
+/** The two links that share this row with the filters.
  *
- *  ⚠️ It is the odd one out and is drawn that way on purpose. Every other chip
- *     here narrows the list below; this one leaves the page. A link that looks
- *     exactly like a filter is a link people click by accident, so it gets its
- *     own class, an arrow, and it never takes the selected state. */
-const INSIGHTS_AFTER: Filter = 'clean'
+ *  ⚠️ They are the odd ones out and are drawn that way on purpose. Every chip
+ *     to their left narrows the list below; these leave the page. A link that
+ *     looks exactly like a filter is a link people click by accident, so they
+ *     get their own class, a divider, an arrow, and never the selected state.
+ *
+ *  They sit after "Starting soon" because that is where "Clean books" and
+ *  "Measured" used to be — both filters the board no longer needs, since the
+ *  grade is a column on every row anyway. */
+const LINKS: { href: string; label: string; Icon: (p: { className?: string }) => JSX.Element; title: string }[] = [
+  {
+    href: '/dropping-odds',
+    label: 'Dropping odds',
+    Icon: IconDrop,
+    title: 'Where the market moved in the last 24 hours — pre-match, and only on books with real money through them',
+  },
+  {
+    href: '/insights',
+    label: 'Insights',
+    Icon: IconInsights,
+    title: 'What we measured, and what it said — including the results that went the wrong way',
+  },
+]
+
+const LINKS_AFTER: Filter = 'soon'
 
 /** "Starting soon" is the next two hours. Long enough to cover a build-up,
  *  short enough that the list is still a list. */
@@ -365,8 +383,6 @@ export default function ScoutPage() {
           const dt = new Date(f.kickoff).getTime() - Date.now()
           return dt > 0 && dt <= SOON_MS
         }
-        case 'clean':
-          return f.book?.grade === 'clean'
         case 'watchlist':
           return watchlist.includes(f.slug)
         default:
@@ -416,17 +432,14 @@ export default function ScoutPage() {
                     <span className="sc-cat-n np-num">{watchlist.length}</span>
                   )}
                 </button>
-                {f.id === INSIGHTS_AFTER && (
-                  <Link
-                    href="/insights"
-                    className="sc-cat is-link"
-                    title="What we measured, and what it said — including the results that went the wrong way"
-                  >
-                    <IconInsights className="sc-cat-icn" />
-                    Insights
-                    <span className="sc-cat-go" aria-hidden="true">→</span>
-                  </Link>
-                )}
+                {f.id === LINKS_AFTER &&
+                  LINKS.map((l) => (
+                    <Link key={l.href} href={l.href} className="sc-cat is-link" title={l.title}>
+                      <l.Icon className="sc-cat-icn" />
+                      {l.label}
+                      <span className="sc-cat-go" aria-hidden="true">→</span>
+                    </Link>
+                  ))}
               </Fragment>
             ))}
           </div>

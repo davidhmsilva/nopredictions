@@ -123,8 +123,31 @@ and only once SMTP actually delivers.
    `checkout.session.completed`, `customer.subscription.created`,
    `customer.subscription.updated`, `customer.subscription.deleted`.
    Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
-5. Redeploy, then buy Pro with card `4242 4242 4242 4242`. `/account` should
-   read PRO and the Lab's counter should disappear.
+5. Redeploy, then buy Pro with card `4242 4242 4242 4242`.
+
+**Test BOTH orders — they are different code paths and only one of them is the
+common case.**
+
+- *Signed in, then pay.* `/account` should read PRO and the Lab's counter
+  should disappear.
+- *Pay first, no account* — the funnel the pricing page leads with. Type an
+  email on `/pricing`, pay, land on `/welcome`, then create an account with
+  that same address. It should be Pro the moment you do.
+
+⚠️ The pay-first path is written and **has never been run end to end**, because
+there is no Stripe account yet — the checkout route refuses at the keys check
+before anything else executes. What HAS been verified is the half that decides
+who gets Pro: `active` and `trialing` grants resolve to `pro`, `canceled` and
+`past_due` to `free` (db/047, checked against four synthetic grants). The
+untested half is Stripe's own round trip.
+
+⚠️ **`pro_grants` (db/047) is why paying without an account works.** A payment
+can arrive for an email that has no `auth.users` row yet, and `profiles.id`
+references that table, so there is nowhere to write it. The webhook therefore
+always writes the grant keyed by EMAIL, and `handle_new_user()` claims it when
+the account is created — in either order, at any later time. Email is only safe
+as the join key because Supabase issues it: the grant goes to whoever proves
+control of the address through auth, never to whoever types it.
 
 ⚠️ **The webhook is the only thing that grants Pro.** `profiles` has no UPDATE
 policy for the client (db/044), so a browser cannot set its own plan. If the
