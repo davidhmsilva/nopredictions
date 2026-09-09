@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { AppNav, AppFooter } from '../../components/AppShell'
+import { AppShell } from '../../components/AppShell'
 import { WalletReport } from '../../components/WalletReport'
+import { WalletContents } from '../../components/WalletContents'
 import type { WalletProfile } from '../../lib/wallet'
 
 // A big wallet is tens of thousands of fills; the request runs for a while and
@@ -68,10 +69,8 @@ export default function WalletPage() {
   }, [address])
 
   return (
-    <div className="scanner-page">
-      <AppNav />
-
-      <main className="scanner-main">
+    <AppShell>
+      <div className="wr-page">
         <button className="wallet-back" onClick={() => router.push('/wallet')}>
           ← ANALYSE ANOTHER WALLET
         </button>
@@ -119,11 +118,13 @@ export default function WalletPage() {
           </div>
         )}
 
-        {profile && <WalletReport p={profile} />}
-      </main>
-
-
-      <AppFooter />
-    </div>
+        {profile && (
+          <>
+            <WalletContents />
+            <WalletReport p={profile} />
+          </>
+        )}
+      </div>
+    </AppShell>
   )
 }

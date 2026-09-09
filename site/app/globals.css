@@ -38,6 +38,11 @@
                'Liberation Mono', monospace;
 
   /* Shape */
+  /* The sticky nav's height, including its border. Four things stick beneath
+     it and each needs to clear it; before this they each guessed, and three of
+     them guessed 0 because `overflow-x: hidden` meant nothing stuck at all. */
+  --nav-h: 61px;
+
   --r:    8px;
   --r-sm: 6px;
   --r-lg: 12px;
@@ -59,7 +64,15 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
-  overflow-x: hidden;
+  /* ⚠️ `clip`, not `hidden`, and the difference is not cosmetic.
+     `overflow-x: hidden` makes this element a SCROLL CONTAINER, and a scroll
+     container between a sticky element and the viewport silently breaks
+     `position: sticky` for everything inside it. Four elements on this site are
+     sticky — the nav, the Game Center's state bar, the Scout table header and
+     the wallet report's contents strip — and none of them stuck. `clip` cuts
+     the overflow without creating a scroll container, which is what was wanted
+     here in the first place. */
+  overflow-x: clip;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1935,7 +1948,7 @@ button { font-family: var(--font); }
 
 /* state bar — sticky, because it is what you look up to check */
 .gc-bar {
-  position: sticky; top: 0; z-index: 20;
+  position: sticky; top: var(--nav-h); z-index: 20;
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 8px 16px;
   background: var(--bg2); border: 1px solid var(--border);
@@ -2159,14 +2172,27 @@ button { font-family: var(--font); }
 .wallet-stat-sub { font-size: 10px; color: var(--grey); margin-top: 5px; }
 
 .wallet-section { margin-bottom: 40px; }
-.wallet-h2 {
-  font-size: 12px; letter-spacing: 3px; color: var(--accent);
-  text-transform: uppercase; margin: 0 0 16px;
-  padding-bottom: 10px; border-bottom: 1px solid var(--border);
-  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+
+/* The report's container, since the page stopped borrowing `.scanner-main`
+   from a page that was deleted in the SaaS split. Wider than the reading pages
+   on purpose: seven of these sections are data tables. */
+.wr-page { max-width: 1060px; margin: 0 auto; padding: 28px 20px 80px; }
+
+/* The section heading, in the same shape Dropping Odds, the tool pages and the
+   Game Center use. It was a 12px green uppercase label with a rule underneath
+   — its own idea, on a site that had settled on one. */
+.wr-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  margin: 0 0 16px; padding-left: 11px; border-left: 3px solid var(--green);
 }
-.wallet-h2-sub {
-  font-size: 10px; letter-spacing: 1px; color: var(--grey); text-transform: none;
+.wr-h2 { font-size: 17px; font-weight: 660; margin: 0; }
+.wr-h2-sub {
+  margin: 0; color: var(--grey2);
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em;
+}
+@media (max-width: 700px) {
+  .wr-head { flex-direction: column; gap: 4px; }
 }
 
 .wallet-prose p { font-size: 13px; line-height: 1.9; color: var(--white); margin: 0 0 14px; }
@@ -2257,7 +2283,6 @@ button { font-family: var(--font); }
   .wallet-head { flex-direction: column; align-items: flex-start; }
   .wallet-name { font-size: 18px; }
   .wallet-headline { font-size: 13px; padding-left: 14px; }
-  .wallet-h2 { flex-direction: column; gap: 4px; }
 }
 
 .wallet-banner {
@@ -2440,6 +2465,7 @@ button { font-family: var(--font); }
 
 /* ── responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
+  :root { --nav-h: 55px; }
   .np-nav-inner { height: 54px; gap: 12px; padding: 0 14px; }
   .np-tabs, .np-brand-sub { display: none; }
   .np-nav-right { margin-left: auto; }
@@ -2550,7 +2576,7 @@ button { font-family: var(--font); }
 .sc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 .sc-table thead th {
-  position: sticky; top: 60px; z-index: 10;
+  position: sticky; top: var(--nav-h); z-index: 10;
   background: var(--bg);
   text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: .07em;
   text-transform: uppercase; color: var(--grey2);
@@ -4170,3 +4196,41 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 @media (max-width: 560px) {
   .ag-step { grid-template-columns: 1fr; gap: 10px; }
 }
+
+/* ── the report's contents strip ───────────────────────────────────────────── */
+/*
+   The wallet report runs to ~4,800px — five screens, eleven sections — and had
+   no way through it but scrolling. This sticks under the header and marks where
+   you are. The section list is read from the DOM, never declared, because the
+   report renders different sections for different wallets.
+*/
+.wr-toc {
+  position: sticky; top: var(--nav-h); z-index: 15;
+  margin: 0 -20px 22px; padding: 0 20px;
+  background: rgba(11,13,16,.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.wr-toc-inner {
+  display: flex; gap: 4px; overflow-x: auto; padding: 9px 0;
+  scrollbar-width: none;
+}
+.wr-toc-inner::-webkit-scrollbar { display: none; }
+
+.wr-toc-link {
+  flex: none; padding: 5px 11px; border-radius: 999px;
+  color: var(--grey2); text-decoration: none; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .03em;
+  border: 1px solid transparent;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.wr-toc-link:hover { color: var(--white); background: var(--bg3); }
+.wr-toc-link.is-on {
+  color: var(--green); background: rgba(34,197,94,.09);
+  border-color: rgba(34,197,94,.35);
+}
+
+/* An anchored heading must not land under the sticky strip. */
+/* Clears the nav and the contents strip. ⚠️ Coupled to `line()` in
+   WalletContents.tsx, which decides which entry is highlighted — it has to sit
+   below where this lands a heading, or a click marks the previous section. */
+.wallet-section[id] { scroll-margin-top: calc(var(--nav-h) + 52px); }

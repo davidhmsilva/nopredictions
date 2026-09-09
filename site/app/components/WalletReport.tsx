@@ -54,13 +54,23 @@ function Stat({ label, value, tone, sub }: { label: string; value: string; tone?
   )
 }
 
+/** A heading turned into an anchor. Derived from the title rather than hand
+ *  written, so a section cannot be renamed into a broken link. */
+export function sectionId(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section className="wallet-section">
-      <h2 className="wallet-h2">
-        {title}
-        {sub ? <span className="wallet-h2-sub">{sub}</span> : null}
-      </h2>
+    <section className="wallet-section" id={sectionId(title)}>
+      {/* ⚠️ The subtitle used to sit INSIDE the h2, which made the accessible
+          name "By entry pricewhere the return actually lives" — one heading,
+          read as one run-on string. It is a sibling now, so the heading is the
+          heading and the gloss is a gloss. */}
+      <div className="wr-head">
+        <h2 className="wr-h2">{title}</h2>
+        {sub ? <p className="wr-h2-sub">{sub}</p> : null}
+      </div>
       {children}
     </section>
   )
