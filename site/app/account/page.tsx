@@ -126,7 +126,7 @@ function AccountPageInner() {
             )}
             <button className="np-btn" onClick={signOut}>Sign out</button>
           </div>
-          {error && <p className="np-plan-error">{error}</p>}
+          {error && <p className="np-acct-error">{error}</p>}
         </section>
       </div>
     </AppShell>

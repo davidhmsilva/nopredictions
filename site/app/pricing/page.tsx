@@ -4,8 +4,14 @@
  *
  *  🔑 The claim this page must never make is that Pro finds you an edge. The
  *     agent is paper, no arm is near its verdict gate, and that is written on
- *     /agent in a banner. What Pro removes is a limit on tools that measure —
- *     that is a real thing to sell and it is the only thing sold here.
+ *     /agent/ours in a banner. What Pro removes is a limit on tools that
+ *     MEASURE — that is a real thing to sell, and it is the only thing sold
+ *     here.
+ *
+ *  The two cards used to carry two independent lists, which meant the rows did
+ *  not line up and nobody could actually compare the plans — the one job a
+ *  pricing page has. The cards now carry only what defines each tier, and the
+ *  comparison happens in one aligned table underneath.
  */
 
 import { useState, type FormEvent } from 'react'
@@ -18,16 +24,33 @@ const YEARLY_USD = 190
 
 type Period = 'monthly' | 'yearly'
 
-const FREE_ROWS = [
-  ['Scout — every football board on Polymarket', true],
-  ['Live clock, score and book grade on every fixture', true],
-  ['Game Center on any fixture', true],
-  ['The agent’s full paper record', true],
-  ['Lab — backtest a theory over 111,475 games', '3 a day'],
-  ['Wallet — rebuild any trader’s record', '3 a day'],
-  ['Watchlist, kept in this browser', true],
-  ['Watchlist, synced across every device', false],
-] as const
+/** One row per thing that EXISTS. Anything planned goes under the table, named
+ *  as planned — a matrix row that is a dash in both columns reads as "Pro does
+ *  not get this either", which is true but is not what a comparison is for. */
+const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
+  { k: 'Scout — every football board on Polymarket', free: '✓', pro: '✓', href: '/' },
+  { k: 'Live clock, score and book quality on every fixture', free: '✓', pro: '✓' },
+  { k: 'Game Center on any fixture', free: '✓', pro: '✓' },
+  { k: 'Dropping odds — where the money went', free: '✓', pro: '✓', href: '/dropping-odds' },
+  { k: 'Insights — what we measured, including the failures', free: '✓', pro: '✓', href: '/insights' },
+  { k: 'Our agent’s full paper record', free: '✓', pro: '✓', href: '/agent/ours' },
+  { k: 'Lab — a theory replayed over 111,475 games', free: '3 a day', pro: 'Unlimited', href: '/lab' },
+  { k: 'Wallet — any trader’s record rebuilt from their fills', free: '3 a day', pro: 'Unlimited', href: '/wallet' },
+  { k: 'Watchlist', free: 'This browser', pro: 'Every device' },
+]
+
+/** The three lines on each card. Short on purpose: the card is the decision,
+ *  the table below is the detail. */
+const FREE_POINTS = [
+  'The whole board, the Game Center, the movers and the record',
+  'Three Lab tests and three wallet reads a day',
+  'No card, ever',
+]
+const PRO_POINTS = [
+  'Everything in Free',
+  'Lab and Wallet with no daily limit',
+  'Watchlist that follows you to any device',
+]
 
 export default function PricingPage() {
   const { me } = useSession()
@@ -71,99 +94,93 @@ export default function PricingPage() {
 
   return (
     <AppShell>
-      <div className="np-pricing">
-        <header className="np-pricing-head">
-          <h1>Two plans</h1>
-          <p>
-            The board is free and always will be — it is how anyone decides the site
-            is worth an account. Pro removes the daily limit on the two tools that do
-            real work: the Lab and the Wallet.
+      <div className="pr-page">
+        <header className="tp-head">
+          <span className="tp-eyebrow">PRICING</span>
+          <h1 className="tp-h1">The board is free. The tools have a limit.</h1>
+          <p className="tp-sub">
+            Everything you can look at costs nothing and always will — it is how
+            anyone decides this site is worth an account. What Pro removes is the
+            daily limit on the two things that do real work.
           </p>
         </header>
 
-        <div className="np-pricing-toggle" role="group" aria-label="Billing period">
+        <div className="pr-toggle" role="group" aria-label="Billing period">
           <button
             className={period === 'monthly' ? 'is-on' : ''}
             onClick={() => setPeriod('monthly')}
+            aria-pressed={period === 'monthly'}
           >
             Monthly
           </button>
           <button
             className={period === 'yearly' ? 'is-on' : ''}
             onClick={() => setPeriod('yearly')}
+            aria-pressed={period === 'yearly'}
           >
-            Yearly <span className="np-pricing-save">2 months free</span>
+            Yearly <span className="pr-save">2 months free</span>
           </button>
         </div>
 
-        <div className="np-pricing-grid">
-          <section className="np-card np-plan">
-            <h2 className="np-plan-name">Free</h2>
-            <div className="np-plan-price"><span className="np-num">$0</span></div>
-            <p className="np-plan-note">No card. An account takes an email and a password.</p>
-            <ul className="np-plan-rows">
-              {FREE_ROWS.map(([label, value]) => (
-                <li key={label} className={value === false ? 'is-off' : ''}>
-                  <span className="np-plan-mark">
-                    {value === false ? '—' : value === true ? '✓' : ''}
-                  </span>
-                  <span>{label}</span>
-                  {typeof value === 'string' && (
-                    <b className="np-plan-qty np-num">{value}</b>
-                  )}
-                </li>
+        {/* ── the decision ── */}
+        <div className="pr-cards">
+          <section className="pr-card">
+            <h2 className="pr-name">Free</h2>
+            <div className="pr-price">
+              <span className="np-num">$0</span>
+            </div>
+            <p className="pr-note">An email and a password. No card.</p>
+
+            <ul className="pr-points">
+              {FREE_POINTS.map((p) => (
+                <li key={p}>{p}</li>
               ))}
             </ul>
-            {!signedIn && (
-              <Link href="/login?next=%2Fpricing" className="np-btn np-plan-cta">
+
+            {signedIn ? (
+              <div className="pr-cta-done">You are on this plan.</div>
+            ) : (
+              <Link href="/login?mode=signup&next=%2Flab" className="np-btn pr-cta">
                 Create a free account
               </Link>
             )}
           </section>
 
-          <section className="np-card np-plan is-pro">
-            <h2 className="np-plan-name">
-              Pro <span className="np-badge is-good">UNLIMITED</span>
+          <section className="pr-card is-pro">
+            <h2 className="pr-name">
+              Pro <span className="np-badge is-good">NO LIMIT</span>
             </h2>
-            <div className="np-plan-price">
+            <div className="pr-price">
               <span className="np-num">${price}</span>
               <small>{unit}</small>
             </div>
-            <p className="np-plan-note">
+            <p className="pr-note">
               {period === 'yearly'
-                ? `$${(YEARLY_USD / 12).toFixed(2)} a month, billed once.`
+                ? `$${(YEARLY_USD / 12).toFixed(2)} a month, billed once. Cancel any time.`
                 : 'Cancel any time, from Stripe’s own portal.'}
             </p>
-            <ul className="np-plan-rows">
-              <li><span className="np-plan-mark">✓</span><span>Everything in Free</span></li>
-              <li><span className="np-plan-mark">✓</span><span>Lab — unlimited backtests</span></li>
-              <li><span className="np-plan-mark">✓</span><span>Wallet — unlimited trader reads</span></li>
-              <li><span className="np-plan-mark">✓</span><span>Watchlist synced across every device</span></li>
+
+            <ul className="pr-points">
+              {PRO_POINTS.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
             </ul>
-            {/* Alerts are built in the schema and NOT in the product: there is
-                no email delivery yet, so they are named as what is next rather
-                than listed as something bought. This site removed a newsletter
-                form once for exactly this — it set local state, showed a tick,
-                and sent nowhere. */}
-            <p className="np-plan-next">
-              <b>Next for Pro:</b> alerts when a fixture kicks off or its book
-              first grades clean. Not built yet, and not part of what you are
-              paying for today.
-            </p>
 
             {isPro ? (
-              <Link href="/account" className="np-btn np-plan-cta">You are on Pro — manage billing</Link>
+              <Link href="/account" className="np-btn pr-cta">
+                You are on Pro — manage billing
+              </Link>
             ) : signedIn ? (
-              <button className="np-btn np-btn-primary np-plan-cta" onClick={() => upgrade()} disabled={busy}>
+              <button className="np-btn np-btn-primary pr-cta" onClick={() => upgrade()} disabled={busy}>
                 {busy ? 'Opening checkout…' : `Upgrade — $${price}${unit}`}
               </button>
             ) : (
-              <form className="np-plan-buy" onSubmit={upgrade}>
-                <label className="np-auth-label" htmlFor="np-buy-email">
+              <form className="pr-buy" onSubmit={upgrade}>
+                <label className="pr-buy-label" htmlFor="pr-email">
                   Your email — no account needed
                 </label>
                 <input
-                  id="np-buy-email"
+                  id="pr-email"
                   className="np-input"
                   type="email"
                   required
@@ -173,26 +190,63 @@ export default function PricingPage() {
                   placeholder="you@example.com"
                   disabled={busy}
                 />
-                <button className="np-btn np-btn-primary np-plan-cta" type="submit" disabled={busy}>
+                <button className="np-btn np-btn-primary pr-cta" type="submit" disabled={busy}>
                   {busy ? 'Opening checkout…' : `Continue to Stripe — $${price}${unit}`}
                 </button>
-                <p className="np-plan-buy-note">
+                <p className="pr-buy-note">
                   Pay first, pick a password after. Already have an account?{' '}
                   <Link href="/login?next=%2Fpricing">Sign in</Link> and it goes on that one.
                 </p>
               </form>
             )}
-            {error && <p className="np-plan-error">{error}</p>}
+            {error && <p className="pr-error">{error}</p>}
           </section>
         </div>
 
-        <div className="np-note np-pricing-honest">
+        {/* ── the comparison, aligned so it can actually be read across ── */}
+        <section className="pr-compare">
+          <div className="tp-section-head">
+            <h2>Line by line</h2>
+          </div>
+          <div className="pr-table">
+            <div className="pr-row is-head">
+              <span />
+              <span>Free</span>
+              <span>Pro</span>
+            </div>
+            {MATRIX.map((m) => (
+              <div key={m.k} className="pr-row">
+                <span className="pr-feat">
+                  {m.href ? <Link href={m.href}>{m.k}</Link> : m.k}
+                </span>
+                <span className={`pr-val${m.free === '✓' ? ' is-tick' : ''}`}>{m.free}</span>
+                <span className={`pr-val${m.pro === '✓' ? ' is-tick' : ''} is-pro`}>{m.pro}</span>
+              </div>
+            ))}
+          </div>
+          <p className="pr-reset">
+            Free counts reset at 00:00 UTC. A refused run never costs you one — if a
+            test fails on our side, you get it back.
+          </p>
+        </section>
+
+        {/* ⚠️ Alerts are in the schema (db/044) and nothing sends anything. They
+            are named here as planned rather than sitting in the table, because a
+            matrix row that is a dash in both columns reads as a Pro limitation
+            instead of an unbuilt feature. */}
+        <div className="pr-next">
+          <strong>Not built yet, and not part of what you would be paying for:</strong>{' '}
+          alerts when a fixture kicks off or its book first grades clean. When they
+          exist they go to Pro, and this page will move them into the table above.
+        </div>
+
+        <div className="np-note pr-honest">
           <strong>What Pro is not.</strong> It is not a tip service and it does not give
           you the agent’s picks to follow. The agent trades on paper, no strategy is
-          near its verdict gate, and <Link href="/agent">its own tab says so</Link>.
-          What you are paying for is unlimited use of tools that measure — a backtest
-          against Pinnacle’s closing line, and a trader’s record rebuilt from their
-          actual fills.
+          near its verdict gate, and{' '}
+          <Link href="/agent/ours">its own record says so</Link>. What you are paying
+          for is unlimited use of tools that measure — a backtest against Pinnacle’s
+          closing line, and a trader’s record rebuilt from their actual fills.
         </div>
       </div>
     </AppShell>
