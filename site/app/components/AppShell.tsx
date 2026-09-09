@@ -26,7 +26,7 @@ export const TABS: {
 }[] = [
   { href: '/',       label: 'Scout',  hint: "Today's boards", Icon: IconBoard },
   { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
-  { href: '/agent',  label: 'Agent',  hint: 'In testing',     Icon: IconAgent },
+  { href: '/agent',  label: 'Agent',  hint: 'Yours, and ours', Icon: IconAgent },
   { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
 ]
 
@@ -334,7 +334,12 @@ export function AppNav() {
                 aria-current={isActive(pathname, t.href) ? 'page' : undefined}
               >
                 {t.label}
-                {t.href === '/agent' && <span className="np-tab-flag">TESTING</span>}
+                {/* The TESTING flag used to sit here. It labelled the paper
+                    record, and since 2026-09-09 that record lives at
+                    /agent/ours — /agent is the empty state, and flagging "you
+                    do not have an agent" as in testing says nothing. The IN
+                    TESTING banner is still on the record itself, which is the
+                    thing it was ever about. */}
               </Link>
             ))}
           </nav>

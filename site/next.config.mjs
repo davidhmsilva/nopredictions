@@ -22,7 +22,11 @@ const nextConfig = {
       // old landing page as "LIVE TRACK RECORD" and `/test` was the hidden
       // Hypothesis Tester people were sent to by hand — both are out there in
       // links we do not control, so neither may 404.
-      { source: '/dashboard', destination: '/agent', permanent: true },
+      // ⚠️ /agent is the empty state since 2026-09-09, not the record. The old
+      //    landing page linked here as "LIVE TRACK RECORD", so it has to reach
+      //    the record — sending it to a page about creating an agent would be
+      //    the wrong answer to the link someone actually clicked.
+      { source: '/dashboard', destination: '/agent/ours', permanent: true },
       { source: '/test', destination: '/lab', permanent: true },
       // The scanner is gone rather than moved: the Game Center does what it did
       // and takes the same pasted URL, so its traffic belongs on the board.

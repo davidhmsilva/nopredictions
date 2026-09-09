@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AppNav, AppFooter } from '../../components/AppShell'
+import { AppShell } from '../../components/AppShell'
 import type {
   GameData,
   Headline,
@@ -10,8 +10,8 @@ import type {
   PricePoint,
 } from '../../lib/gamecenter'
 import { tradeable, type Look, type Pulse } from '../../lib/looks'
-
-const WATCHLIST_KEY = 'np_watchlist'
+import { useSession } from '../../lib/useSession'
+import { useWatchlist } from '../../lib/useWatchlist'
 
 // The user thinks in decimal odds, so every probability on this page carries the
 // price. Outside this band the decimal stops describing a bet anyone would
@@ -110,7 +110,7 @@ function OddsTiles({ headlines }: { headlines: Headline[] }) {
   if (headlines.length === 0) return null
   return (
     <section className="gc-section">
-      <div className="gc-eyebrow">The main markets</div>
+      <h2 className="gc-h2">The main markets</h2>
       <div className="gc-tiles">
         {headlines.map((h) => (
           <div key={h.label} className={`gc-tile${h.isMid ? ' is-mid' : ''}`}>
@@ -214,9 +214,9 @@ function PriceChart({
 
   return (
     <section className="gc-section">
-      <div className="gc-eyebrow">
+      <h2 className="gc-h2">
         Price · last {hours > 0 ? `${hours}h` : '24h'}
-      </div>
+      </h2>
 
       {geom ? (
         <div className="gc-chart">
@@ -290,7 +290,7 @@ function Momentum({ s, home, away }: { s: LiveStats; home: string; away: string 
 
   return (
     <section className="gc-section">
-      <div className="gc-eyebrow">How it is going</div>
+      <h2 className="gc-h2">How it is going</h2>
       {/* The rails are two colours and nothing else says which is which, so the
           names carry the key. */}
       <div className="gc-mom-head">
@@ -328,7 +328,7 @@ function Pulse({ pulse }: { pulse: Pulse[] }) {
   if (pulse.length === 0) return null
   return (
     <section className="gc-section">
-      <div className="gc-eyebrow">Moved in the last 20 minutes</div>
+      <h2 className="gc-h2">Moved in the last 20 minutes</h2>
       <ul className="gc-pulse-list">
         {pulse.slice(0, 5).map((p, i) => (
           <li key={i} className={p.movePp > 0 ? 'gc-pos' : 'gc-neg'}>
@@ -422,7 +422,7 @@ function Looks({ data }: { data: GameData }) {
 
   return (
     <section className="gc-section">
-      <div className="gc-eyebrow">Worth a look</div>
+      <h2 className="gc-h2">Worth a look</h2>
 
       {live.length === 0 ? (
         <div className="gc-nothing">
@@ -534,7 +534,7 @@ function Board({ groups }: { groups: MarketGroup[] }) {
 
   return (
     <section className="gc-section">
-      <div className="gc-eyebrow">The board</div>
+      <h2 className="gc-h2">The board</h2>
       <p className="gc-quiet">
         {rows.length} of {quoted} quoted outcomes have a real order book. The rest are Gamma
         mids — a number, not a price you can pay.
@@ -622,9 +622,16 @@ export default function GamePage({ params }: { params: { slug: string } }) {
   const [data, setData] = useState<GameData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [watched, setWatched] = useState(false)
-
   const slug = params.slug
+
+  // ⚠️ This page used to read and write `np_watchlist` in localStorage itself.
+  //    It therefore agreed with the board by accident and not by design — and
+  //    once Pro gained a synced watchlist, a star added here stayed on this
+  //    device while one added on the board followed the account. One hook, one
+  //    list.
+  const { me } = useSession()
+  const { slugs, toggle } = useWatchlist(me?.plan === 'pro')
+  const watched = slugs.includes(slug)
 
   const load = useCallback(async () => {
     try {
@@ -653,32 +660,10 @@ export default function GamePage({ params }: { params: { slug: string } }) {
     return () => clearInterval(id)
   }, [isLive, load])
 
-  useEffect(() => {
-    try {
-      const list = JSON.parse(localStorage.getItem(WATCHLIST_KEY) || '[]') as string[]
-      setWatched(list.includes(slug))
-    } catch {
-      /* a corrupt watchlist is not worth a broken page */
-    }
-  }, [slug])
-
-  function toggleWatch() {
-    try {
-      const list = JSON.parse(localStorage.getItem(WATCHLIST_KEY) || '[]') as string[]
-      const next = list.includes(slug) ? list.filter((s) => s !== slug) : [...list, slug]
-      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next))
-      setWatched(next.includes(slug))
-    } catch {
-      /* ignore */
-    }
-  }
-
 
   return (
-    <div className="scanner-page">
-      <AppNav />
-
-      <main className="scanner-main gc-main">
+    <AppShell>
+      <div className="gc-main">
         {loading && (
           <div className="gc-loading">
             <span className="scan-spinner" /> loading fixture…
@@ -699,7 +684,10 @@ export default function GamePage({ params }: { params: { slug: string } }) {
             <Board groups={data.groups} />
 
             <div className="gc-actions">
-              <button className="gc-action" onClick={toggleWatch}>
+              <button
+                className="gc-action"
+                onClick={() => toggle(slug, { home: data.home, away: data.away })}
+              >
                 {watched ? '★ In watchlist' : '☆ Add to watchlist'}
               </button>
               <a className="gc-action" href={data.pmUrl} target="_blank" rel="noopener noreferrer">
@@ -715,10 +703,7 @@ export default function GamePage({ params }: { params: { slug: string } }) {
             <Disclosure data={data} />
           </>
         )}
-      </main>
-
-
-      <AppFooter />
-    </div>
+      </div>
+    </AppShell>
   )
 }

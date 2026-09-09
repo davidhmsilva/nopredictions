@@ -1924,17 +1924,10 @@ button { font-family: var(--font); }
 /* ── GAME CENTER ──
    A companion for someone watching the match: state first, a short ranked
    shortlist second, everything else quiet or behind a click. */
-.gc-main { padding-bottom: 60px; }
 .gc-loading {
   display: flex; align-items: center; gap: 10px;
   color: var(--grey); font-size: 12px; padding: 40px 0;
 }
-.gc-eyebrow {
-  font-size: 10px; letter-spacing: 2px; color: var(--grey);
-  text-transform: uppercase; margin-bottom: 10px;
-}
-.gc-quiet { color: var(--grey); font-size: 11px; line-height: 1.6; }
-.gc-section { margin-bottom: 26px; }
 .gc-mono { font-variant-numeric: tabular-nums; }
 .gc-r { text-align: right; }
 .gc-pos { color: var(--green); }
@@ -2901,10 +2894,13 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 
 /* ── sections ── */
-.gc-section { margin-bottom: 26px; }
-.gc-eyebrow {
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .11em;
-  text-transform: uppercase; color: var(--grey2); margin-bottom: 10px;
+.gc-main { padding-top: 26px; }
+.gc-section { margin-bottom: 28px; }
+/* Was a grey uppercase div. It is a heading, and it is now drawn like every
+   other section heading on the site — the green rule from Dropping Odds. */
+.gc-h2 {
+  font-size: 16px; font-weight: 650; margin: 0 0 12px;
+  padding-left: 11px; border-left: 3px solid var(--green);
 }
 .gc-quiet { font-size: 13px; color: var(--grey); line-height: 1.55; }
 
@@ -3881,3 +3877,66 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .tp-gate h2 { font-size: 19px; font-weight: 660; margin: 0 0 9px; }
 .tp-gate p { color: var(--grey); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; max-width: 58ch; }
 .tp-gate-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Agent — the empty state
+   Nobody has an agent, including whoever is reading. The page says so, explains
+   what one would be, and marks which of the four steps actually exist. Two of
+   them do not, and a walkthrough that hid that would be selling.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.ag-empty { max-width: 840px; margin: 0 auto; padding: 48px 20px 90px; }
+
+.ag-empty-head { margin-bottom: 40px; }
+.ag-empty-eyebrow {
+  display: block; margin-bottom: 14px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--green);
+}
+.ag-empty-head h1 {
+  font-size: 44px; line-height: 1.1; font-weight: 720;
+  letter-spacing: -.026em; margin: 0 0 16px;
+}
+@media (max-width: 760px) { .ag-empty-head h1 { font-size: 32px; } }
+.ag-empty-head p {
+  max-width: 62ch; margin: 0 0 24px;
+  color: var(--grey); font-size: 15px; line-height: 1.72;
+}
+.ag-empty-cta { display: flex; gap: 9px; flex-wrap: wrap; }
+.ag-empty-note { margin: 14px 0 0 !important; color: var(--grey2); font-size: 12.5px !important; }
+
+/* ── the four steps ────────────────────────────────────────────────────────── */
+
+.ag-steps-list { list-style: none; margin: 0; padding: 0; counter-reset: none; }
+
+.ag-step {
+  display: grid; grid-template-columns: 38px 1fr; gap: 16px;
+  padding: 18px 20px; margin-bottom: 8px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+}
+/* The two that do not exist are drawn as outlines. A dashed border is the
+   cheapest honest signal that a row is a plan and not a feature. */
+.ag-step.is-next { background: transparent; border-style: dashed; }
+
+.ag-step-n {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 650;
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--grey);
+}
+.ag-step.is-live .ag-step-n {
+  background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.45); color: var(--green);
+}
+
+.ag-step-body h3 {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 15px; font-weight: 640; margin: 4px 0 7px;
+}
+.ag-step-body p { margin: 0; color: var(--grey); font-size: 13.5px; line-height: 1.65; }
+
+.ag-empty-honest { margin-top: 30px; font-size: 13px; line-height: 1.7; }
+.ag-empty-honest a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .ag-step { grid-template-columns: 1fr; gap: 10px; }
+}
