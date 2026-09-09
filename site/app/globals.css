@@ -3146,63 +3146,114 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
    ───────────────────────────────────────────────────────────────────────── */
 
 /* ── sign in / sign up ─────────────────────────────────────────────────────── */
+/*
+   A two-column split. The card used to float alone in the middle of a 1280px
+   page under a 22px heading — no eyebrow, no reason, and a scale that matched
+   nothing else on the site. The left column carries the reason now and the card
+   keeps the job. The card is first in the DOM, so a phone gets the form.
+*/
 
-.np-auth { display: flex; justify-content: center; padding: 48px 20px 80px; }
-.np-auth-card {
-  width: 100%; max-width: 420px;
+.lg-page {
+  display: grid; grid-template-columns: 1fr minmax(0, 420px); gap: 48px;
+  align-items: start; max-width: 960px; margin: 0 auto; padding: 52px 20px 90px;
+}
+/* On a wide screen the reason reads first; in the DOM it is second. */
+.lg-why { grid-column: 1; grid-row: 1; }
+.lg-card { grid-column: 2; grid-row: 1; }
+
+@media (max-width: 880px) {
+  .lg-page { grid-template-columns: 1fr; gap: 34px; max-width: 460px; padding-top: 36px; }
+  .lg-card { grid-column: 1; grid-row: 1; }
+  .lg-why  { grid-column: 1; grid-row: 2; }
+}
+
+/* ── the reason ── */
+
+.lg-h1 {
+  font-size: 40px; line-height: 1.12; font-weight: 720;
+  letter-spacing: -.025em; margin: 0 0 16px;
+}
+@media (max-width: 880px) { .lg-h1 { font-size: 28px; } }
+.lg-sub { color: var(--grey); font-size: 14.5px; line-height: 1.7; margin: 0 0 26px; }
+
+.lg-reasons { margin: 0 0 22px; }
+.lg-reason { padding: 12px 0; border-top: 1px solid var(--border); }
+.lg-reason dt {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--green); margin-bottom: 4px;
+}
+.lg-reason dd { margin: 0; color: var(--grey); font-size: 13px; line-height: 1.6; }
+
+.lg-why-foot { margin: 0; color: var(--grey2); font-size: 12.5px; line-height: 1.6; }
+.lg-why-foot a { color: var(--green); text-decoration: none; }
+.lg-why-foot a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── the card ── */
+
+.lg-card {
   background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--r-lg); padding: 28px;
-}
-.np-auth-title { font-size: 22px; font-weight: 650; margin: 0 0 6px; }
-.np-auth-sub   { color: var(--grey); font-size: 13.5px; line-height: 1.55; margin: 0 0 22px; }
-.np-auth-wide  { width: 100%; }
-
-.np-auth-or {
-  display: flex; align-items: center; gap: 12px;
-  color: var(--grey2); font-size: 11px; letter-spacing: .08em;
-  text-transform: uppercase; margin: 18px 0;
-}
-.np-auth-or::before, .np-auth-or::after {
-  content: ''; flex: 1; height: 1px; background: var(--border);
+  border-radius: var(--r-lg); padding: 24px;
 }
 
-.np-auth-form { display: flex; flex-direction: column; gap: 7px; }
-.np-auth-label {
-  font-size: 11px; letter-spacing: .07em; text-transform: uppercase;
-  color: var(--grey); margin-top: 8px;
+/* Two modes, one card. A link that swapped the whole form used to sit at the
+   bottom, which meant the choice was made after reading the wrong form. */
+.lg-modes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--r-sm); margin-bottom: 20px;
 }
-.np-auth-form .np-btn { margin-top: 18px; }
+.lg-modes button {
+  padding: 8px 10px; border: 0; border-radius: 4px; cursor: pointer;
+  background: transparent; color: var(--grey);
+  font-family: var(--font); font-size: 13px; font-weight: 550;
+  transition: background .12s, color .12s;
+}
+.lg-modes button.is-on { background: var(--bg3); color: var(--white); }
 
-.np-auth-link {
+.lg-prefilled {
+  margin-bottom: 16px; padding: 10px 12px; border-radius: var(--r-sm);
+  border: 1px solid rgba(34,197,94,.3); background: rgba(34,197,94,.07);
+  font-size: 12.5px; line-height: 1.5; color: var(--grey);
+}
+.lg-prefilled strong { color: var(--white); }
+
+.lg-wide { width: 100%; justify-content: center; }
+
+.lg-or {
+  display: flex; align-items: center; gap: 12px; margin: 16px 0;
+  color: var(--grey2); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+}
+.lg-or::before, .lg-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.lg-form { display: flex; flex-direction: column; gap: 7px; }
+.lg-label {
+  margin-top: 8px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--grey2);
+}
+.lg-form .tp-go { margin-top: 18px; }
+
+.lg-link {
   display: block; width: 100%; margin-top: 14px; padding: 0;
   background: none; border: 0; cursor: pointer;
-  color: var(--grey); font-family: var(--font); font-size: 13px;
+  color: var(--grey); font-family: var(--font); font-size: 12.5px;
   text-decoration: underline; text-underline-offset: 3px;
 }
-.np-auth-link:hover:not(:disabled) { color: var(--white); }
-.np-auth-link:disabled { opacity: .5; cursor: not-allowed; }
+.lg-link:hover:not(:disabled) { color: var(--white); }
+.lg-link:disabled { opacity: .5; cursor: not-allowed; }
 
-.np-auth-notice {
+.lg-notice {
   margin-top: 16px; padding: 11px 13px; border-radius: var(--r-sm);
   border: 1px solid rgba(34,197,94,.35); background: rgba(34,197,94,.08);
-  color: var(--white); font-size: 13px; line-height: 1.5;
+  color: var(--white); font-size: 12.5px; line-height: 1.55;
 }
-.np-auth-notice.is-error {
-  border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.08);
-}
+.lg-notice.is-error { border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.08); }
 
-.np-auth-switch { margin-top: 20px; font-size: 13.5px; color: var(--grey); }
-.np-auth-switch button {
-  background: none; border: 0; padding: 0; cursor: pointer;
-  color: var(--green); font-family: var(--font); font-size: 13.5px; font-weight: 550;
+.lg-foot {
+  margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
+  color: var(--grey2); font-size: 11.5px; line-height: 1.6;
 }
-.np-auth-switch button:hover { text-decoration: underline; text-underline-offset: 3px; }
-
-.np-auth-foot {
-  margin: 22px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
-  color: var(--grey2); font-size: 12px; line-height: 1.6;
-}
-.np-auth-foot a { color: var(--grey); text-decoration: underline; text-underline-offset: 2px; }
+.lg-foot a { color: var(--grey); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ── pricing ───────────────────────────────────────────────────────────────── */
 /*
@@ -3279,7 +3330,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   padding: 9px 16px; border-radius: var(--r-sm); text-align: center;
   border: 1px dashed var(--border2); color: var(--grey); font-size: 12.5px;
 }
-.pr-error { margin: 10px 0 0; color: var(--red); font-size: 12.5px; }
 
 /* ── pay without an account ── */
 
@@ -3363,42 +3413,74 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 
 /* ── account ───────────────────────────────────────────────────────────────── */
+/*
+   Standard head, then two cards: the plan and today's usage. The quota used to
+   be a line of text — it is a bar now, because the question someone opens this
+   page with is how much is left, and a bar answers before the sentence is read.
+*/
 
-.np-acct { max-width: 560px; margin: 0 auto; padding: 40px 20px 80px; }
-.np-acct h1 { font-size: 24px; font-weight: 680; margin: 0 0 8px; }
-.np-acct-sub { color: var(--grey); font-size: 13.5px; line-height: 1.6; margin: 0 0 20px; }
-.np-acct-loading { color: var(--grey); font-size: 13.5px; }
-.np-acct-card { margin-top: 18px; padding: 22px; }
+.ac-page { max-width: 780px; margin: 0 auto; padding: 44px 20px 90px; }
+.ac-loading { color: var(--grey); font-size: 13.5px; }
 
-.np-acct-ok {
-  margin: 14px 0 0; padding: 11px 13px; border-radius: var(--r-sm);
+.ac-ok {
+  margin: 0 0 20px; padding: 12px 14px; border-radius: var(--r-sm);
   border: 1px solid rgba(34,197,94,.35); background: rgba(34,197,94,.08);
   font-size: 13px; line-height: 1.55;
 }
 
-.np-acct-dl {
-  display: grid; grid-template-columns: 90px 1fr; gap: 10px 14px;
-  margin: 0 0 20px; padding-bottom: 18px; border-bottom: 1px solid var(--border);
+.ac-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;
+  margin-bottom: 22px;
 }
-.np-acct-dl dt {
-  font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--grey);
-}
-.np-acct-dl dd { margin: 0; font-size: 13.5px; }
+@media (max-width: 700px) { .ac-grid { grid-template-columns: 1fr; } }
 
-.np-acct-quotas { list-style: none; margin: 0; padding: 0; }
-.np-acct-quota {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 9px 0; font-size: 13.5px; border-bottom: 1px solid var(--border);
+.ac-card {
+  display: flex; flex-direction: column; padding: 22px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r-lg);
 }
-.np-acct-quota:last-child { border-bottom: 0; }
-.np-acct-quota a { color: var(--white); text-decoration: none; font-weight: 550; }
-.np-acct-quota a:hover { color: var(--green); }
-.np-acct-quota b { color: var(--grey); font-size: 12.5px; font-weight: 500; }
-.np-acct-quota b.c-red { color: var(--red); }
+.ac-card.is-pro {
+  border-color: rgba(34,197,94,.32);
+  background: linear-gradient(170deg, rgba(34,197,94,.05), var(--bg2) 55%);
+}
+.ac-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 12px;
+}
+.ac-card-head h2 { font-size: 15px; font-weight: 650; margin: 0; }
+.ac-card-note { color: var(--grey); font-size: 13px; line-height: 1.6; margin: 0 0 18px; flex: 1; }
+.ac-card-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.ac-card-foot { margin: 14px 0 0; color: var(--grey2); font-size: 11.5px; line-height: 1.6; }
+.ac-reset { font-size: 10px; letter-spacing: .05em; color: var(--grey2); }
 
-.np-acct-reset { margin: 12px 0 0; color: var(--grey2); font-size: 12px; }
-.np-acct-error { margin: 10px 0 0; color: var(--red); font-size: 12.5px; }
-.np-acct-actions { display: flex; gap: 9px; margin-top: 20px; flex-wrap: wrap; }
+/* ── the meters ── */
+
+.ac-meters { display: flex; flex-direction: column; gap: 16px; margin-bottom: 4px; }
+.ac-meter-top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 7px;
+}
+.ac-meter-top a { color: var(--white); font-size: 13.5px; font-weight: 600; text-decoration: none; }
+.ac-meter-top a:hover { color: var(--green); }
+.ac-meter-count { font-size: 11.5px; color: var(--grey); }
+.ac-meter.is-out .ac-meter-count { color: var(--amber); }
+
+.ac-bar {
+  height: 6px; border-radius: 999px; background: var(--bg); overflow: hidden;
+  border: 1px solid var(--border);
+}
+.ac-bar span {
+  display: block; height: 100%; background: var(--green);
+  transition: width .2s ease;
+}
+.ac-meter.is-out .ac-bar span { background: var(--amber); }
+
+.ac-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+
+/* Shared, because three pages wanted them and each had invented a name.
+   `.np-acct-actions` lived on the account page and was borrowed by the wallet
+   gate; deleting the account block took the gate's layout with it. */
+.np-btn-row { display: flex; gap: 9px; flex-wrap: wrap; }
+.np-form-error { margin: 10px 0 0; color: var(--red); font-size: 12.5px; }
 
 /* ── the quota strip the Lab and Wallet show above their input ─────────────── */
 

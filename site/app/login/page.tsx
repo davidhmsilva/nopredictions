@@ -14,9 +14,15 @@
  *  ⚠️ Sign-up has two possible outcomes and the difference is a Supabase
  *     setting we do not control from here. With email confirmation ON the
  *     response carries a user and NO session — the account exists but is not
- *     usable until a link is clicked. With it OFF, a session comes back and
- *     the user is in. Both are handled; the form says which happened rather
- *     than showing a spinner that never resolves.
+ *     usable until a link is clicked. With it OFF, a session comes back and the
+ *     user is in. Both are handled; the form says which happened rather than
+ *     showing a spinner that never resolves.
+ *
+ *  The page is a two-column split. The card used to float alone in the middle
+ *  of a 1280px page under a 22px heading, saying nothing about what an account
+ *  is for and looking like a different site. The left column now carries the
+ *  reason and the card keeps the job. ⚠️ The card is FIRST in the DOM — on a
+ *  phone the person came to sign in, not to read.
  */
 
 import { Suspense, useState, type FormEvent } from 'react'
@@ -36,18 +42,24 @@ function safeNext(raw: string | null): string {
   return raw
 }
 
+/** What the account is for. Every line is something that exists today. */
+const REASONS: { k: string; v: string }[] = [
+  { k: 'Lab', v: 'Three theories a day, replayed over 111,475 real matches against Pinnacle’s close.' },
+  { k: 'Wallet', v: 'Three traders a day, every fill rebuilt into completed round trips.' },
+  { k: 'Watchlist', v: 'The fixtures you star, kept.' },
+]
+
 function LoginPageInner() {
   const router = useRouter()
   const params = useSearchParams()
   const next = safeNext(params.get('next'))
+  const prefilled = params.get('email')
 
-  const [mode, setMode] = useState<Mode>(
-    params.get('mode') === 'signup' ? 'signup' : 'signin'
-  )
+  const [mode, setMode] = useState<Mode>(params.get('mode') === 'signup' ? 'signup' : 'signin')
   // Prefilled by /welcome with the address the payment was made on. Using a
-  // different one here puts the subscription on the wrong account, so the
-  // field is filled rather than left for the reader to remember.
-  const [email, setEmail] = useState(params.get('email') ?? '')
+  // different one here puts the subscription on the wrong account, so the field
+  // is filled rather than left for the reader to remember.
+  const [email, setEmail] = useState(prefilled ?? '')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(
@@ -73,7 +85,9 @@ function LoginPageInner() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+        },
       })
       if (error) throw error
 
@@ -127,104 +141,138 @@ function LoginPageInner() {
   }
 
   return (
-    <AppShell>
-      <div className="np-auth">
-        <div className="np-auth-card">
-          <h1 className="np-auth-title">
-            {mode === 'signin' ? 'Sign in' : 'Create an account'}
-          </h1>
-          <p className="np-auth-sub">
-            {params.get('email')
-              ? 'Use this address — it is the one the subscription is held against.'
-              : mode === 'signin'
-                ? 'Scout, Agent and the Game Center never needed one. This is for the Lab and the Wallet.'
-                : 'Free: three Lab tests and three wallet reads a day. No card.'}
-          </p>
+    <div className="lg-page">
+      {/* Card first in the DOM: on a phone this is what the visit is for. */}
+      <div className="lg-card">
+        <div className="lg-modes" role="tablist" aria-label="Sign in or create an account">
+          <button
+            role="tab"
+            aria-selected={mode === 'signin'}
+            className={mode === 'signin' ? 'is-on' : ''}
+            onClick={() => { setMode('signin'); setNotice(null) }}
+          >
+            Sign in
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === 'signup'}
+            className={mode === 'signup' ? 'is-on' : ''}
+            onClick={() => { setMode('signup'); setNotice(null) }}
+          >
+            Create account
+          </button>
+        </div>
 
-          {GOOGLE_ON && (
+        {prefilled && (
+          <div className="lg-prefilled">
+            Use <strong>{prefilled}</strong> — it is the address your subscription is
+            held against.
+          </div>
+        )}
+
+        {GOOGLE_ON && (
+          <>
+            <button className="np-btn lg-wide" onClick={withGoogle} disabled={busy}>
+              Continue with Google
+            </button>
+            <div className="lg-or"><span>or</span></div>
+          </>
+        )}
+
+        <form onSubmit={withPassword} className="lg-form">
+          <label className="lg-label" htmlFor="np-email">Email</label>
+          <input
+            id="np-email"
+            className="tp-input"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+
+          <label className="lg-label" htmlFor="np-password">Password</label>
+          <input
+            id="np-password"
+            className="tp-input"
+            type="password"
+            autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+            required
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={mode === 'signup' ? 'At least 8 characters' : ''}
+          />
+
+          <button className="tp-go lg-wide" type="submit" disabled={busy}>
+            {busy ? 'Working…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+
+        {MAGIC_ON && (
+          <button className="lg-link" onClick={withMagicLink} disabled={busy}>
+            Email me a sign-in link instead
+          </button>
+        )}
+
+        {notice && (
+          <div className={`lg-notice${notice.kind === 'error' ? ' is-error' : ''}`}>
+            {notice.text}
+          </div>
+        )}
+
+        <p className="lg-foot">
+          {mode === 'signup' ? (
+            'No card. The free plan has no expiry and no trial to forget about.'
+          ) : (
             <>
-              <button className="np-btn np-auth-wide" onClick={withGoogle} disabled={busy}>
-                Continue with Google
-              </button>
-              <div className="np-auth-or"><span>or</span></div>
+              An account changes nothing about what this site claims. The agent is
+              still paper and still says so on{' '}
+              <Link href="/agent/ours">its own record</Link>.
             </>
           )}
-
-          <form onSubmit={withPassword} className="np-auth-form">
-            <label className="np-auth-label" htmlFor="np-email">Email</label>
-            <input
-              id="np-email"
-              className="np-input"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-
-            <label className="np-auth-label" htmlFor="np-password">Password</label>
-            <input
-              id="np-password"
-              className="np-input"
-              type="password"
-              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'signup' ? 'At least 8 characters' : ''}
-            />
-
-            <button className="np-btn np-btn-primary np-auth-wide" type="submit" disabled={busy}>
-              {busy ? 'Working…' : mode === 'signin' ? 'Sign in' : 'Create account'}
-            </button>
-          </form>
-
-          {MAGIC_ON && (
-            <button className="np-auth-link" onClick={withMagicLink} disabled={busy}>
-              Email me a sign-in link instead
-            </button>
-          )}
-
-          {notice && (
-            <div className={`np-auth-notice ${notice.kind === 'error' ? 'is-error' : ''}`}>
-              {notice.text}
-            </div>
-          )}
-
-          <div className="np-auth-switch">
-            {mode === 'signin' ? (
-              <>
-                No account?{' '}
-                <button onClick={() => { setMode('signup'); setNotice(null) }}>Create one</button>
-              </>
-            ) : (
-              <>
-                Already have one?{' '}
-                <button onClick={() => { setMode('signin'); setNotice(null) }}>Sign in</button>
-              </>
-            )}
-          </div>
-
-          <p className="np-auth-foot">
-            An account changes nothing about what the site claims. The agent is still
-            paper and still says so on <Link href="/agent">its own tab</Link>.
-          </p>
-        </div>
+        </p>
       </div>
-    </AppShell>
+
+      {/* The reason. Second in the DOM, first on a wide screen. */}
+      <div className="lg-why">
+        <span className="tp-eyebrow">FREE ACCOUNT</span>
+        <h1 className="lg-h1">
+          {mode === 'signup' ? 'It takes an email and a password.' : 'Welcome back.'}
+        </h1>
+        <p className="lg-sub">
+          Scout, Dropping odds, the Game Center and the agent’s record never needed
+          one and never will. An account is for the two tools that do real work.
+        </p>
+
+        <dl className="lg-reasons">
+          {REASONS.map((r) => (
+            <div key={r.k} className="lg-reason">
+              <dt>{r.k}</dt>
+              <dd>{r.v}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <p className="lg-why-foot">
+          Want no limit? <Link href="/pricing">Pro is $19 a month</Link> — and you can
+          pay without making an account first.
+        </p>
+      </div>
+    </div>
   )
 }
 
-/** `useSearchParams` makes this page client-rendered by definition, and Next
- *  refuses to prerender it without a boundary to fall back to. Neither page
- *  has anything to gain from static HTML — both are about one specific
- *  person — so the boundary is the whole answer rather than a workaround. */
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="np-auth"><div className="np-auth-card" /></div>}>
-      <LoginPageInner />
-    </Suspense>
+    <AppShell>
+      {/* `useSearchParams` makes this page client-rendered by definition, and
+          Next refuses to prerender it without a boundary to fall back to. It has
+          nothing to gain from static HTML — it is about one person. */}
+      <Suspense fallback={<div className="lg-page" />}>
+        <LoginPageInner />
+      </Suspense>
+    </AppShell>
   )
 }

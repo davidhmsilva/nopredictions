@@ -84,7 +84,7 @@ export default function WalletPage() {
                 ? 'Rebuilding a trader’s whole record is the expensive half of this site. A free account gets three a day, and takes an email and a password.'
                 : 'Free accounts get three wallet reads a day. The count resets at 00:00 UTC — or Pro removes the limit.'}
             </p>
-            <div className="np-acct-actions">
+            <div className="np-btn-row">
               {gate === 'signed_out' ? (
                 <Link
                   className="np-btn np-btn-primary"

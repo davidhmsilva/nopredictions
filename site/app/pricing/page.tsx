@@ -199,7 +199,7 @@ export default function PricingPage() {
                 </p>
               </form>
             )}
-            {error && <p className="pr-error">{error}</p>}
+            {error && <p className="np-form-error">{error}</p>}
           </section>
         </div>
 
