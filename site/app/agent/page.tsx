@@ -64,8 +64,18 @@ export default function AgentPage() {
   //    anyway — this fires once, for a link published before the split, and a
   //    full load costs nothing on a path nobody takes twice.
   useEffect(() => {
-    const h = window.location.hash.replace(/^#/, '')
-    if (h) window.location.replace(`/agent/ours#${h}`)
+    const forward = () => {
+      const h = window.location.hash.replace(/^#/, '')
+      if (h) window.location.replace(`/agent/ours#${h}`)
+    }
+    forward()
+    // Mount alone is not enough: arriving at /agent and THEN gaining a hash is
+    // a same-document change that never remounts this component. Nothing on
+    // the site links that way today, which is exactly why it would be missed —
+    // behaviour that works because of the path you took to reach it is the
+    // kind that breaks silently later.
+    window.addEventListener('hashchange', forward)
+    return () => window.removeEventListener('hashchange', forward)
   }, [])
 
   const signedIn = Boolean(me?.user)
