@@ -3501,12 +3501,13 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Insights — articles and the newsletter
-   Added 2026-09-08. The Insights entry lives in the Scout board's chip row,
-   in the slot the "Measured" filter used to hold.
+   Added 2026-09-08, rebuilt 2026-09-09. The index was three identical cards
+   under a 28px heading with no eyebrow: no hierarchy, and a scale that matched
+   nothing else on the site. The newest piece leads now and the rest are rows.
    ───────────────────────────────────────────────────────────────────────── */
 
-/* The odd chip: it navigates, the others filter. A left divider and an arrow
-   say so before the click, and it never takes the selected state. */
+/* The Insights entry in the Scout chip row. It navigates where its neighbours
+   filter, so it is drawn differently — see the note on `.sc-cat.is-link`. */
 .sc-cat.is-link {
   text-decoration: none;
   color: var(--green);
@@ -3522,76 +3523,140 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-cat.is-link:hover { color: #29d669; background: var(--bg-hover); }
 .sc-cat-go { opacity: .55; font-size: 11px; }
 
-/* ── index ─────────────────────────────────────────────────────────────────── */
+.in-page { max-width: 940px; margin: 0 auto; padding: 44px 20px 90px; }
 
-.np-insights { max-width: 780px; margin: 0 auto; padding: 40px 20px 80px; }
-.np-insights-head { margin-bottom: 26px; }
-.np-insights-head h1 { font-size: 28px; font-weight: 680; margin: 0 0 10px; }
-.np-insights-head p { color: var(--grey); font-size: 14px; line-height: 1.7; margin: 0; }
+/* ── shared metadata line ── */
 
-.np-insights-list { display: flex; flex-direction: column; gap: 12px; }
-
-.np-post {
-  display: block; text-decoration: none; color: inherit; padding: 20px;
-  transition: border-color .12s, background .12s;
-}
-.np-post:hover { border-color: var(--border2); background: var(--bg3); }
-
-.np-post-meta {
+.in-meta {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  font-family: var(--font-mono); font-size: 11px; color: var(--grey);
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--grey);
   margin-bottom: 10px;
 }
-.np-post-mins { color: var(--grey2); }
-.np-post-title { font-size: 18px; font-weight: 640; line-height: 1.35; margin: 0 0 8px; }
-.np-post:hover .np-post-title { color: var(--green); }
-.np-post-sum { color: var(--grey); font-size: 13.5px; line-height: 1.6; margin: 0; }
-.np-post-src {
+.in-mins { color: var(--grey2); }
+.in-src {
   margin: 10px 0 0; color: var(--grey2);
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
 }
 
-/* ── one article ───────────────────────────────────────────────────────────── */
+/* ── the lead ── */
 
-.np-article { max-width: 720px; margin: 0 auto; padding: 32px 20px 80px; }
-.np-article-back {
-  display: inline-block; margin-bottom: 22px; color: var(--grey);
+.in-lead {
+  display: block; position: relative; text-decoration: none; color: inherit;
+  padding: 26px; margin-bottom: 34px;
+  background: linear-gradient(170deg, var(--bg3), var(--bg2) 60%);
+  border: 1px solid var(--border2); border-radius: var(--r-lg);
+  transition: border-color .12s;
+}
+.in-lead:hover { border-color: rgba(34,197,94,.45); }
+.in-lead-flag {
+  display: inline-block; margin-bottom: 14px;
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .16em;
+  color: var(--green);
+}
+.in-lead h2 {
+  font-size: 28px; line-height: 1.22; font-weight: 690;
+  letter-spacing: -.02em; margin: 0 0 12px; max-width: 30ch;
+}
+@media (max-width: 640px) { .in-lead h2 { font-size: 22px; max-width: none; } }
+.in-lead-sum {
+  max-width: 62ch; margin: 0; color: var(--grey);
+  font-size: 14.5px; line-height: 1.65;
+}
+.in-go {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 18px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em;
+  color: var(--green); transition: gap .12s;
+}
+.in-lead:hover .in-go { gap: 10px; }
+
+/* ── the rest, as rows ── */
+
+.in-rest { margin-bottom: 34px; }
+.in-list {
+  border: 1px solid var(--border); border-radius: var(--r);
+  overflow: hidden; background: var(--bg2);
+}
+.in-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center;
+  padding: 18px 20px; text-decoration: none; color: inherit;
+  border-bottom: 1px solid var(--border); transition: background .1s;
+}
+.in-row:last-child { border-bottom: 0; }
+.in-row:hover { background: var(--bg3); }
+.in-row-main { min-width: 0; }
+.in-row h3 {
+  font-size: 16px; font-weight: 640; line-height: 1.35; margin: 0 0 7px;
+}
+.in-row:hover h3 { color: var(--green); }
+.in-row-main > p {
+  margin: 0; color: var(--grey); font-size: 13px; line-height: 1.6; max-width: 66ch;
+}
+.in-row-go { color: var(--grey2); font-size: 14px; transition: color .12s, transform .12s; }
+.in-row:hover .in-row-go { color: var(--green); transform: translateX(3px); }
+
+/* ── one article ── */
+
+.in-article { max-width: 760px; margin: 0 auto; padding: 32px 20px 90px; }
+.in-back {
+  display: inline-block; margin-bottom: 24px; color: var(--grey);
   font-size: 12.5px; text-decoration: none;
 }
-.np-article-back:hover { color: var(--white); }
+.in-back:hover { color: var(--white); }
 
-.np-article-head { margin-bottom: 28px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
-.np-article-head h1 {
-  font-size: 30px; font-weight: 700; line-height: 1.22;
-  letter-spacing: -.015em; margin: 0 0 12px;
+.in-head { margin-bottom: 30px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.in-head h1 {
+  font-size: 34px; font-weight: 710; line-height: 1.18;
+  letter-spacing: -.022em; margin: 0 0 14px; max-width: 22ch;
 }
-.np-article-sum { color: var(--grey); font-size: 15.5px; line-height: 1.65; margin: 0; }
-.np-article-src {
-  margin: 14px 0 0; color: var(--grey2);
-  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+@media (max-width: 640px) { .in-head h1 { font-size: 26px; max-width: none; } }
+.in-article-sum {
+  max-width: 62ch; margin: 0;
+  color: var(--grey); font-size: 16px; line-height: 1.65;
 }
-.np-article-src strong { color: var(--grey); font-weight: 550; }
+.in-article-src strong { color: var(--grey); font-weight: 550; }
 
-.np-article-foot {
-  margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--border);
+.in-foot {
+  margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border);
   color: var(--grey2); font-size: 12.5px; line-height: 1.6;
 }
-.np-article-foot a { color: var(--grey); text-decoration: underline; text-underline-offset: 2px; }
+.in-foot p { margin: 0; }
+.in-foot a { color: var(--grey); text-decoration: underline; text-underline-offset: 2px; }
+
+.in-more { margin-top: 34px; }
 
 /* ── the prose itself ──────────────────────────────────────────────────────── */
 
 .np-prose { font-size: 15.5px; line-height: 1.75; color: #d3d7de; }
 .np-prose > *:first-child { margin-top: 0; }
-.np-prose p { margin: 0 0 18px; }
+
+/* ⚠️ The MEASURE, not the container. At 680px this ran 87 characters a line
+   where comfortable reading is 60-75. Constraining the container instead would
+   have taken the tables down with it, and a data table narrowed to reading
+   width has to scroll — a worse trade than a wide table.
+
+   ⚠️ In PIXELS, not `ch`, and that is deliberate. `1ch` is the width of the
+   "0" glyph, which in this stack is 9.76px against an average character of
+   7.8px — so `68ch` measures 664px and renders 85 characters, missing the
+   target by 25%. 560px is 72 characters, measured on this font at this size.
+   Every other `ch` value on the page is inflated by the same factor; they are
+   short paragraphs where it does not matter. */
+.np-prose > p,
+.np-prose > ul,
+.np-prose > ol,
+.np-prose > h2,
+.np-prose > h3,
+.np-prose > blockquote { max-width: 560px; }
+
+.np-prose p { margin: 0 0 19px; }
 .np-prose h2 {
   font-size: 20px; font-weight: 650; color: var(--white);
-  margin: 34px 0 14px; letter-spacing: -.01em;
+  margin: 36px 0 14px; letter-spacing: -.01em;
 }
-.np-prose h3 { font-size: 16px; font-weight: 620; color: var(--white); margin: 26px 0 10px; }
+.np-prose h3 { font-size: 16px; font-weight: 620; color: var(--white); margin: 28px 0 10px; }
 .np-prose strong { color: var(--white); font-weight: 620; }
 .np-prose a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
-.np-prose ul, .np-prose ol { margin: 0 0 18px; padding-left: 22px; }
-.np-prose li { margin-bottom: 7px; }
+.np-prose ul, .np-prose ol { margin: 0 0 19px; padding-left: 22px; }
+.np-prose li { margin-bottom: 8px; }
 .np-prose code {
   font-family: var(--font-mono); font-size: 13px;
   background: var(--bg3); border: 1px solid var(--border);
@@ -3599,22 +3664,22 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .np-prose pre {
   background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--r-sm); padding: 14px; overflow-x: auto; margin: 0 0 18px;
+  border-radius: var(--r-sm); padding: 14px; overflow-x: auto; margin: 0 0 19px;
 }
 .np-prose pre code { background: none; border: 0; padding: 0; }
 .np-prose blockquote {
-  margin: 0 0 18px; padding: 2px 0 2px 16px;
+  margin: 0 0 19px; padding: 2px 0 2px 16px;
   border-left: 3px solid var(--border2); color: var(--grey);
 }
-.np-prose hr { border: 0; border-top: 1px solid var(--border); margin: 30px 0; }
+.np-prose hr { border: 0; border-top: 1px solid var(--border); margin: 32px 0; }
 
 /* A wide table must scroll inside itself, never push the page sideways. */
 .np-prose table {
   display: block; width: 100%; overflow-x: auto;
-  border-collapse: collapse; margin: 0 0 20px; font-size: 13.5px;
+  border-collapse: collapse; margin: 0 0 22px; font-size: 13.5px;
 }
 .np-prose th, .np-prose td {
-  border-bottom: 1px solid var(--border); padding: 8px 14px 8px 0;
+  border-bottom: 1px solid var(--border); padding: 9px 16px 9px 0;
   text-align: left; white-space: nowrap;
 }
 .np-prose th {
