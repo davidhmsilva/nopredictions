@@ -61,7 +61,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.extras
@@ -104,7 +104,10 @@ log = logging.getLogger("fav_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure Favourite HT"
-OBS_VERSION = 3
+# v4 (2026-09-11): missing xG estimated from shots, not renormalised (see
+# live_tracker.estimate_xg), via ht_pressure_agent.current_pressure. The axis
+# moved; never pool with v3.
+OBS_VERSION = 4
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -726,53 +729,119 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
 
 # ── settlement ───────────────────────────────────────────────────────────────
 
-def _halftime_score(fixture_id: int) -> tuple[int, int] | None:
-    """(home, away) at half time from api-football, or None.
+# A fixture api-football has not answered this long after our last look at it
+# is not going to start answering. Past it the tape is the only source, and a
+# fixture the tape never saw reach the break stays open WITHOUT costing a call
+# per run — a retry with no limit is the same bug as a cache with no expiry.
+SETTLE_API_MAX_AGE_H = 72
+
+# Statuses where score.halftime is not yet the settlement quantity.
+_HT_NOT_OVER = ("1H", "NS", "TBD", "PST", "CANC")
+
+
+def _halftime_scores(fixture_ids: list[int]) -> dict[int, tuple[int, int]]:
+    """(home, away) at half time per fixture, from api-football.
 
     `score.halftime` is exactly the settlement quantity — no reconstruction from
-    events, no assumption about which minute stoppage-time goals land in. One
-    call per fixture per settle run.
+    events, no assumption about which minute stoppage-time goals land in.
+
+    Batched 20 ids per call, as pressure_agent._final_goals_api does. This was
+    one call per fixture per run, and together with the no-favourite rows that
+    never left `pending` (see _close_rows_without_a_favourite) that came to
+    ~5,560 calls a run every ~35 minutes — 143,613 recorded on 2026-09-10 by the
+    settle cron alone, against a key allowed 75,000 a day. That is what refused
+    the live poll every afternoon and left all three arms blind for the evening.
+
+    Only fixtures whose half is over are returned, so a missing key means "not
+    settleable from the API", never "0-0". Negative ids are ESPN's namespace
+    (see espn_stats) and are never sent to api-football.
     """
     key = os.getenv("FOOTBALL_API_KEY", "")
-    if not key:
-        return None
-    try:
-        af_budget.process_counter().record("fixture")
-        resp = requests.get(
-            "https://v3.football.api-sports.io/fixtures",
-            params={"id": fixture_id},
-            headers={"x-apisports-key": key},
-            timeout=8,
-        )
-        if resp.status_code != 200:
-            return None
-        body = resp.json()
-        if body.get("errors"):
-            return None
-        for f in body.get("response", []):
-            ht = (f.get("score") or {}).get("halftime") or {}
-            h, a = ht.get("home"), ht.get("away")
-            if h is None or a is None:
-                return None
-            # Only trust it once the half is actually over.
-            status = ((f.get("fixture") or {}).get("status") or {}).get("short", "")
-            if status in ("1H", "NS", "TBD", "PST", "CANC"):
-                return None
-            return int(h), int(a)
-    except Exception:
-        return None
-    return None
+    ids = [f for f in fixture_ids if f > 0]
+    if not key or not ids:
+        return {}
+    out: dict[int, tuple[int, int]] = {}
+    for i in range(0, len(ids), 20):
+        batch = ids[i:i + 20]
+        try:
+            af_budget.process_counter().record("ids")
+            resp = requests.get(
+                "https://v3.football.api-sports.io/fixtures",
+                params={"ids": "-".join(str(f) for f in batch)},
+                headers={"x-apisports-key": key},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                continue
+            body = resp.json()
+            if body.get("errors"):
+                # Quota or rate: every later batch would be refused too, and
+                # asking again is how a dead key keeps getting spent.
+                break
+            for f in body.get("response", []):
+                status = ((f.get("fixture") or {}).get("status") or {}).get("short", "")
+                if status in _HT_NOT_OVER:
+                    continue
+                ht = (f.get("score") or {}).get("halftime") or {}
+                h, a = ht.get("home"), ht.get("away")
+                if h is None or a is None:
+                    continue
+                out[f["fixture"]["id"]] = (int(h), int(a))
+        except Exception:
+            continue
+    return out
+
+
+def _close_rows_without_a_favourite(conn) -> int:
+    """Close, with no API call, every row that has no favourite to judge.
+
+    A row is written for every fixture the agent watches, and most have no
+    favourite — no PM 1X2, or no side at MIN_FAV_PROB. `fav_led_at_ht` means
+    nothing there, yet settle() used to fetch their half-time score and then
+    `continue` past them, so they never left `pending` and were fetched again
+    on every run: 5,556 of the 5,560 pending fixtures on 2026-09-10, piling up
+    since 08-19. Closed as ht_source = 'no_favourite' with the outcome columns
+    left NULL — this closes the row, it does not claim an outcome.
+
+    Set-based and chunked, because the first run has ~250k rows to close.
+    """
+    chunk = 20_000
+    closed = 0
+    with conn.cursor() as cur:
+        while True:
+            cur.execute(
+                """UPDATE fav_ht_observations
+                      SET settled_at = now(), ht_source = 'no_favourite'
+                    WHERE id IN (
+                          SELECT id FROM fav_ht_observations
+                           WHERE settled_at IS NULL
+                             AND fav_side IS NULL
+                             AND paper_trade_id IS NULL
+                             AND observed_at < now() - interval '35 minutes'
+                           LIMIT %s)""",
+                (chunk,),
+            )
+            closed += cur.rowcount
+            if cur.rowcount < chunk:
+                break
+    conn.commit()
+    return closed
 
 
 TAPE_HT_MINUTE = 43
 
 
 def settle(conn) -> int:
+    closed = _close_rows_without_a_favourite(conn)
+    if closed:
+        log.info(f"closed {closed} rows with no favourite (no API call)")
+
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """SELECT id, fixture_id, minute, fav_side, paper_trade_id
                  FROM fav_ht_observations
                 WHERE settled_at IS NULL
+                  AND fav_side IS NOT NULL
                   AND observed_at < now() - interval '35 minutes'
                 ORDER BY id"""
         )
@@ -784,20 +853,24 @@ def settle(conn) -> int:
     fixture_ids = sorted({r["fixture_id"] for r in pending})
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT fixture_id, minute, home_goals, away_goals
+            """SELECT fixture_id, minute, home_goals, away_goals, observed_at
                  FROM fav_ht_observations WHERE fixture_id = ANY(%s)""",
             (fixture_ids,),
         )
         tape: dict[int, list[tuple[int, int, int]]] = {}
-        for fid, minute, hg, ag in cur.fetchall():
+        last_seen: dict[int, datetime] = {}
+        for fid, minute, hg, ag, seen in cur.fetchall():
             tape.setdefault(fid, []).append((minute, hg, ag))
+            if fid not in last_seen or seen > last_seen[fid]:
+                last_seen[fid] = seen
 
     # Every api-football call FIRST, with no transaction open. This loop used
     # to sit inside the write cursor, which is how a read transaction came to
     # be held for eight minutes while Python did HTTP — see db_txn.py.
-    api_cache: dict[int, tuple[int, int] | None] = {
-        fid: _halftime_score(fid) for fid in fixture_ids
-    }
+    horizon = datetime.now(timezone.utc) - timedelta(hours=SETTLE_API_MAX_AGE_H)
+    api_cache = _halftime_scores(
+        [fid for fid in fixture_ids if last_seen.get(fid) and last_seen[fid] >= horizon]
+    )
 
     settled = 0
     with conn.cursor() as cur:

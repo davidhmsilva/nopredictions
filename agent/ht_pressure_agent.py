@@ -141,7 +141,10 @@ log = logging.getLogger("ht_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure HT Over 0.5"
-OBS_VERSION = 5
+# v6 (2026-09-11): missing xG estimated from shots, not renormalised (see
+# live_tracker.estimate_xg), and has_inside finally passed on ESPN rows. The
+# axis moved; never pool with v5.
+OBS_VERSION = 6
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -353,14 +356,18 @@ def opening_pressure(sig: PressureSignals) -> tuple[float, float, float]:
     # across both sides: one team having created nothing is not the same as
     # api-football publishing no xG for the competition.
     has_xg = bool(sig.home_xg_total or sig.away_xg_total)
+    # has_inside was never passed here, so an ESPN fixture scored its missing
+    # shots-in-box as a real zero on both first-half arms. Passed since 09-11.
     home = danger_index(
         sig.home_shots_on_total * scale, sig.home_shots_inside_total * scale,
         sig.home_xg_total * scale, sig.home_corners_total * scale,
-        sig.home_possession, has_xg=has_xg)
+        sig.home_possession, has_xg=has_xg, has_inside=sig.has_inside,
+        shots_total=sig.home_shots_total * scale)
     away = danger_index(
         sig.away_shots_on_total * scale, sig.away_shots_inside_total * scale,
         sig.away_xg_total * scale, sig.away_corners_total * scale,
-        sig.away_possession, has_xg=has_xg)
+        sig.away_possession, has_xg=has_xg, has_inside=sig.has_inside,
+        shots_total=sig.away_shots_total * scale)
     # Both ends, because an over does not care who scores.
     return (home + away) / 2.0, home, away
 
@@ -390,11 +397,13 @@ def window_pressure(sig: PressureSignals) -> tuple[float, float, float] | None:
     home = danger_index(
         sig.home_shots_on_window, sig.home_shots_inside_window,
         sig.home_xg_window, sig.home_corners_window,
-        sig.home_possession, has_xg=has_xg)
+        sig.home_possession, has_xg=has_xg, has_inside=sig.has_inside,
+        shots_total=sig.home_shots_total_window)
     away = danger_index(
         sig.away_shots_on_window, sig.away_shots_inside_window,
         sig.away_xg_window, sig.away_corners_window,
-        sig.away_possession, has_xg=has_xg)
+        sig.away_possession, has_xg=has_xg, has_inside=sig.has_inside,
+        shots_total=sig.away_shots_total_window)
     return (home + away) / 2.0, home, away
 
 

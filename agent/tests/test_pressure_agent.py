@@ -585,7 +585,7 @@ def test_a_miss_is_not_recomputed_within_one_universe():
     assert len(calls) == 1
 
 
-# ── obs_version 3: the index is renormalised when the feed has no xG ─────────
+# ── no xG in the feed: renormalised in v3-v4, estimated from shots since v5 ──
 
 def _snap(minute, **kw):
     s = lt.StatSnapshot(minute=minute, timestamp=0.0)
@@ -611,18 +611,37 @@ def _tracker_with_window(has_xg):
     return tr
 
 
-def test_a_feed_without_xg_is_no_longer_scored_out_of_sixty():
-    """The defect obs_version 3 closes.
-
-    xG carries 40% of the weight, so a fixture whose competition publishes none
+def test_a_feed_without_xg_gets_an_estimated_xg():
+    """xG carries 40% of the weight, so a fixture whose feed publishes none
     could only ever score 60/100 — against a MIN_PRESSURE of 45 that excluded it
-    outright, not merely penalised it. Measured on tradeable rows at minute 75+,
-    no-xG fixtures peaked at 29.4 and 0 of 372 could enter.
-    """
+    outright. v3 renormalised the other weights; v5 estimates the missing xG
+    from the shots instead, which sits nearer the real index on rows that had
+    both (MAE 2.35 against 4.21)."""
     sig = _tracker_with_window(has_xg=False).get_signals(1)
-    raw = lt.danger_index(4, 5, 0.0, 3, 50.0, has_xg=True)
-    assert sig.home_danger_index == pytest.approx(raw / (1.0 - lt._W_XG))
-    assert sig.home_danger_index > raw
+    est = lt.estimate_xg(4, 5)
+    assert sig.home_danger_index == pytest.approx(
+        lt.danger_index(4, 5, est, 3, 50.0, has_xg=True))
+    assert sig.home_danger_index > lt.danger_index(4, 5, 0.0, 3, 50.0, has_xg=True)
+
+
+def test_the_estimate_is_on_the_scale_of_real_xg():
+    """Four on target and five in the box in fifteen minutes is a siege; the
+    fit prices it near 0.87 xG, and nothing at all at 0.0."""
+    assert lt.estimate_xg(4, 5) == pytest.approx(4 * lt._XGE_ON + 5 * lt._XGE_IN)
+    assert 0.6 < lt.estimate_xg(4, 5) < 1.2
+    assert lt.estimate_xg(0, 0) == 0.0
+
+
+def test_without_shots_in_box_the_estimate_needs_the_total():
+    """ESPN's shape. With no shots-in-box AND no total there is nothing to
+    estimate from, and the index falls back to renormalising rather than
+    scoring a zero."""
+    assert lt.estimate_xg(3, 0, has_inside=False) is None
+    est = lt.estimate_xg(3, 0, shots_total=7, has_inside=False)
+    assert est == pytest.approx(3 * lt._XGE_ON_NO_INSIDE + 4 * lt._XGE_OFF_NO_INSIDE)
+    assert lt.danger_index(3, 0, 0.0, 2, 60.0, has_xg=False, has_inside=False,
+                           shots_total=7) == pytest.approx(
+        lt.danger_index(3, 0, est, 2, 60.0, has_inside=False))
 
 
 def test_renormalising_does_not_touch_a_feed_that_has_xg():
@@ -646,5 +665,6 @@ def test_xg_coverage_is_read_off_the_totals_not_the_window():
 def test_obs_version_was_bumped_with_the_axis():
     """Each version measures the same quantity differently — the split has to
     exist in the data or the populations pool into one meaningless yield.
-    v3 moved the axis (xG renormalised); v4 added the book gates."""
-    assert pa.OBS_VERSION == 4
+    v3 moved the axis (xG renormalised); v4 added the book gates; v5 moved the
+    axis again (missing xG estimated from shots)."""
+    assert pa.OBS_VERSION == 5

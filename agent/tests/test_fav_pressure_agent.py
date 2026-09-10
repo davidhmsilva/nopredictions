@@ -355,3 +355,123 @@ def test_no_stats_never_enters(board):
     assert not rows[0]["would_enter"]
     assert "rate limited" in rows[0]["skip_reason"]
     assert rows[0]["opening_fav_pressure"] is None
+
+
+# ── settlement: the call count is the bug ────────────────────────────────────
+# On 2026-09-10 this settle spent 143,613 api-football calls against a 75,000/day
+# key — one per pending fixture per run, on 5,560 fixtures that could never
+# settle. These pin the three things that made it unbounded.
+
+
+class _Resp:
+    def __init__(self, body, status=200):
+        self._body, self.status_code = body, status
+
+    def json(self):
+        return self._body
+
+
+class _NoCounter:
+    def record(self, kind, n=1):
+        pass
+
+
+def _af_fixture(fid, ht=(1, 0), status="FT"):
+    return {"fixture": {"id": fid, "status": {"short": status}},
+            "score": {"halftime": {"home": ht[0], "away": ht[1]}}}
+
+
+@pytest.fixture
+def af(monkeypatch):
+    """A fake api-football. Also keeps the tests off the real call counter,
+    which the live daemons read to ration the day."""
+    calls: list[list[int]] = []
+    replies: dict = {"body": None}
+
+    def fake_get(url, params=None, **kw):
+        ids = [int(x) for x in params["ids"].split("-")]
+        calls.append(ids)
+        body = replies["body"] or {"errors": [], "response": [_af_fixture(i) for i in ids]}
+        return _Resp(body)
+
+    monkeypatch.setenv("FOOTBALL_API_KEY", "k")
+    monkeypatch.setattr(fa.requests, "get", fake_get)
+    monkeypatch.setattr(fa.af_budget, "process_counter", lambda: _NoCounter())
+    return calls, replies
+
+
+def test_halftime_scores_are_batched_twenty_ids_a_call(af):
+    calls, _ = af
+    out = fa._halftime_scores(list(range(1, 46)))
+    assert [len(c) for c in calls] == [20, 20, 5]
+    assert out[45] == (1, 0)
+
+
+def test_a_refusal_stops_the_run_instead_of_spending_the_rest(af):
+    calls, replies = af
+    replies["body"] = {"errors": {"requests": "You have reached the request limit for the day"},
+                       "response": []}
+    assert fa._halftime_scores(list(range(1, 101))) == {}
+    assert len(calls) == 1
+
+
+def test_espn_ids_and_unfinished_halves_are_never_settled_from_the_api(af):
+    calls, replies = af
+    replies["body"] = {"errors": [], "response": [_af_fixture(7, status="1H"),
+                                                  _af_fixture(8, status="HT")]}
+    out = fa._halftime_scores([-401234, 7, 8])
+    assert calls == [[7, 8]]            # the negative (ESPN) id is never sent
+    assert out == {8: (1, 0)}           # a half still in play is not a result
+
+
+class _Cur:
+    def __init__(self, conn):
+        self.conn, self.rowcount, self._rows = conn, 0, []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, params=None):
+        self.conn.sql.append(sql)
+        if sql.lstrip().startswith("UPDATE"):
+            self.rowcount, self._rows = 0, []
+        elif "SELECT id, fixture_id" in sql:
+            self._rows = self.conn.pending
+        else:
+            self._rows = self.conn.tape
+
+    def fetchall(self):
+        return self._rows
+
+
+class _Conn:
+    def __init__(self, pending, tape):
+        self.pending, self.tape, self.sql = pending, tape, []
+
+    def cursor(self, cursor_factory=None):
+        return _Cur(self)
+
+    def commit(self):
+        pass
+
+
+def test_settle_never_asks_about_rows_without_a_favourite_or_stale_fixtures(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    stale = now - timedelta(hours=fa.SETTLE_API_MAX_AGE_H + 1)
+    asked: list[list[int]] = []
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: asked.append(list(ids)) or {})
+    conn = _Conn(
+        pending=[{"id": 1, "fixture_id": 5, "minute": 20, "fav_side": "home", "paper_trade_id": None},
+                 {"id": 2, "fixture_id": 6, "minute": 20, "fav_side": "away", "paper_trade_id": None}],
+        tape=[(5, 20, 0, 0, stale), (6, 20, 0, 0, now - timedelta(hours=1))],
+    )
+    assert fa.settle(conn) == 0         # neither reached the break on the tape
+    assert asked == [[6]]               # 5 is past the horizon: tape only, no call
+    closes = [s for s in conn.sql if s.lstrip().startswith("UPDATE")]
+    assert closes and "fav_side IS NULL" in closes[0]
+    pending_sql = next(s for s in conn.sql if "SELECT id, fixture_id" in s)
+    assert "fav_side IS NOT NULL" in pending_sql

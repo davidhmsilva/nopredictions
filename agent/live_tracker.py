@@ -44,15 +44,49 @@ MIN_MINUTE_FOR_SIGNALS = 15
 # the window baseline exactly when the second half starts.
 MISSING_POLLS_BEFORE_DROP = 20
 
+# api-football's xG stat type, normalised (lowercase, spaces -> underscores).
+# Exact-string matching on 'expected_goals' turns any rename into a silent 0.
+_XG_TYPES = frozenset({'expected_goals', 'xg', 'expected_goals_(xg)'})
+_STAT_TYPES_SEEN: set[str] = set()
+
 
 # The hand-written weights. xG carries 40% of the score and api-football supplies
 # it on only about 60% of the fixtures it covers with statistics at all.
 _W_XG, _W_SHOTS_ON, _W_SHOTS_IN, _W_CORNERS, _W_POSS = 0.40, 0.25, 0.15, 0.10, 0.10
 
+# The xG the feed no longer sends, estimated from what it still does. Fitted by
+# non-negative least squares on api-football's OWN live xG — 459 fixtures,
+# 29,839 fixture-minutes, 2026-08-14 → 09-01, the last days it carried xG —
+# out-of-sample by fixture: cumulative R² 0.73, 15-minute-window corr 0.82.
+# Shots from outside the box and corners came out at exactly 0: whatever xG they
+# carry is already in the on-target term. Without shots-in-box (ESPN) the fit
+# uses on-target + off-target instead, R² 0.69; 32k historical team-matches
+# (Understat/FBref xG against Football-Data shots) give 0.215 / 0.055 on the
+# same two terms — the same shape. Refit with `python xg_proxy_fit.py`.
+_XGE_ON, _XGE_IN = 0.0868, 0.1045
+_XGE_ON_NO_INSIDE, _XGE_OFF_NO_INSIDE = 0.1664, 0.0592
+
+
+def estimate_xg(shots_on: float, shots_inside: float,
+                shots_total: float | None = None,
+                has_inside: bool = True) -> float | None:
+    """xG estimated from shot counts, on the same span as the counts passed in.
+
+    None when the feed gives us nothing to estimate from — no shots-in-box AND
+    no total — so the caller can say "unknown" rather than score a zero.
+    """
+    if has_inside:
+        return _XGE_ON * shots_on + _XGE_IN * shots_inside
+    if shots_total is None:
+        return None
+    return (_XGE_ON_NO_INSIDE * shots_on
+            + _XGE_OFF_NO_INSIDE * max(0.0, shots_total - shots_on))
+
 
 def danger_index(shots_on: float, shots_inside: float, xg: float,
                  corners: float, possession: float,
-                 has_xg: bool = True, has_inside: bool = True) -> float:
+                 has_xg: bool = True, has_inside: bool = True,
+                 shots_total: float | None = None) -> float:
     """
     Composite danger score 0–100.
     Weights: xG(40%) + shots_on(25%) + shots_inside(15%) + corners(10%) + possession(10%)
@@ -77,10 +111,31 @@ def danger_index(shots_on: float, shots_inside: float, xg: float,
     row so a later fit can control for it instead of treating two different
     measurements as one.
 
+    Superseded 2026-09-11: the missing xG is now ESTIMATED from shots
+    (estimate_xg), and renormalising survives only as the fallback when not even
+    that is possible. api-football stopped sending xG on 2026-09-02, so this is
+    now every fixture, not 40% of them. Measured on 21,865 fixture-minutes that
+    DID carry real xG, recomputing the index each way against the real one:
+
+        treatment        MAE vs real   p90 at 75'+   share >= 45 at 75'+
+        real xG             0.00          41.0            7.8%
+        estimated xG        2.35          36.8            6.8%
+        renormalised        4.21          34.3            6.2%
+
+    The estimate halves the error and sits nearer the real scale — but it is
+    shots reweighted, not new information: it cannot see what xG saw beyond
+    them, and it smooths the top tail. `has_xg` still records what the FEED
+    sent, so an estimated row stays separable from a measured one.
+
     Module level, and not a method, because the weights are the object under
     test: they were written by hand and never estimated, and two copies of them
     drifting apart would quietly split the evidence for refitting them.
     """
+    if not has_xg:
+        est = estimate_xg(shots_on, shots_inside, shots_total, has_inside)
+        if est is not None:
+            xg, has_xg = est, True
+
     xg_score = min(100, xg * 100)                      # 1.0 xG in window = 100
     shots_on_score = min(100, shots_on * 20)           # 5 shots on target = 100
     shots_inside_score = min(100, shots_inside * 15)   # ~7 shots inside = 100
@@ -180,6 +235,8 @@ class PressureSignals:
     away_shots_on_window: int = 0
     home_shots_inside_window: int = 0
     away_shots_inside_window: int = 0
+    home_shots_total_window: int = 0     # only the xG estimate reads these
+    away_shots_total_window: int = 0
     home_xg_window: float = 0.0
     away_xg_window: float = 0.0
     home_corners_window: int = 0
@@ -764,6 +821,15 @@ class LiveMatchTracker:
 
     def _parse_stats(self, snap: StatSnapshot, stats: list[dict], is_home: bool):
         """Parse api-football statistics array into a snapshot."""
+        new = {s.get('type', '') for s in stats} - _STAT_TYPES_SEEN
+        if new:
+            # xG went from present to 0% of fixtures on 2026-09-02, on every
+            # league at once, while shots/corners/possession kept arriving — the
+            # shape of a renamed field more than of a feed dropping it. Every
+            # name is logged the first time a process sees it, so the next
+            # change of this kind shows up in the log instead of as a silent 0.
+            _STAT_TYPES_SEEN.update(new)
+            log.info(f"[tracker] api-football stat types first seen: {sorted(new)}")
         for s in stats:
             typ = s.get('type', '')
             val = s.get('value')
@@ -786,7 +852,7 @@ class LiveMatchTracker:
                 pct = float(str(val).replace('%', ''))
                 if is_home: snap.home_possession = pct
                 else: snap.away_possession = pct
-            elif typ == 'expected_goals':
+            elif typ.strip().lower().replace(' ', '_') in _XG_TYPES:
                 if is_home: snap.home_xg = float(val)
                 else: snap.away_xg = float(val)
             elif typ == 'Goalkeeper Saves':
@@ -950,6 +1016,8 @@ class LiveMatchTracker:
             signals.away_shots_on_window = max(0, latest.away_shots_on - window_start.away_shots_on)
             signals.home_shots_inside_window = max(0, latest.home_shots_inside - window_start.home_shots_inside)
             signals.away_shots_inside_window = max(0, latest.away_shots_inside - window_start.away_shots_inside)
+            signals.home_shots_total_window = max(0, latest.home_shots_total - window_start.home_shots_total)
+            signals.away_shots_total_window = max(0, latest.away_shots_total - window_start.away_shots_total)
             signals.home_xg_window = max(0.0, latest.home_xg - window_start.home_xg)
             signals.away_xg_window = max(0.0, latest.away_xg - window_start.away_xg)
             signals.home_corners_window = max(0, latest.home_corners - window_start.home_corners)
@@ -960,6 +1028,8 @@ class LiveMatchTracker:
                 scale = min(1.0, self.window_minutes / latest.minute)
                 signals.home_shots_on_window = round(latest.home_shots_on * scale)
                 signals.away_shots_on_window = round(latest.away_shots_on * scale)
+                signals.home_shots_total_window = round(latest.home_shots_total * scale)
+                signals.away_shots_total_window = round(latest.away_shots_total * scale)
                 signals.home_xg_window = latest.home_xg * scale
                 signals.away_xg_window = latest.away_xg * scale
 
@@ -991,19 +1061,22 @@ class LiveMatchTracker:
             signals.home_shots_on_window, signals.home_shots_inside_window,
             signals.home_xg_window, signals.home_corners_window,
             signals.home_possession, latest.minute, has_xg=has_xg,
-            has_inside=latest.has_inside)
+            has_inside=latest.has_inside,
+            shots_total=signals.home_shots_total_window)
         signals.away_danger_index = self._danger_index(
             signals.away_shots_on_window, signals.away_shots_inside_window,
             signals.away_xg_window, signals.away_corners_window,
             signals.away_possession, latest.minute, has_xg=has_xg,
-            has_inside=latest.has_inside)
+            has_inside=latest.has_inside,
+            shots_total=signals.away_shots_total_window)
 
         return signals
 
     def _danger_index(self, shots_on: int, shots_inside: int,
                       xg: float, corners: int, possession: float,
                       minute: int, has_xg: bool = True,
-                      has_inside: bool = True) -> float:
+                      has_inside: bool = True,
+                      shots_total: int | None = None) -> float:
         """Composite danger score 0–100 over the rolling window.
 
         This used to drop has_xg on purpose, to protect the record Live Pressure
@@ -1022,7 +1095,8 @@ class LiveMatchTracker:
         row so the fit can control for it.
         """
         return danger_index(shots_on, shots_inside, xg, corners, possession,
-                            has_xg=has_xg, has_inside=has_inside)
+                            has_xg=has_xg, has_inside=has_inside,
+                            shots_total=shots_total)
 
     def get_all_signals(self) -> dict[int, PressureSignals]:
         """Get pressure signals for all tracked fixtures."""

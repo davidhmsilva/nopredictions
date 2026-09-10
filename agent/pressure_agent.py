@@ -101,7 +101,11 @@ log = logging.getLogger("pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 STRATEGY_NAME = "Live Pressure Overs"
-OBS_VERSION = 4
+# v5 (2026-09-11): the AXIS moved again — a fixture with no xG in the feed gets
+# an ESTIMATED xG from its shots (live_tracker.estimate_xg) instead of the xG
+# term being dropped and the rest renormalised. api-football has sent no xG
+# since 09-02, so that is every row. Never pool with v4.
+OBS_VERSION = 5
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300         # PM universe re-pull

@@ -1469,6 +1469,68 @@ After restarting both daemons, `pg_stat_activity` shows **zero** backends in
 
 ⚠️ **A restart was required for any of it to apply**, as always in this repo.
 
+## The settle cron was spending the key — fixed 2026-09-10
+
+s16 had not entered since 09-05 15:06Z. api-football refused the live poll
+from mid-afternoon every day, and the per-process counters said whose calls
+did it: `.af_calls_pressure_settle.json` recorded **143,613 on 09-10** against
+a 75,000/day key, at a steady ~5,525 per settle run. The live daemon spent 1,613.
+
+🔑 **`fav_pressure_agent.settle()` fetched before it filtered.** It asked for
+the half-time score of every pending fixture, one call each, and only THEN
+`continue`d past rows with `fav_side IS NULL`. Those rows — every fixture with
+no favourite, i.e. most of what the agent watches — could never settle, so they
+stayed pending and were fetched again on every run: 5,556 of 5,560 pending
+fixtures, piling up since 08-19, so the cost grew daily until it passed the
+whole allowance. The likeliest answer to the question the 09-06 section left
+open ("7,176 of our own against a refusal").
+
+Fixed in `fav_pressure_agent.py`:
+- no-favourite rows are closed set-based with **no call** (`ht_source =
+  'no_favourite'`, outcome columns NULL) — 247,671 closed on the first run, 32s;
+- `_halftime_scores()` batches 20 ids per call, stops at the first refusal, and
+  never sends ESPN's negative ids;
+- `SETTLE_API_MAX_AGE_H = 72`: an older fixture settles from the tape or not at
+  all, so what cannot settle costs nothing per run.
+
+⚠️ **s16 has a second, separate problem: xG.** api-football rows have carried
+**no xG since 2026-09-02** — every league on the same day, while shots, corners
+and possession kept arriving (238 fixtures with stats that day, 0 with xG).
+`_parse_stats` matched the exact string `'expected_goals'`; it now matches
+normalised variants and logs every stat-type name the first time a process sees
+it. **A rename is a theory, not a finding** — read the `stat types first seen`
+line after the 00:00 UTC reset.
+
+### The xG is now estimated — obs_version bump on all three arms (2026-09-11)
+
+`live_tracker.estimate_xg`, fitted by `agent/xg_proxy_fit.py` on api-football's
+OWN live xG (459 fixtures, 08-14 → 09-01, out-of-sample by fixture):
+**xG ≈ 0.087 × shots on target + 0.104 × shots in the box** — R² 0.73
+cumulative, corr 0.82 on the 15-minute window. Outside-box shots and corners fit
+to exactly 0. ESPN (no shots-in-box): 0.166 × on + 0.059 × off-target, R² 0.69,
+the same shape as 32k historical team-matches. `danger_index` uses the estimate
+whenever the feed has no xG; renormalising survives only as the fallback when
+not even the estimate is possible.
+
+On 21,865 fixture-minutes that DID carry real xG, the index recomputed each way:
+
+| | MAE vs real | p90 at 75'+ | ≥45 at 75'+ |
+|---|---|---|---|
+| real xG | 0 | 41.0 | 7.8% |
+| **estimated (now)** | **2.35** | 36.8 | 6.8% |
+| renormalised (before) | 4.21 | 34.3 | 6.2% |
+
+🔑 **This corrects a number above's framing:** "no-xG p90 31 vs with-xG 43"
+compared DIFFERENT fixtures. On the same fixtures the missing xG costs ~7 points
+at p90 and the rest is competition mix — so the estimate lifts s16's ≥45 rate
+~10% (6.2% → 6.8% of rows at 75'+), it does not restore 7.8%. And it is **shots
+reweighted, not new information**: [[finding-live-reading-ceiling]] still holds.
+
+`has_xg` still says what the FEED sent, so from these versions on
+`has_xg = false` means *estimated*. Fixed on the way: `ht_pressure_agent` never
+passed `has_inside`, so on ESPN rows s17/s18 scored shots-in-box as a real zero.
+**s16 v5 · s17 v6 · s18 v4** — never pool with earlier versions.
+
 ## Polymarket already carried the clock (2026-09-06)
 
 Found by the user looking at Polymarket's own page — "2H - 90", "0 - 1" — while
