@@ -76,13 +76,79 @@ def test_a_sell_spanning_two_lots_splits_them():
 
 
 def test_the_price_field_is_ignored_in_favour_of_the_cash():
-    """PM rounds `price` to the displayed tick — 17.5% of GSX-'s fills disagree
-    with their own usdcSize. The money moved is the only price that is real."""
+    """`price` is the execution price before the fee; usdcSize is the cash that
+    moved. P&L is measured on the money, never on the quoted price."""
     rows = [trade(1000, "BUY", 30, 1.1412, price=0.04),
             trade(2000, "SELL", 30, 1.1412, price=0.04)]
     lots, _ = wa.build_lots(rows, {CID: MARKET})
     assert lots[0].entry_price == pytest.approx(0.03804)
     assert lots[0].pnl == pytest.approx(0.0)
+
+
+# ── fees and the leaderboard ─────────────────────────────────────────────────
+
+def test_the_fee_is_the_cash_beyond_the_pre_fee_price():
+    """On a buy the fee is paid on top of price × shares; on a sell it comes out
+    of the proceeds. king1605: $5,866 this way, to the dollar what gravia.trade
+    reports as the wallet's fees."""
+    rows = [trade(1000, "BUY", 100, 50.0 + 1.25, price=0.50),    # 0.05·0.5·0.5·100
+            trade(2000, "SELL", 100, 60.0 - 1.20, price=0.60)]   # 0.05·0.6·0.4·100
+    _, flows = wa.build_lots(rows, {CID: MARKET})
+    assert flows["fees"] == pytest.approx(2.45)
+
+
+def test_a_maker_fill_pays_no_fee():
+    rows = [trade(1000, "BUY", 100, 50.0, price=0.50)]
+    _, flows = wa.build_lots(rows, {CID: MARKET})
+    assert flows["fees"] == pytest.approx(0.0)
+
+
+def test_the_leaderboard_is_matched_gross_of_fees_not_net():
+    """PM's leaderboard counts profit before fees. king1605 read 'unreconciled'
+    ($41,098 vs $35,366 net) when the whole gap was $5,866 of fees."""
+    rows = [trade(1000, "BUY", 100, 51.25, price=0.50)]          # wins: +48.75 net
+    p = wa.analyse("0xabc", rows, {CID: MARKET}, lb_profit=50.0)
+    assert p["totals"]["pnl"] == pytest.approx(48.75)
+    assert p["totals"]["fees"] == pytest.approx(1.25)
+    assert p["reconciliation"]["reconstructed"] == pytest.approx(50.0)
+    assert p["trust"] == "ok"
+    assert wa.analyse("0xabc", rows, {CID: MARKET}, lb_profit=45.0)["trust"] == "unreconciled"
+
+
+def test_rebates_are_left_out_of_the_leaderboard_comparison():
+    """Adding rebates pushed BOTH king1605 and GSX- outside their bracket."""
+    rows = [trade(1000, "BUY", 100, 51.25, price=0.50),
+            {"timestamp": 1500, "type": "MAKER_REBATE", "usdcSize": 30.0, "size": 0,
+             "conditionId": CID, "transactionHash": "0xreb"}]
+    p = wa.analyse("0xabc", rows, {CID: MARKET}, lb_profit=50.0)
+    assert p["reconciliation"]["reconstructed"] == pytest.approx(50.0)
+    assert p["trust"] == "ok"
+
+
+# ── what sport a market is ───────────────────────────────────────────────────
+
+SPORTS = {"rus": {"name": "Russian Premier League", "football": True},
+          "lol": {"name": "LoL", "football": False}}
+
+
+def _on(ticker):
+    return {**MARKET, "events": [{"ticker": ticker}]}
+
+
+def test_gammas_league_list_decides_football_before_the_hand_table():
+    """king1605 read 37% 'unknown sport' on a book that is all football."""
+    assert wa._football(_on("rus-kra-fak-2026-08-02"), SPORTS) is True
+    assert wa._football(_on("lol-t1-gen-2026-08-02"), SPORTS) is False
+    assert wa._football(_on("rus-kra-fak-2026-08-02")) is None     # no list → we do not know
+
+
+def test_col_is_the_conference_league_not_colombia():
+    assert wa._competition(_on("col-ars-che-2026-08-02")) == "Conference League"
+
+
+def test_a_code_the_hand_table_lacks_is_named_from_gammas_list():
+    assert wa._competition(_on("rus-kra-fak-2026-08-02"), SPORTS) == "Russian Premier League"
+    assert wa._competition(_on("rus-kra-fak-2026-08-02")) == "RUS"
 
 
 # ── redemptions ──────────────────────────────────────────────────────────────

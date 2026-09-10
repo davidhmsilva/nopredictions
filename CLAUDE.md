@@ -980,7 +980,9 @@ than an obvious failure:
 | | |
 |---|---|
 | `/activity?offset=` | refuses past **5000**. A naive pager returns 5,000 rows and looks complete; GSX- has 16,157. Page by time cursor. |
-| a fill's `price` | is **rounded to the displayed tick** and disagrees with the cash on 2,771 of 15,810 fills (30 shares at "0.04" cost $1.1412). Use `usdcSize / size`. |
+| a fill's `price` | is the price **before the fee**; `usdcSize` is the cash, fee included. Use `usdcSize / size` for P&L. The gap IS the fee — 0 on maker fills, rate × p(1−p) per share on taker (mostly 0.05), never negative on 16.5k fills across two wallets. It was once read as tick rounding; it is not. |
+| lb-api `profit` | is **GROSS of fees and leaves rebates out**. Compared against net P&L, every fee-paying wallet read `unreconciled` — king1605 $41,098 vs $35,366, the gap being $5,876 of fees (to the dollar what gravia.trade shows). Reconciled against P&L + fees with a 1% tolerance since 2026-09-10. |
+| the ticker head | is not a sport, and a hand table goes stale: `col` is the **Conference League**, not Colombia, and 37% of an all-football wallet read "unknown". Gamma `/sports` (465 leagues) is keyed on the same code, names the league and tags soccer (`100350`). Its series ids change by season — never join on them. |
 | REDEEM rows | carry **no `asset`** — map `(conditionId, outcomeIndex)` → token or the payout lands on the other side of the market. |
 | shares sold, never bought | are neg-risk conversions (`type=CONVERSION` returns empty). Booked **FLAT, never free** — free is an error that can only run one way, the shape of db/038. The report brackets the two bounds and PM's own figure has to fall inside. |
 | MERGE | **is a real exit and the feed publishes it** (RN1: 2,845). Unmodelled it showed **−$14.2M of "expired worthless"** that never happened. SPLIT stays unmodelled on purpose — its per-leg cost is unknowable and any convention would distort the entry-price bands. |

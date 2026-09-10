@@ -11,8 +11,10 @@
  *
  * The traps are documented in the Python. The short version:
  *   · `/activity?offset=` refuses past 5000 — page by time cursor, never offset.
- *   · `price` on a fill is rounded to the displayed tick and disagrees with the
- *     cash on ~18% of them. Use usdcSize / size.
+ *   · `price` on a fill is the price BEFORE the fee; usdcSize is the cash, fee
+ *     included. P&L uses usdcSize / size, and the gap between the two is the fee.
+ *   · Polymarket's leaderboard profit is GROSS of fees and leaves rebates out —
+ *     reconcile against P&L + fees, or every fee-paying wallet looks broken.
  *   · REDEEM rows carry no `asset` — map (conditionId, outcomeIndex) → token.
  *   · Shares sold that were never bought came from neg-risk conversions, which
  *     the feed does not publish. Book them FLAT, never free.
@@ -64,7 +66,7 @@ const COMPETITIONS: Record<string, string> = {
   fra: 'Ligue 1', ned: 'Eredivisie', por: 'Primeira Liga', efl: 'Championship',
   ucl: 'Champions League', uel: 'Europa League', uecl: 'Conference League',
   bra: 'Brasileirão', bra2: 'Brasileirão B', cdb: 'Copa do Brasil',
-  arg: 'Argentina Primera', mls: 'MLS', lmx: 'Liga MX', col: 'Colombia',
+  arg: 'Argentina Primera', mls: 'MLS', lmx: 'Liga MX', col: 'Conference League',
   chi: 'Chile', lib: 'Libertadores', sud: 'Sudamericana',
   lc: 'Leagues Cup', lec: 'Leagues Cup', col1: 'Colombia Primera A',
   csl: 'Chinese Super League', egy: 'Egypt', tur: 'Süper Lig',
@@ -297,6 +299,33 @@ export async function fetchLbProfit(wallet: string): Promise<number | null> {
   return Array.isArray(d) && d.length ? Number(d[0].amount) : null
 }
 
+/** How far PM's leaderboard may sit from the gross reconstruction and still
+ *  agree — king1605 sits 0.35% off after fees, for a reason not yet found. */
+const RECON_TOL_PCT = 0.01
+const SOCCER_TAG = '100350'
+
+/** Gamma's league list keyed by the code event tickers lead with — names every
+ *  league and tags the soccer ones. Series ids are NOT used: they change by
+ *  season. A failure returns {} and the hand-kept table answers alone. */
+export async function fetchSports(): Promise<Sports> {
+  const out: Sports = {}
+  try {
+    const d = await getJson(`${GAMMA_API}/sports`)
+    for (const row of Array.isArray(d) ? d : []) {
+      const code = String(row.sport || '').toLowerCase()
+      if (code) {
+        out[code] = {
+          name: row.name || code.toUpperCase(),
+          football: String(row.tags || '').split(',').includes(SOCCER_TAG),
+        }
+      }
+    }
+  } catch {
+    // the hand-kept table still answers for the codes it knows
+  }
+  return out
+}
+
 export async function fetchCurrentValue(wallet: string): Promise<number | null> {
   const d = await getJson(`${DATA_API}/value?user=${wallet}`)
   return Array.isArray(d) && d.length ? Number(d[0].value) : null
@@ -351,11 +380,24 @@ function isFootball(label: string): boolean | null {
   return null
 }
 
-function competition(m?: GammaMarket): string {
-  const ticker = m?.events?.[0]?.ticker || ''
-  const head = String(ticker).split('-')[0].toLowerCase()
+export type Sports = Record<string, { name: string; football: boolean }>
+
+const tickerHead = (m?: GammaMarket) => String(m?.events?.[0]?.ticker || '').split('-')[0].toLowerCase()
+
+function competition(m?: GammaMarket, sports?: Sports): string {
+  const head = tickerHead(m)
   if (!head) return 'unknown'
-  return COMPETITIONS[head] || head.toUpperCase()
+  if (COMPETITIONS[head]) return COMPETITIONS[head]
+  if (sports?.[head]) return sports[head].name
+  return head.toUpperCase()
+}
+
+/** Gamma's own league list decides first; the hand-kept table only answers
+ *  for codes that list does not carry. */
+function football(m?: GammaMarket, sports?: Sports): boolean | null {
+  const head = tickerHead(m)
+  if (sports?.[head]) return sports[head].football
+  return isFootball(competition(m, sports))
 }
 
 // ─── the reconstruction ─────────────────────────────────────────────────────
@@ -363,7 +405,7 @@ function competition(m?: GammaMarket): string {
 interface Flows {
   buys: number; sells: number; redeems: number; merges: number; mergeProceeds: number
   deployed: number; sellProceeds: number; redeemProceeds: number; openValue: number
-  rebates: number; rewards: number; unhandled: Record<string, number>
+  rebates: number; rewards: number; fees: number; unhandled: Record<string, number>
 }
 
 /** What the first `shares` in the queue cost, without consuming them. */
@@ -413,7 +455,7 @@ export function buildLots(rows: ActivityRow[], markets: Record<string, GammaMark
   const unhandled: Record<string, number> = {}
   const flows: Flows = {
     buys: 0, sells: 0, redeems: 0, merges: 0, mergeProceeds: 0, deployed: 0, sellProceeds: 0,
-    redeemProceeds: 0, openValue: 0, rebates: 0, rewards: 0, unhandled,
+    redeemProceeds: 0, openValue: 0, rebates: 0, rewards: 0, fees: 0, unhandled,
   }
 
   const tokenOf: Record<string, string> = {}
@@ -438,9 +480,11 @@ export function buildLots(rows: ActivityRow[], markets: Record<string, GammaMark
       const asset = r.asset || ''
       if (!asset || size <= 0) continue
       remember(asset, r)
-      // ⚠️ NOT r.price — that field is rounded to the displayed tick and
-      // disagrees with the cash on ~18% of fills. The money moved is the price.
+      // ⚠️ NOT r.price — that is the price BEFORE the fee. The money moved is
+      // the price, and the gap between the two is the fee (see the Python).
       const price = usd / size
+      const px = Number(r.price || 0)
+      if (px > 0) flows.fees += r.side === 'BUY' ? usd - px * size : px * size - usd
       if (r.side === 'BUY') {
         flows.buys++
         flows.deployed += usd
@@ -653,6 +697,7 @@ function bootstrap(lots: Lot[], seed = 0x9e3779b9, draws = 4000) {
 export function analyse(
   wallet: string, rows: ActivityRow[], markets: Record<string, GammaMarket>,
   complete = true, lbProfit: number | null = null, currentValue: number | null = null,
+  sports: Sports = {},
 ): WalletProfile {
   const { lots: allLots, flows } = buildLots(rows, markets)
   if (!allLots.length) throw new Error('no market activity could be reconstructed for this wallet')
@@ -761,7 +806,7 @@ export function analyse(
   let footballCost = 0
   let unknownSportCost = 0
   for (const l of lots) {
-    const verdict = isFootball(competition(markets[l.conditionId]))
+    const verdict = football(markets[l.conditionId], sports)
     if (verdict === true) footballCost += cost(l)
     else if (verdict === null) unknownSportCost += cost(l)
   }
@@ -770,6 +815,9 @@ export function analyse(
   const exposure = exposureOf(lots)
   const sweepCost = sum(sweeps.map(cost))
   const sweepPnl = sum(sweeps.map(lotPnl))
+  // PM's leaderboard is GROSS of fees and leaves rebates out — see the Python.
+  const feesPaid = flows.fees
+  const reconTol = lbProfit !== null ? Math.max(1, RECON_TOL_PCT * Math.abs(lbProfit)) : 1
 
   const profile: WalletProfile = {
     wallet: wallet.toLowerCase(),
@@ -795,7 +843,7 @@ export function analyse(
       open_value: flows.openValue, pnl, pnl_high: pnlHigh,
       yield_pct: pct(pnl, deployed), yield_high_pct: pct(pnlHigh, deployed),
       realized_pnl: sum(closed.map(lotPnl)), marked_pnl: sum(marks.map(lotPnl)),
-      rebates: flows.rebates, rewards: flows.rewards,
+      rebates: flows.rebates, rewards: flows.rewards, fees: feesPaid,
       median_ticket: median(buyTickets), p90_ticket: quantile(buyTickets, 0.9),
       max_ticket: maxOf(buyTickets),
       buy_vwap: buyShares ? deployed / buyShares : 0,
@@ -805,12 +853,14 @@ export function analyse(
     },
     reconciliation: {
       lb_profit: lbProfit,
-      reconstructed: pnl + flows.rebates + flows.rewards,
-      reconstructed_high: pnlHigh + flows.rebates + flows.rewards,
+      basis: 'gross of fees, rebates excluded',
+      reconstructed: pnl + feesPaid,
+      reconstructed_high: pnlHigh + feesPaid,
+      tolerance: reconTol,
       inside_bracket:
         lbProfit !== null &&
-        pnl + flows.rebates + flows.rewards - 1 <= lbProfit &&
-        lbProfit <= pnlHigh + flows.rebates + flows.rewards + 1,
+        pnl + feesPaid - reconTol <= lbProfit &&
+        lbProfit <= pnlHigh + feesPaid + reconTol,
     },
     exposure: { ...exposure, turnover: exposure.peak_cost_basis ? deployed / exposure.peak_cost_basis : 0 },
     hold: {
@@ -838,7 +888,7 @@ export function analyse(
       worst: minOf(dayVals),
       worst_losing_streak: worstStreak,
     },
-    universe: bucket(lots, (l) => competition(markets[l.conditionId])).slice(0, 16),
+    universe: bucket(lots, (l) => competition(markets[l.conditionId], sports)).slice(0, 16),
     market_types: bucket(lots, (l) => markets[l.conditionId]?.sportsMarketType || 'other').slice(0, 10),
     concentration: {
       top1_pct: pct(sum(ranked.slice(0, 1)), pnl),
@@ -1161,8 +1211,12 @@ export function narrate(p: WalletProfile) {
   }
   para.push(
     `Concentration: top event ${conc.top1_pct.toFixed(0)}% of profit, top 5 ${conc.top5_pct.toFixed(0)}%, top 10 ` +
-      `${conc.top10_pct.toFixed(0)}%; ${conc.profitable_events_pct.toFixed(0)}% of events profitable. Drop the 200 ` +
-      `best individual lots and it still makes ${fmtMoney(conc.drop_top200_pnl)} (${sgn(conc.drop_top200_yield_pct, 2)}). ` +
+      `${conc.top10_pct.toFixed(0)}%; ${conc.profitable_events_pct.toFixed(0)}% of events profitable. ` +
+      (conc.drop_top200_pnl >= 0
+        ? `Drop the 200 best individual lots and it still makes ${fmtMoney(conc.drop_top200_pnl)} ` +
+          `(${sgn(conc.drop_top200_yield_pct, 2)}). `
+        : `Drop the 200 best individual lots and the rest of the book LOSES ${fmtMoney(Math.abs(conc.drop_top200_pnl))} ` +
+          `(${sgn(conc.drop_top200_yield_pct, 2)}) — the entire result is those 200 trades. `) +
       (conc.top5_pct < 35
         ? 'The result does not depend on a handful of bets.'
         : '**A large share of the result is a handful of bets** — treat the headline as one draw.'),
@@ -1171,8 +1225,9 @@ export function narrate(p: WalletProfile) {
   if (rec.lb_profit !== null && rec.lb_profit !== undefined) {
     if (cov.unmatched_lots) {
       para.push(
-        `Reconciliation: Polymarket's own all-time profit for this wallet is ${fmtMoney(rec.lb_profit)}; our ` +
-          `reconstruction brackets it at ${fmtMoney(rec.reconstructed)} … ${fmtMoney(rec.reconstructed_high)} ` +
+        `Reconciliation: Polymarket's own all-time profit for this wallet is ${fmtMoney(rec.lb_profit)}, counted ` +
+          `before fees; on the same basis (P&L plus ${fmtMoney(t.fees)} of fees paid) our reconstruction ` +
+          `brackets it at ${fmtMoney(rec.reconstructed)} … ${fmtMoney(rec.reconstructed_high)} ` +
           (rec.inside_bracket
             ? '(it falls inside — the reconstruction is trustworthy).'
             : '(**it falls outside — do not trust these numbers**; something in the reconstruction is wrong, ' +
@@ -1181,10 +1236,11 @@ export function narrate(p: WalletProfile) {
     } else {
       const gap = rec.lb_profit - rec.reconstructed
       para.push(
-        `Reconciliation: Polymarket says ${fmtMoney(rec.lb_profit)} all-time, we reconstruct ` +
+        `Reconciliation: Polymarket says ${fmtMoney(rec.lb_profit)} all-time, counted before fees; on the ` +
+          `same basis (P&L plus ${fmtMoney(t.fees)} of fees paid) we reconstruct ` +
           `${fmtMoney(rec.reconstructed)} — a gap of ${fmtMoney(gap)} ` +
           `(${pct(Math.abs(gap), Math.abs(rec.lb_profit) || 1).toFixed(1)}%). ` +
-          (Math.abs(gap) < 0.05 * Math.abs(rec.lb_profit || 1)
+          (rec.inside_bracket
             ? 'Close enough to trust.'
             : '**That gap is large enough to matter — read the numbers as approximate.**'),
       )
@@ -1248,12 +1304,13 @@ export function narrate(p: WalletProfile) {
 /** One call: fetch everything and analyse. */
 export async function analyseWallet(wallet: string, since: number | null = null): Promise<WalletProfile> {
   const addr = wallet.trim().toLowerCase()
-  const [{ rows, complete }, lbProfit, currentValue] = await Promise.all([
+  const [{ rows, complete }, lbProfit, currentValue, sports] = await Promise.all([
     fetchActivity(addr, since),
     fetchLbProfit(addr),
     fetchCurrentValue(addr),
+    fetchSports(),
   ])
   if (!rows.length) throw new Error('this address has no Polymarket activity')
   const markets = await fetchMarkets(rows.map((r) => r.conditionId || ''))
-  return analyse(addr, rows, markets, complete, lbProfit, currentValue)
+  return analyse(addr, rows, markets, complete, lbProfit, currentValue, sports)
 }

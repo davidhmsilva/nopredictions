@@ -262,6 +262,32 @@ def fetch_lb_profit(wallet: str, session: Optional[requests.Session] = None) -> 
     return None
 
 
+SOCCER_TAG = "100350"
+
+
+def fetch_sports(session: Optional[requests.Session] = None) -> dict[str, dict]:
+    """Gamma's league list, keyed by the code event tickers lead with.
+
+    The ticker head is the only competition id a market carries, and a
+    hand-kept table of them goes stale: king1605 read 37% "unknown sport" on a
+    book that is all football (rus, swe, aut, kor…), and `col` — once mapped to
+    Colombia — is the Conference League. `/sports` names all ~465 leagues and
+    tags the soccer ones. Series ids are NOT used: they change by season, and 6
+    of king1605's Russian markets carry one `/sports` does not list.
+    """
+    s = session or _session()
+    out: dict[str, dict] = {}
+    try:
+        for row in _get(s, f"{GAMMA_API}/sports") or []:
+            code = str(row.get("sport") or "").lower()
+            if code:
+                tags = str(row.get("tags") or "").split(",")
+                out[code] = {"name": row.get("name") or code.upper(), "football": SOCCER_TAG in tags}
+    except Exception:
+        pass
+    return out
+
+
 def fetch_current_value(wallet: str, session: Optional[requests.Session] = None) -> Optional[float]:
     s = session or _session()
     try:
@@ -333,7 +359,7 @@ COMPETITIONS = {
     "fra": "Ligue 1", "ned": "Eredivisie", "por": "Primeira Liga", "efl": "Championship",
     "ucl": "Champions League", "uel": "Europa League", "uecl": "Conference League",
     "bra": "Brasileirão", "bra2": "Brasileirão B", "cdb": "Copa do Brasil",
-    "arg": "Argentina Primera", "mls": "MLS", "lmx": "Liga MX", "col": "Colombia",
+    "arg": "Argentina Primera", "mls": "MLS", "lmx": "Liga MX", "col": "Conference League",
     "chi": "Chile", "lib": "Libertadores", "sud": "Sudamericana",
     "lc": "Leagues Cup", "lec": "Leagues Cup", "col1": "Colombia Primera A",
     "csl": "Chinese Super League", "egy": "Egypt", "tur": "Süper Lig",
@@ -359,13 +385,30 @@ def _is_football(label: str) -> Optional[bool]:
     return None
 
 
-def _competition(m: dict) -> str:
+def _ticker_head(m: dict) -> str:
     ev = (m or {}).get("events") or []
     ticker = (ev[0].get("ticker") if ev else "") or (m or {}).get("slug") or ""
-    head = str(ticker).split("-")[0].lower()
+    return str(ticker).split("-")[0].lower()
+
+
+def _competition(m: dict, sports: Optional[dict] = None) -> str:
+    head = _ticker_head(m)
     if not head:
         return "unknown"
-    return COMPETITIONS.get(head, head.upper())
+    if head in COMPETITIONS:
+        return COMPETITIONS[head]
+    if sports and head in sports:
+        return sports[head]["name"]
+    return head.upper()
+
+
+def _football(m: dict, sports: Optional[dict] = None) -> Optional[bool]:
+    """Gamma's own league list decides first; the hand-kept table only answers
+    for codes that list does not carry."""
+    head = _ticker_head(m)
+    if sports and head in sports:
+        return sports[head]["football"]
+    return _is_football(_competition(m, sports))
 
 
 # ─── the reconstruction ─────────────────────────────────────────────────────
@@ -382,7 +425,7 @@ def build_lots(rows: list[dict], markets: dict[str, dict]) -> tuple[list[Lot], d
     lots: list[Lot] = []
     meta: dict[str, dict] = {}
     unhandled: Counter = Counter()
-    rebates = rewards = 0.0
+    rebates = rewards = fees = 0.0
     sell_proceeds = redeem_proceeds = merge_proceeds = deployed = 0.0
     buys = sells = redeems = merges = 0
 
@@ -413,11 +456,16 @@ def build_lots(rows: list[dict], markets: dict[str, dict]) -> tuple[list[Lot], d
             if not asset or size <= 0:
                 continue
             remember(asset, row)
-            # ⚠️ NOT row["price"] — that field is rounded to the displayed tick
-            # and disagrees with the cash on 2,771 of GSX-'s 15,810 fills (30
-            # shares booked at "0.04" cost $1.1412, i.e. 0.03804). The money
-            # moved is usdcSize; the price is whatever the money implies.
+            # ⚠️ NOT row["price"] — that is the execution price BEFORE the fee.
+            # The money moved is usdcSize, fee included, and P&L is measured on
+            # the money. Their difference IS the fee: per fill it sits at 0
+            # (maker) or at a rate × p·(1−p) per share (taker, mostly 0.05) and
+            # is never negative — measured on king1605's 729 fills and GSX-'s
+            # 15,810, 2026-09-10.
             price = usd / size
+            px = float(row.get("price") or 0.0)
+            if px > 0:
+                fees += (usd - px * size) if row.get("side") == "BUY" else (px * size - usd)
             if row.get("side") == "BUY":
                 buys += 1
                 deployed += usd
@@ -515,7 +563,7 @@ def build_lots(rows: list[dict], markets: dict[str, dict]) -> tuple[list[Lot], d
         "merge_proceeds": merge_proceeds,
         "deployed": deployed, "sell_proceeds": sell_proceeds,
         "redeem_proceeds": redeem_proceeds, "open_value": open_value,
-        "rebates": rebates, "rewards": rewards,
+        "rebates": rebates, "rewards": rewards, "fees": fees,
         "unhandled": dict(unhandled),
     }
     return lots, flows
@@ -676,9 +724,16 @@ def _bootstrap(lots: list[Lot], seed: int = 0x9E3779B9, draws: int = 4000) -> di
             "p_le_zero": neg / draws}
 
 
+# How far PM's leaderboard may sit from our gross reconstruction and still count
+# as agreeing. king1605 sits 0.35% off once fees are added back, for a reason we
+# have not found; GSX- sits inside its bracket.
+RECON_TOL_PCT = 0.01
+
+
 def analyse(wallet: str, rows: list[dict], markets: dict[str, dict],
             complete: bool = True, lb_profit: Optional[float] = None,
-            current_value: Optional[float] = None) -> dict:
+            current_value: Optional[float] = None,
+            sports: Optional[dict] = None) -> dict:
     all_lots, flows = build_lots(rows, markets)
     if not all_lots:
         raise SystemExit(f"no football/market activity reconstructed for {wallet}")
@@ -786,7 +841,7 @@ def analyse(wallet: str, rows: list[dict], markets: dict[str, dict],
                    and float(r.get("usdcSize") or 0.0) > 0]
     football_cost = unknown_sport_cost = 0.0
     for lot in lots:
-        verdict = _is_football(_competition(markets.get(lot.condition_id, {})))
+        verdict = _football(markets.get(lot.condition_id, {}), sports)
         if verdict is True:
             football_cost += lot.cost
         elif verdict is None:
@@ -796,6 +851,14 @@ def analyse(wallet: str, rows: list[dict], markets: dict[str, dict],
     buy_usd = flows["deployed"]
     buy_shares = sum(l.shares for l in lots)
     sell_lots = [l for l in closed if l.exit_kind == "sell"]
+
+    # Polymarket's leaderboard profit is GROSS of trading fees and leaves rebates
+    # out. Measured, not assumed: lb − (pnl + fees) is −$145 on king1605 ($5,876
+    # of fees) and lands inside the unmatched bracket on GSX-; adding rebates
+    # pushes BOTH outside. Compared net, every fee-paying wallet read as
+    # "unreconciled" off nothing.
+    fees = flows["fees"]
+    recon_tol = max(1.0, RECON_TOL_PCT * abs(lb_profit)) if lb_profit is not None else 1.0
 
     profile = {
         "wallet": wallet.lower(),
@@ -825,7 +888,7 @@ def analyse(wallet: str, rows: list[dict], markets: dict[str, dict],
             "yield_pct": _pct(pnl, deployed), "yield_high_pct": _pct(pnl_high, deployed),
             "realized_pnl": sum(l.pnl for l in closed),
             "marked_pnl": sum(l.pnl for l in marks),
-            "rebates": flows["rebates"], "rewards": flows["rewards"],
+            "rebates": flows["rebates"], "rewards": flows["rewards"], "fees": fees,
             # A ticket is what the wallet actually sent to the book. FIFO
             # splits one buy across several exits, so lot costs are fragments
             # of tickets and their median runs far below the real one.
@@ -840,11 +903,12 @@ def analyse(wallet: str, rows: list[dict], markets: dict[str, dict],
         },
         "reconciliation": {
             "lb_profit": lb_profit,
-            "reconstructed": pnl + flows["rebates"] + flows["rewards"],
-            "reconstructed_high": pnl_high + flows["rebates"] + flows["rewards"],
+            "basis": "gross of fees, rebates excluded",
+            "reconstructed": pnl + fees,
+            "reconstructed_high": pnl_high + fees,
+            "tolerance": recon_tol,
             "inside_bracket": (lb_profit is not None and
-                               pnl + flows["rebates"] + flows["rewards"] - 1 <= lb_profit
-                               <= pnl_high + flows["rebates"] + flows["rewards"] + 1),
+                               pnl + fees - recon_tol <= lb_profit <= pnl_high + fees + recon_tol),
         },
         "exposure": {**exposure,
                      "turnover": (deployed / exposure["peak_cost_basis"])
@@ -874,7 +938,7 @@ def analyse(wallet: str, rows: list[dict], markets: dict[str, dict],
             "best": max(day_vals, default=0.0), "worst": min(day_vals, default=0.0),
             "worst_losing_streak": worst_streak,
         },
-        "universe": _bucket(lots, lambda l: _competition(markets.get(l.condition_id, {})))[:16],
+        "universe": _bucket(lots, lambda l: _competition(markets.get(l.condition_id, {}), sports))[:16],
         "market_types": _bucket(
             lots, lambda l: (markets.get(l.condition_id, {}) or {}).get("sportsMarketType") or "other")[:10],
         "concentration": {
@@ -1221,7 +1285,8 @@ def narrate(p: dict) -> dict:
         if cov["unmatched_lots"]:
             para.append(
                 f"Reconciliation: Polymarket's own all-time profit for this wallet is "
-                f"{_fmt_money(rec['lb_profit'])}; our reconstruction brackets it at "
+                f"{_fmt_money(rec['lb_profit'])}, counted before fees; on the same basis (P&L plus "
+                f"{_fmt_money(t['fees'])} of fees paid) our reconstruction brackets it at "
                 f"{_fmt_money(rec['reconstructed'])} … {_fmt_money(rec['reconstructed_high'])} "
                 + ("(it falls inside — the reconstruction is trustworthy)."
                    if rec["inside_bracket"] else
@@ -1230,10 +1295,11 @@ def narrate(p: dict) -> dict:
         else:
             gap = rec["lb_profit"] - rec["reconstructed"]
             para.append(
-                f"Reconciliation: Polymarket says {_fmt_money(rec['lb_profit'])} all-time, we "
+                f"Reconciliation: Polymarket says {_fmt_money(rec['lb_profit'])} all-time, counted "
+                f"before fees; on the same basis (P&L plus {_fmt_money(t['fees'])} of fees paid) we "
                 f"reconstruct {_fmt_money(rec['reconstructed'])} — a gap of {_fmt_money(gap)} "
                 f"({_pct(abs(gap), abs(rec['lb_profit']) or 1):.1f}%). "
-                + ("Close enough to trust." if abs(gap) < 0.05 * abs(rec["lb_profit"] or 1)
+                + ("Close enough to trust." if rec["inside_bracket"]
                    else "**That gap is large enough to matter — read the numbers as approximate.**"))
     sections.append({"title": "Is the edge real?", "paragraphs": para})
 
@@ -1310,6 +1376,7 @@ def render_markdown(p: dict) -> str:
     a(f"| markets / events / tokens | {cov['markets']:,} / {cov['events']:,} / {cov['tokens']:,} |")
     a(f"| deployed | {_fmt_money(t['deployed'])} |")
     a(f"| P&L | **{_fmt_money(t['pnl'])}** ({t['yield_pct']:+.2f}%) |")
+    a(f"| fees paid | {_fmt_money(t['fees'])} ({_pct(t['fees'], t['deployed']):.2f}% of deployed) |")
     a(f"| median ticket | {_fmt_money(t['median_ticket'])} (p90 {_fmt_money(t['p90_ticket'])}, "
       f"max {_fmt_money(t['max_ticket'])}) |")
     a(f"| BUY vwap / SELL vwap | {t['buy_vwap']:.3f} / {t['sell_vwap']:.3f} |")
@@ -1384,7 +1451,8 @@ def load(wallet: str, since: Optional[int] = None, verbose: bool = False) -> dic
     print(f"  {len(markets):,} resolved", file=sys.stderr)
     return analyse(wallet, rows, markets, complete=complete,
                    lb_profit=fetch_lb_profit(wallet, s),
-                   current_value=fetch_current_value(wallet, s))
+                   current_value=fetch_current_value(wallet, s),
+                   sports=fetch_sports(s))
 
 
 def verify_site(profile: dict, base: str) -> int:
@@ -1416,6 +1484,7 @@ def verify_site(profile: dict, base: str) -> int:
         ("deployed", ("totals", "deployed"), 0.01),
         ("pnl", ("totals", "pnl"), 0.01),
         ("pnl_high", ("totals", "pnl_high"), 0.01),
+        ("fees", ("totals", "fees"), 0.01),
         ("yield_pct", ("totals", "yield_pct"), 0.001),
         ("median_ticket", ("totals", "median_ticket"), 0.01),
         ("median_hold_min", ("hold", "median_min"), 0.001),
