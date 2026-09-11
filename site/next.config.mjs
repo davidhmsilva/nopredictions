@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // A second `next dev` in this folder (two sessions previewing at once) must
+  // not share `.next` with the first — the collision surfaces as a missing
+  // vendor chunk or a 500 on a page that builds fine. Unset in production.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   // A type error is a bug that reached the deploy. The two that were being
   // ignored here were real: a Set the ES5 target could not iterate, and an
   // `avg_clv` typed as absent when the view returns null. Both fixed; the

@@ -20,11 +20,11 @@
 
 import { teamScore } from './gamecenter'
 
-const BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer'
+export const BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer'
 
 /** The competitions Polymarket actually lists a board for, plus the majors.
  *  A code that does not exist returns nothing and costs one failed request. */
-const LEAGUES = [
+export const LEAGUES = [
   'usa.1', 'eng.1', 'eng.2', 'eng.3', 'eng.4', 'esp.1', 'esp.2',
   'ita.1', 'ita.2', 'ger.1', 'ger.2', 'fra.1', 'fra.2', 'ned.1', 'ned.2',
   'por.1', 'bel.1', 'tur.1', 'sui.1', 'aut.1', 'sco.1', 'nor.1', 'swe.1',

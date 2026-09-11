@@ -83,3 +83,4 @@ reports/deleted_orphan_paper_trades_*.csv
 stuck_trades_*.csv
 ingest/_deleted_*.csv
 
+.next-gc/

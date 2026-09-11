@@ -22,6 +22,7 @@ import {
   type PricePoint,
 } from '../../lib/gamecenter'
 import { buildLooks, buildPulse } from '../../lib/looks'
+import { buildPricedLike } from '../../lib/pricedLike'
 
 // Top-of-book is fetched for the most-traded markets only. Every extra token is
 // a CLOB round trip, and a fixture board runs to 85 markets — pulling books for
@@ -236,6 +237,14 @@ export async function GET(request: Request) {
     const pressure = buildPressure(groups, board, nextRung?.points ?? [], preOver25)
 
     const headlines = buildHeadlines(groups, teams.home, teams.away)
+    const pricedLike = buildPricedLike({
+      groups,
+      headlines,
+      home: teams.home,
+      away: teams.away,
+      preOver25,
+      started,
+    })
 
     // The headline markets' own 24h price series, joined on the question so the
     // chart and the odds tiles above it are the same five markets. Sides were
@@ -287,6 +296,7 @@ export async function GET(request: Request) {
       history,
       kalshi,
       notes,
+      pricedLike,
     }
 
     return NextResponse.json(payload)

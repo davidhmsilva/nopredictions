@@ -17,6 +17,9 @@ Usage:
 
     # Use a different cache directory
     python stage_a_football_data.py --cache-dir /path/to/cache
+
+    # The season being played now, re-downloaded (what the daily cron runs)
+    python stage_a_football_data.py --current-season --refresh --continue-on-error
 """
 
 # PEP 563: defer annotation evaluation so `X | None` syntax works on Python 3.9.
@@ -121,14 +124,20 @@ BOOKMAKER_COLUMNS = {
 # Download
 # ---------------------------------------------------------------------------
 
-def download_csv(fd_league_code: str, season: str, cache_dir: Path | None):
+def download_csv(fd_league_code: str, season: str, cache_dir: Path | None,
+                 refresh: bool = False):
     fd_season = season_to_fd_code(season)
     url = f'{FD_BASE}/{fd_season}/{fd_league_code}.csv'
 
+    # ⚠️ The cache never expires. A season still being played is a file that
+    # grows every week, so without `refresh` a "re-run" re-reads the snapshot
+    # from the day it was first downloaded: on 2026-09-11 21 of 22 leagues were
+    # still the 08-28 file, and only the one league never cached got new rows.
+    cache_file = None
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / f'{fd_season}_{fd_league_code}.csv'
-        if cache_file.exists():
+        if cache_file.exists() and not refresh:
             log.debug(f'cache hit: {cache_file}')
             return read_fd_csv(cache_file)
 
@@ -138,6 +147,9 @@ def download_csv(fd_league_code: str, season: str, cache_dir: Path | None):
         resp.raise_for_status()
     except requests.RequestException as e:
         log.warning(f'failed to download {url}: {e}')
+        # A refresh that cannot reach the server still has last week's file.
+        if refresh and cache_file is not None and cache_file.exists():
+            return read_fd_csv(cache_file)
         return None
 
     # Football-Data.co.uk runs Apache mod_negotiation: when a season/league file
@@ -459,7 +471,8 @@ def log_finish(cur, log_id, rows_ingested, status='succeeded', error=None):
 # ---------------------------------------------------------------------------
 
 def ingest_league_season(conn, league_code: str, season: str,
-                         bookmaker_ids: dict, cache_dir: Path | None) -> int:
+                         bookmaker_ids: dict, cache_dir: Path | None,
+                         refresh: bool = False) -> int:
     fd_code = LEAGUES[league_code]
     resource = f'{season}/{fd_code}'
 
@@ -468,7 +481,7 @@ def ingest_league_season(conn, league_code: str, season: str,
     conn.commit()
 
     try:
-        df = download_csv(fd_code, season, cache_dir)
+        df = download_csv(fd_code, season, cache_dir, refresh)
         if df is None or df.empty:
             log.warning(f'{resource}: no data')
             log_finish(cur, log_id, 0)
@@ -535,7 +548,17 @@ def main():
                         help='download+parse only, no DB writes')
     parser.add_argument('--continue-on-error', action='store_true',
                         help='log errors and continue to next CSV')
+    parser.add_argument('--current-season', action='store_true',
+                        help='only the season being played now (overrides --seasons)')
+    parser.add_argument('--refresh', action='store_true',
+                        help='re-download instead of reading the cache (use for a live season)')
     args = parser.parse_args()
+    if args.current_season:
+        # From July the new season's file is the live one — the same boundary the
+        # site uses for "since 1 Jul".
+        today = date.today()
+        y = today.year if today.month >= 7 else today.year - 1
+        args.seasons = [f'{y}-{str(y + 1)[-2:]}']
 
     if args.dry_run:
         log.info('DRY RUN (no DB writes)')
@@ -571,7 +594,7 @@ def main():
             for s in args.seasons:
                 try:
                     total += ingest_league_season(
-                        conn, lg, s, bookmaker_ids, args.cache_dir,
+                        conn, lg, s, bookmaker_ids, args.cache_dir, args.refresh,
                     )
                 except Exception:
                     if not args.continue_on_error:

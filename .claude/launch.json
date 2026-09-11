@@ -4,9 +4,23 @@
     {
       "name": "np-site",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "site", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "site",
+        "run",
+        "dev"
+      ],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "np-site-gc",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd site && NEXT_DIST_DIR=.next-gc npx next dev -p 3107"
+      ],
+      "port": 3107
     }
   ]
 }

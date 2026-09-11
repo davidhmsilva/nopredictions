@@ -2,66 +2,73 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppShell } from '../../components/AppShell'
-import type {
-  GameData,
-  Headline,
-  LiveStats,
-  MarketGroup,
-  PricePoint,
-} from '../../lib/gamecenter'
+import type { GameData, Headline, MarketGroup, PricePoint } from '../../lib/gamecenter'
+import type { MatchContext } from '../../lib/matchcontext'
 import { tradeable, type Look, type Pulse } from '../../lib/looks'
 import { useSession } from '../../lib/useSession'
 import { useWatchlist } from '../../lib/useWatchlist'
+import { SETTLED_BAND, money, odds, pct, signed } from './fmt'
 
-// The user thinks in decimal odds, so every probability on this page carries the
-// price. Outside this band the decimal stops describing a bet anyone would
-// place — an outcome at 0.001 renders as 1000.00 — so those are labelled.
-const SETTLED_BAND = 0.01
-
-function odds(p: number | null | undefined): string {
-  if (p == null || p <= 0 || p >= 1) return '—'
-  if (p <= SETTLED_BAND) return 'settled ✗'
-  if (p >= 1 - SETTLED_BAND) return 'settled ✓'
-  return (1 / p).toFixed(2)
+function ordinal(n: number): string {
+  const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
+  return `${n}${s}`
 }
-
-function pct(p: number | null | undefined): string {
-  return p == null ? '—' : `${(p * 100).toFixed(0)}%`
-}
-
-function money(v: number | null | undefined): string {
-  if (v == null) return '—'
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(1)}k`
-  return `$${v.toFixed(0)}`
-}
-
-function signed(pp: number | null | undefined): string {
-  return pp == null ? '—' : `${pp > 0 ? '+' : ''}${pp.toFixed(1)}pp`
-}
+import { BriefCard, MomentumChart, PricedLikeCard, StreakHighlights } from './Insights'
+import { MatchTab } from './MatchTab'
+import { StatsTab } from './StatsTab'
 
 // ── the match, big ───────────────────────────────────────────────────────────
 //
 // Everything a companion needs in the three seconds you look away from the
-// game: who is playing, what the score is, what minute it is.
+// game: who is playing, what the score is, what minute it is — and, before
+// kick-off, how each side arrives.
 
-function MatchHero({ data }: { data: GameData }) {
+function FormPills({ results }: { results: string[] }) {
+  if (!results.length) return null
+  return (
+    <span className="gcx-hero-form" title="Last five, latest first">
+      {results.map((r, i) => (
+        <span key={i} className={`gcx-pill gcx-pill-${r}`}>{r}</span>
+      ))}
+    </span>
+  )
+}
+
+function MatchHero({ data, ctx }: { data: GameData; ctx: MatchContext | null }) {
   const live = data.live
   const board = data.board
+  const espn = ctx?.espn ?? null
   const kickoff = data.kickoff ? new Date(data.kickoff) : null
 
-  // The live feed wins when it is there; the board carries the score when it is
-  // not, which is most of the time on smaller competitions.
+  // Order of trust for the score: api-football's live feed, then ESPN, then
+  // what the board itself says. Never Polymarket's listed start time.
   const score = live
-    ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute }
-    : board.homeGoals != null && board.awayGoals != null
-      ? { h: board.homeGoals, a: board.awayGoals, minute: null }
-      : null
-  const inPlay = !!live || board.phase === 'live'
-  const done = board.phase === 'finished'
+    ? { h: live.homeGoals, a: live.awayGoals, minute: live.minute != null ? `${live.minute}'` : null }
+    : espn && espn.state !== 'pre' && espn.home.score != null && espn.away.score != null
+      ? { h: espn.home.score, a: espn.away.score, minute: espn.clock }
+      : board.homeGoals != null && board.awayGoals != null
+        ? { h: board.homeGoals, a: board.awayGoals, minute: null }
+        : null
+  const done = board.phase === 'finished' || espn?.state === 'post'
+  const inPlay = !done && (!!live || board.phase === 'live' || espn?.state === 'in')
+
+  const formOf = (side: 'home' | 'away') => {
+    const t = side === 'home' ? ctx?.teams?.home : ctx?.teams?.away
+    if (t?.games.length) return t.games.slice(0, 5).map((g) => g.result)
+    const e = side === 'home' ? espn?.home : espn?.away
+    return e?.form.slice(0, 5).map((g) => g.result).filter((r) => /^[WDL]$/.test(r)) ?? []
+  }
+  const posOf = (side: 'home' | 'away') => espn?.table?.rows.find((r) => r.mark === side)?.rank ?? null
+  const logo = (side: 'home' | 'away') => (side === 'home' ? espn?.home.logo : espn?.away.logo) ?? null
+
+  const meta = [
+    espn?.venue ? `${espn.venue}${espn.city ? `, ${espn.city}` : ''}` : null,
+    espn?.referee ? `Referee ${espn.referee}` : null,
+    espn?.broadcasts.length ? espn.broadcasts.slice(0, 2).join(' · ') : null,
+  ].filter(Boolean)
 
   return (
-    <header className={`gc-hero${inPlay && !done ? ' is-live' : ''}`}>
+    <header className={`gc-hero${inPlay ? ' is-live' : ''}`}>
       <div className="gc-hero-top">
         <span className="gc-hero-comp">{data.competition ?? 'Football'}</span>
         {done ? (
@@ -69,19 +76,26 @@ function MatchHero({ data }: { data: GameData }) {
         ) : inPlay ? (
           <span className="np-badge is-live">
             ● LIVE
-            {score?.minute != null && <span className="gc-hero-min">{score.minute}&apos;</span>}
+            {score?.minute && <span className="gc-hero-min">{score.minute}</span>}
           </span>
         ) : kickoff ? (
           <span className="gc-hero-ko np-num">
-            {kickoff.toLocaleString([], {
-              weekday: 'short', hour: '2-digit', minute: '2-digit',
-            })}
+            {kickoff.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
           </span>
         ) : null}
       </div>
 
       <div className="gc-hero-teams">
-        <span className="gc-hero-team">{data.home}</span>
+        <span className="gc-hero-team">
+          {logo('home') && <img className="gcx-logo" src={logo('home') as string} alt="" loading="lazy" />}
+          <span>
+            {data.home}
+            <span className="gcx-hero-sub">
+              {posOf('home') && <span className="gcx-hero-pos">{ordinal(posOf('home') as number)}</span>}
+              <FormPills results={formOf('home')} />
+            </span>
+          </span>
+        </span>
         {score ? (
           <span className="gc-hero-score np-num">
             {score.h}<i>–</i>{score.a}
@@ -89,17 +103,32 @@ function MatchHero({ data }: { data: GameData }) {
         ) : (
           <span className="gc-hero-v">v</span>
         )}
-        <span className="gc-hero-team gc-hero-team-away">{data.away}</span>
+        <span className="gc-hero-team gc-hero-team-away">
+          <span>
+            {data.away}
+            <span className="gcx-hero-sub">
+              <FormPills results={formOf('away')} />
+              {posOf('away') && <span className="gcx-hero-pos">{ordinal(posOf('away') as number)}</span>}
+            </span>
+          </span>
+          {logo('away') && <img className="gcx-logo" src={logo('away') as string} alt="" loading="lazy" />}
+        </span>
       </div>
+
+      {espn && espn.home.halves.length > 1 && (
+        <div className="gcx-hero-halves np-num">HT {espn.home.halves[0]}–{espn.away.halves[0]}</div>
+      )}
 
       {/* When there is no clock, say so rather than showing a minute we do not
           have. Polymarket's listed start ran half an hour early on some leagues
           and eight hours late on others, so it is never used as a substitute. */}
-      {inPlay && !done && score?.minute == null && (
+      {inPlay && !score?.minute && (
         <div className="gc-hero-noclock" title={board.evidence ?? undefined}>
           in play · no verified clock for this competition
         </div>
       )}
+
+      {meta.length > 0 && <div className="gcx-hero-meta">{meta.join('  ·  ')}</div>}
     </header>
   )
 }
@@ -176,30 +205,27 @@ function PriceChart({
     const ts = pts.map((p) => p.t)
     const t0 = Math.min(...ts)
     const t1 = Math.max(...ts)
-    const odds = pts.map((p) => 1 / p.p)
-    const lo = Math.max(1.01, Math.min(...odds) * 0.93)
-    const hi = Math.min(60, Math.max(...odds) * 1.07)
+    const oddsV = pts.map((p) => 1 / p.p)
+    const lo = Math.max(1.01, Math.min(...oddsV) * 0.93)
+    const hi = Math.min(60, Math.max(...oddsV) * 1.07)
 
     const x = (t: number) => PAD_L + ((t - t0) / (t1 - t0 || 1)) * (W - PAD_L - PAD_R)
     const y = (o: number) =>
       PAD_T +
       (1 - (Math.log(o) - Math.log(lo)) / (Math.log(hi) - Math.log(lo) || 1)) * (H - PAD_T - PAD_B)
 
-    const lines = shown.map((s, i) => {
+    const lines = shown.map((s) => {
       const p = s.points
         .filter((q) => q.p > 0.02 && q.p < 0.98)
         .map((q, j) => `${j === 0 ? 'M' : 'L'}${x(q.t).toFixed(1)},${y(1 / q.p).toFixed(1)}`)
         .join(' ')
-      const last = s.points[s.points.length - 1]
       return {
         label: s.label,
         d: p,
         colour: SERIES_COLOUR[series.findIndex((z) => z.label === s.label) % SERIES_COLOUR.length],
-        last: last && last.p > 0.01 && last.p < 0.99 ? 1 / last.p : null,
       }
     })
 
-    // Four gridlines at round-ish odds inside the range.
     const ticks: { v: number; y: number }[] = []
     for (const v of [1.1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 7, 10, 15, 25, 40]) {
       if (v >= lo && v <= hi) ticks.push({ v, y: y(v) })
@@ -214,9 +240,7 @@ function PriceChart({
 
   return (
     <section className="gc-section">
-      <h2 className="gc-h2">
-        Price · last {hours > 0 ? `${hours}h` : '24h'}
-      </h2>
+      <h2 className="gc-h2">Price · last {hours > 0 ? `${hours}h` : '24h'}</h2>
 
       {geom ? (
         <div className="gc-chart">
@@ -273,58 +297,9 @@ function PriceChart({
   )
 }
 
-// ── what the game looks like ─────────────────────────────────────────────────
-
-function Momentum({ s, home, away }: { s: LiveStats; home: string; away: string }) {
-  const rows: { label: string; h: number; a: number; fmt?: (v: number) => string }[] = [
-    { label: 'Possession', h: s.homePossession ?? 0, a: s.awayPossession ?? 0, fmt: (v) => `${v}%` },
-    { label: 'Shots', h: s.homeShotsTotal, a: s.awayShotsTotal },
-    { label: 'On target', h: s.homeShotsOn, a: s.awayShotsOn },
-    { label: 'Corners', h: s.homeCorners, a: s.awayCorners },
-  ]
-  if (s.homeXg != null && s.awayXg != null) {
-    rows.splice(1, 0, { label: 'xG', h: s.homeXg, a: s.awayXg, fmt: (v) => v.toFixed(2) })
-  }
-
-  const short = (t: string) => t.split(/\s+/).slice(0, 2).join(' ')
-
-  return (
-    <section className="gc-section">
-      <h2 className="gc-h2">How it is going</h2>
-      {/* The rails are two colours and nothing else says which is which, so the
-          names carry the key. */}
-      <div className="gc-mom-head">
-        <span className="gc-mom-home">{short(home)}</span>
-        <span className="gc-mom-away">{short(away)}</span>
-      </div>
-      <div className="gc-mom">
-        {rows.map((r) => {
-          const total = r.h + r.a
-          // A 0-0 split renders as an empty rail rather than as a 50/50 bar that
-          // claims a balance nothing has established yet.
-          const hp = total > 0 ? (r.h / total) * 100 : 0
-          const fmt = r.fmt ?? ((v: number) => String(v))
-          return (
-            <div key={r.label} className="gc-mom-row">
-              <span className="gc-mom-v np-num">{fmt(r.h)}</span>
-              <div className="gc-mom-mid">
-                <span className="gc-mom-k">{r.label}</span>
-                <div className="gc-mom-rail">
-                  <span className="gc-mom-fill" style={{ width: `${hp}%` }} />
-                </div>
-              </div>
-              <span className="gc-mom-v gc-mom-v-away np-num">{fmt(r.a)}</span>
-            </div>
-          )
-        })}
-      </div>
-    </section>
-  )
-}
-
 // ── the last twenty minutes ──────────────────────────────────────────────────
 
-function Pulse({ pulse }: { pulse: Pulse[] }) {
+function PulseList({ pulse }: { pulse: Pulse[] }) {
   if (pulse.length === 0) return null
   return (
     <section className="gc-section">
@@ -441,9 +416,6 @@ function Looks({ data }: { data: GameData }) {
               </span>
             </div>
           )}
-          {/* Shown whether or not anything is cheap: the comparison IS the
-              product. A bettor watching wants "is 1.23 too short?" answered in
-              two seconds, and the answer is usually no. */}
           <ul className="gc-looks">
             {live.map((l) => (
               <LookRow key={l.id} look={l} />
@@ -480,7 +452,8 @@ function NO_READ_REASON(data: GameData): string {
     return (
       'The measured tables are conditioned on a live state — a minute and a score — so they ' +
       'have nothing to say before kick-off. Pre-match, Polymarket sits within 0.10pp of the ' +
-      'de-vigged Pinnacle line, which is another way of saying there is nothing here.'
+      'de-vigged Pinnacle line, which is another way of saying there is nothing here. The ' +
+      '"priced like this" table on Overview is the pre-match comparison.'
     )
   }
   if (!data.live) {
@@ -540,28 +513,30 @@ function Board({ groups }: { groups: MarketGroup[] }) {
         mids — a number, not a price you can pay.
       </p>
 
-      <table className="gc-board">
-        <thead>
-          <tr>
-            <th>Market</th>
-            <th>Side</th>
-            <th className="gc-r">Ask</th>
-            <th className="gc-r">Spread</th>
-            <th className="gc-r">Depth</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(open ? rows : rows.slice(0, 8)).map((r, i) => (
-            <tr key={i}>
-              <td className="gc-board-q">{r.question.split(':').pop()?.trim()}</td>
-              <td>{r.outcome}</td>
-              <td className="gc-r gc-mono">{odds(r.ask)}</td>
-              <td className="gc-r gc-mono">{r.spreadPp.toFixed(1)}pp</td>
-              <td className="gc-r gc-mono">{money(r.depthUsd)}</td>
+      <div className="gcx-scroll">
+        <table className="gc-board">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Side</th>
+              <th className="gc-r">Ask</th>
+              <th className="gc-r">Spread</th>
+              <th className="gc-r">Depth</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {(open ? rows : rows.slice(0, 8)).map((r, i) => (
+              <tr key={i}>
+                <td className="gc-board-q">{r.question.split(':').pop()?.trim()}</td>
+                <td>{r.outcome}</td>
+                <td className="gc-r gc-mono">{odds(r.ask)}</td>
+                <td className="gc-r gc-mono">{r.spreadPp.toFixed(1)}pp</td>
+                <td className="gc-r gc-mono">{money(r.depthUsd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       {rows.length > 8 && (
         <button className="gc-more" onClick={() => setOpen((v) => !v)}>
@@ -595,6 +570,16 @@ function Disclosure({ data }: { data: GameData }) {
             selling the one thing we measured as not working.
           </li>
           <li>
+            <strong>Form is shown, not sold.</strong> Team numbers come from our own database of
+            145,000 matches with half-time scores and closing prices. We tested recent form against
+            the closing price on 14,365 held-out matches and it added nothing — a streak here is a
+            description, and its &quot;1 in N&quot; is worked out at the league&apos;s own rate.
+          </li>
+          <li>
+            <strong>The brief is written by AI</strong> from the numbers on this page and told to
+            use nothing else. Where it quotes a number, the number is on the page beside it.
+          </li>
+          <li>
             <strong>Prices are asks, not mids.</strong> The mid is the number that made a paper
             strategy book +141% where the same 15 decisions returned +3.4% live.
           </li>
@@ -616,22 +601,52 @@ function Disclosure({ data }: { data: GameData }) {
   )
 }
 
+// ── tabs ─────────────────────────────────────────────────────────────────────
+
+const TABS = [
+  ['overview', 'Overview'],
+  ['stats', 'Stats'],
+  ['match', 'Match'],
+  ['markets', 'Markets'],
+] as const
+type Tab = (typeof TABS)[number][0]
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function GamePage({ params }: { params: { slug: string } }) {
   const [data, setData] = useState<GameData | null>(null)
+  const [ctx, setCtx] = useState<MatchContext | null>(null)
+  const [ctxLoading, setCtxLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<Tab>('overview')
   const slug = params.slug
 
-  // ⚠️ This page used to read and write `np_watchlist` in localStorage itself.
-  //    It therefore agreed with the board by accident and not by design — and
-  //    once Pro gained a synced watchlist, a star added here stayed on this
-  //    device while one added on the board followed the account. One hook, one
-  //    list.
+  // One watchlist hook for the board and this page, so a star follows the
+  // account on Pro and the device otherwise — never one of each.
   const { me } = useSession()
   const { slugs, toggle } = useWatchlist(me?.plan === 'pro')
   const watched = slugs.includes(slug)
+
+  // A shared "#stats" link opens Stats — on first load AND when only the hash
+  // changes, which does not reload the page.
+  useEffect(() => {
+    const fromHash = () => {
+      const h = window.location.hash.slice(1)
+      if (TABS.some(([k]) => k === h)) setTab(h as Tab)
+    }
+    fromHash()
+    window.addEventListener('hashchange', fromHash)
+    return () => window.removeEventListener('hashchange', fromHash)
+  }, [])
+  const choose = (t: Tab) => {
+    setTab(t)
+    try {
+      history.replaceState(null, '', `#${t}`)
+    } catch {
+      /* a sandboxed frame may refuse; the tab still switches */
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -647,19 +662,44 @@ export default function GamePage({ params }: { params: { slug: string } }) {
     }
   }, [slug])
 
+  const loadCtx = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/game/context?slug=${encodeURIComponent(slug)}`)
+      if (res.ok) setCtx(await res.json())
+    } catch {
+      /* the price panel stands on its own; the context panels say they are missing */
+    } finally {
+      setCtxLoading(false)
+    }
+  }, [slug])
+
   useEffect(() => {
     load()
-  }, [load])
+    loadCtx()
+  }, [load, loadCtx])
 
   // Refresh while the match is live. 30s matches how long the live feed is
-  // cached server-side, so a faster poll would only re-serve the same numbers.
-  const isLive = data?.board.phase === 'live'
+  // cached server-side; the match context changes more slowly than the prices.
+  const isLive = data?.board.phase === 'live' || ctx?.espn?.state === 'in'
   useEffect(() => {
     if (!isLive) return
-    const id = setInterval(load, 30000)
-    return () => clearInterval(id)
-  }, [isLive, load])
+    const a = setInterval(load, 30000)
+    const b = setInterval(loadCtx, 60000)
+    return () => {
+      clearInterval(a)
+      clearInterval(b)
+    }
+  }, [isLive, load, loadCtx])
 
+  // Before kick-off the line-ups are the one thing worth re-checking for.
+  const waitingForXi = !!ctx?.espn && ctx.espn.state === 'pre' && !ctx.espn.lineupsConfirmed
+  useEffect(() => {
+    if (!waitingForXi) return
+    const id = setInterval(loadCtx, 5 * 60000)
+    return () => clearInterval(id)
+  }, [waitingForXi, loadCtx])
+
+  const swapped = !!ctx?.espn?.swapped
 
   return (
     <AppShell>
@@ -673,15 +713,68 @@ export default function GamePage({ params }: { params: { slug: string } }) {
 
         {data && (
           <>
-            <MatchHero data={data} />
-            <OddsTiles headlines={data.headlines ?? []} />
-            <PriceChart series={data.series ?? []} headlines={data.headlines ?? []} />
-            {data.live?.stats && (
-              <Momentum s={data.live.stats} home={data.home} away={data.away} />
+            <MatchHero data={data} ctx={ctx} />
+
+            <nav className="gcx-tabs" role="tablist" aria-label="Game Center sections">
+              {TABS.map(([k, label]) => (
+                <button
+                  key={k}
+                  role="tab"
+                  aria-selected={tab === k}
+                  className={`gcx-tab${tab === k ? ' is-on' : ''}`}
+                  onClick={() => choose(k)}
+                >
+                  {label}
+                  {k === 'match' && isLive && <i className="gcx-tab-dot" aria-label="live" />}
+                  {k === 'match' && !isLive && ctx?.espn?.lineupsConfirmed && ctx.espn.state === 'pre' && (
+                    <i className="gcx-tab-new">XI</i>
+                  )}
+                </button>
+              ))}
+            </nav>
+
+            {tab === 'overview' && (
+              <>
+                <BriefCard slug={slug} />
+                <OddsTiles headlines={data.headlines ?? []} />
+                {ctx?.momentum && isLive && (
+                  <MomentumChart m={ctx.momentum} espn={ctx.espn} home={data.home} away={data.away} />
+                )}
+                <PricedLikeCard pl={data.pricedLike} />
+                <StreakHighlights ctx={ctx?.teams ?? null} swapped={swapped} />
+                <PriceChart series={data.series ?? []} headlines={data.headlines ?? []} />
+                <PulseList pulse={data.pulse ?? []} />
+              </>
             )}
-            <Pulse pulse={data.pulse ?? []} />
-            <Looks data={data} />
-            <Board groups={data.groups} />
+
+            {tab === 'stats' && (
+              <StatsTab
+                ctx={ctx?.teams ?? null}
+                loading={ctxLoading}
+                espn={ctx?.espn ?? null}
+                home={data.home}
+                away={data.away}
+              />
+            )}
+
+            {tab === 'match' && (
+              <MatchTab
+                espn={ctx?.espn ?? null}
+                loading={ctxLoading}
+                momentum={ctx?.momentum ?? null}
+                liveStats={data.live?.stats ?? null}
+                home={data.home}
+                away={data.away}
+              />
+            )}
+
+            {tab === 'markets' && (
+              <>
+                <PulseList pulse={data.pulse ?? []} />
+                <Looks data={data} />
+                <Board groups={data.groups} />
+              </>
+            )}
 
             <div className="gc-actions">
               <button

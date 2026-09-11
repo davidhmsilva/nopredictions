@@ -136,6 +136,7 @@ export interface Headline {
 }
 
 import type { Look, Pulse } from './looks'
+import { shortTeam } from './teamname'
 
 export interface GameData {
   slug: string
@@ -160,6 +161,8 @@ export interface GameData {
   groups: MarketGroup[]
   history: { tokenId: string; label: string; points: PricePoint[] } | null
   kalshi: KalshiComparison | null
+  /** Every other market in matches the sharpest book priced the same way. */
+  pricedLike?: import('./pricedLike').PricedLike | null
   notes: string[]
 }
 
@@ -969,7 +972,7 @@ export function buildHeadlines(groups: MarketGroup[], home: string, away: string
     return best?.g
   }
 
-  const shortName = (s: string) => s.split(/\s+/).slice(0, 2).join(' ')
+  const shortName = shortTeam
   push(shortName(home), winMarket(home), /^yes$/i)
   push('Draw', result.find((g) => /draw|tie/i.test(g.question)), /^yes$/i)
   push(shortName(away), winMarket(away), /^yes$/i)

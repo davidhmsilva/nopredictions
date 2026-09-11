@@ -1,0 +1,115 @@
+# ─── PAUSED 2026-08-15: everything except Live Pressure Overs ───────────
+# Backup of the live crontab: reports/crontab_backup_2026-08-15.txt
+# Re-enable a job by removing the '#PAUSED ' prefix from its line.
+# NOPREDICTIONS cron jobs (updated 2026-05-24)
+# All use absolute Python path to avoid macOS permission issues with venv activate
+
+PYTHON=/Users/davidsilva/agente/ingest/.venv/bin/python
+WORKDIR=/Users/davidsilva/agente
+
+# ─── PRE-MATCH EDGE SCANS (paper_trader + DC scanner) ──────────────────────
+
+# Morning scan: 07:00 UTC (08:00 Lisboa) — overnight + early matches
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --daily 07:00 paper_morning sh -c "cd $WORKDIR && $PYTHON -m agent.paper_trader >> /tmp/nopredictions_morning.log 2>&1"
+
+# Midday scan: 10:00 UTC — afternoon/evening European matches
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --daily 10:00 paper_midday sh -c "cd $WORKDIR && $PYTHON -m agent.paper_trader >> /tmp/nopredictions_midday.log 2>&1"
+
+# DC scanner: daily at 08:00 UTC — scans PM next 3 days
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --daily 08:00 dc_scanner sh -c "cd $WORKDIR && $PYTHON agent/dc_scanner.py >> $WORKDIR/agent/dc_scanner.log 2>&1"
+
+# Sim Model Pre-Match scanner: daily at 08:00 UTC — MC sim across 5 market groups per match
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --daily 08:00 sim_scanner sh -c "cd $WORKDIR && $PYTHON agent/sim_scanner.py >> $WORKDIR/agent/sim_scanner.log 2>&1"
+
+# ─── CLOSING ODDS COLLECTOR (Pinnacle via api-football) ───────────────────
+
+# Capture Pinnacle closing odds ~5 min before typical kickoff blocks
+# Weekdays: 11:55, 13:55, 17:55, 19:55 UTC (lunch + evening European fixtures)
+#PAUSED */30 * * * * cd $WORKDIR && $PYTHON agent/closing_collector.py >> $WORKDIR/agent/closing_collector.log 2>&1
+# ─── OBSERVATION LAYER (model vs PM price time series, no trades) ──────────
+#PAUSED */30 * * * * cd $WORKDIR && $PYTHON agent/observer.py >> $WORKDIR/agent/observer.log 2>&1
+# in-play observation: denser cadence to catch fast live moves
+#PAUSED */10 * * * * cd $WORKDIR && $PYTHON agent/observer.py --live >> $WORKDIR/agent/observer.log 2>&1
+
+# Weekends: 11:55, 13:55, 15:55, 17:55, 19:55 UTC (full day coverage)
+
+# ─── IN-PLAY POISSON DAEMON V4 (continuous, 24/7) ─────────────────────────
+# Continuous polling every 10 min. Hourly cron + lockfile = crash recovery in ≤1h.
+#PAUSED */10 * * * * $WORKDIR/agent/inplay_daemon.sh
+
+# ─── PM ON-CHAIN POSITION SYNC ────────────────────────────────────────────
+
+# Every 15 min — reconcile paper_trades with on-chain CTF balances + ingest manual bets
+#PAUSED */15 * * * * cd $WORKDIR && $PYTHON agent/pm_chain_sync.py >> $WORKDIR/agent/pm_chain_sync.log 2>&1
+
+# ─── DAILY TASKS ──────────────────────────────────────────────────────────
+
+# Daily diary: end-of-day summary at 23:30 UTC
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --daily 23:30 diary sh -c "cd $WORKDIR && $PYTHON agent/daily_diary.py >> /tmp/nopredictions_diary.log 2>&1"
+
+# Cron health check: keep systemd alive
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --daily 02:18 alive /usr/bin/touch /tmp/nopredictions_cron_alive
+
+# In-play CONVERGENCE daemon (shadow) — added 2026-06-04, same windows as inplay_daemon
+#PAUSED */10 17-21 * * 1-5 $WORKDIR/agent/convergence_daemon.sh
+#PAUSED */10 12-20 * * 0,6 $WORKDIR/agent/convergence_daemon.sh
+
+# ─── PRE-MATCH DRIFT (NO on longshots, exit at +20% before kickoff) ─────────
+# Scanner: 08:00 + 12:00 UTC — catch new markets as they open
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --gap 300 drift_scanner sh -c "cd $WORKDIR && $PYTHON agent/drift_scanner.py >> $WORKDIR/agent/drift_scanner.log 2>&1"
+# Monitor: every 15 min — check prices, exit at target/stop/kickoff
+#PAUSED */15 * * * * cd /Users/davidsilva/agente && /Users/davidsilva/agente/ingest/.venv/bin/python agent/drift_monitor.py >> /Users/davidsilva/agente/agent/drift_monitor.log 2>&1
+
+
+# WC In-Play Overs B1 — SHADOW — 2026-06-19 USA-AUS (19:00) + SCO-MAR (22:00)
+# REMOVE this line after 2026-06-19 ~00:30 UTC
+# EXPIRED (WC 2026 window, ended 2026-07-19) — fires EVERY MINUTE when active
+#* * 11-31 6 * cd $WORKDIR && $PYTHON agent/wc_overs_live.py --once >> $WORKDIR/agent/wc_overs.log 2>&1
+# EXPIRED (WC 2026 window, ended 2026-07-19) — fires EVERY MINUTE when active
+#* * 1-19 7 * cd $WORKDIR && $PYTHON agent/wc_overs_live.py --once >> $WORKDIR/agent/wc_overs.log 2>&1
+# FLB: */10 + a 110min guard inside the wrapper, because macOS cron skips
+# jobs missed while asleep and this Mac sleeps ~85% of the day (see flb_daemon.sh)
+# DISABLED 2026-07-28 — FLB closed as DEAD at n=1,108 (-7.5% after costs,
+# CI excludes zero the wrong way). Scanner kept writing paper rows and
+# polluting paper_trades. Re-enable only if the thesis is revived.
+#*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 110 flb $WORKDIR/agent/flb_daemon.sh
+
+# ─── OVER LATE GOALS — observation only, never places an order ─────────────
+# Forever daemon; the wrapper is a singleton so this hourly line only self-heals.
+#PAUSED */10 * * * * $WORKDIR/agent/late_goals_daemon.sh
+# Backfill outcomes on watched over lines
+#PAUSED */10 * * * * $WORKDIR/agent/cron_guard.sh --gap 110 late_goals_settle sh -c "cd $WORKDIR/agent && set -a && . $WORKDIR/ingest/.env && set +a && $PYTHON late_goals_observer.py --settle >> $WORKDIR/agent/late_goals_observer.log 2>&1"
+# MOVED TO LAUNCHD 2026-08-29 — com.nopredictions.pressure.
+# Must stay removed: the wrapper exits 0 when another holder has the lock,
+# and with KeepAlive that becomes a respawn every 30s forever if a cron-started
+# wrapper ever wins the race. One supervisor. Rollback: bootout the agent and
+# uncomment this line.
+# MOVED TO LAUNCHD 2026-08-29 — com.nopredictions.pressure.
+# Must stay commented: the wrapper exits 0 when another holder has the lock,
+# and with KeepAlive that becomes a respawn every 30s forever if a cron-started
+# wrapper ever wins the race. One supervisor. Rollback: bootout the agent, uncomment.
+#MOVED */10 * * * * $WORKDIR/agent/pressure_daemon.sh
+# Settle every ~30min, not ~2h: a match that ends at 19:08 used to sit
+# on the public page as OPEN until the next 110-min tick. Cost is flat —
+# settled_at stops reprocessing, so a shorter gap means smaller runs, and
+# the api-football call for a winner still happens exactly once.
+# --gap 25 (not 30) because a */10 tick at 29min would miss a 30 gap.
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 25 pressure_settle sh -c "cd $WORKDIR/agent && set -a && . $WORKDIR/ingest/.env && set +a && AF_COUNTER_NAME=pressure_settle $PYTHON pressure_agent.py --settle >> $WORKDIR/agent/pressure_agent.log 2>&1"
+# ─── PRESSURE HEALTH CHECK ────────────────────────────────────────────────
+# The only signal that has never lied is max(observed_at) in the observation
+# tables: three separate outages (08-20, 08-27, 08-28) all left a live process,
+# a held lock and a log with a FRESH mtime — because --settle writes to the same
+# file from its own cron line. Sleep-aware, so it does not fire on the ~22% of
+# the day this Mac spends asleep. --recover is ON: a WEDGED verdict kills the
+# lock holder (and its children) so the */10 pressure_daemon.sh tick can take
+# over. It only ever fires on a stale heartbeat stamp, never on CRASH-LOOP or
+# STALE, because restarting the supervisor does not fix either of those.
+*/10 * * * * cd $WORKDIR/agent && $PYTHON pressure_health.py --quiet --recover >> $WORKDIR/agent/pressure_health.log 2>&1
+# ─── SETTLED-MARKET SWEEP — observation only, never places an order ────────
+# The daemon itself is LAUNCHD (com.nopredictions.settled_sweep). Do NOT add a
+# cron line for settled_sweep_daemon.sh: the wrapper exits 0 when another holder
+# has the flock, which with KeepAlive becomes a respawn every 30s forever.
+# This line is the --settle backfill only — a short job that exits, so it is safe.
+# rule_correct (our verdict vs PM own resolution) is the PRIMARY measurement and
+# it only exists once this has run.
+*/10 * * * * $WORKDIR/agent/cron_guard.sh --gap 25 sweep_settle sh -c "cd $WORKDIR/agent && set -a && . $WORKDIR/ingest/.env && set +a && AF_COUNTER_NAME=sweep_settle $PYTHON settled_sweep_observer.py --settle >> $WORKDIR/agent/settled_sweep_observer.log 2>&1"

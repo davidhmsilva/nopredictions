@@ -96,6 +96,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── inplay_sim_scanner.py          ← Strategy 7: Sim Model In-Play ✅ NEW
 │   ├── wallet_analyzer.py            ← Polymarket wallet analyser (FIFO + written reading) ✅ NEW
 │   ├── late_goals_table.py            ← empirical late-goal fair value (no model) ✅
+│   ├── priced_like_table.py           ← Game Center "priced like this" + league base rates ✅ NEW
 │   ├── late_goals_observer.py         ← Over Late Goals — paper observation only ✅
 │   ├── resolver.py                    ← resolves trades + calculates CLV ✅
 │   ├── tools/
@@ -122,7 +123,14 @@ riding the AI + prediction-markets wave simultaneously.
     │   ├── lib/supabaseBrowser.ts     ← client half — NEVER merge with the server half
     │   ├── lib/supabaseAuth.ts        ← server half (imports next/headers)
     │   ├── lib/useSession.ts · lib/useWatchlist.ts
-    │   ├── game/[slug]/page.tsx       ← GAME CENTER — reached by clicking a fixture
+    │   ├── game/[slug]/page.tsx       ← GAME CENTER — tabs: Overview · Stats · Match · Markets
+    │   ├── game/[slug]/{Insights,StatsTab,MatchTab}.tsx · fmt.ts
+    │   ├── api/game/context · api/game/brief   ← team form + ESPN + pressure · the AI brief
+    │   ├── lib/teamform.ts            ← our DB → form, streaks with rarity, H2H, vs closing price
+    │   ├── lib/espnMatch.ts           ← ESPN summary: line-ups, timeline, box score, table
+    │   ├── lib/pricedLike.ts          ← "matches priced like this" (priced_like.json)
+    │   ├── lib/matchbrief.ts          ← Claude brief, cached per fixture per phase
+    │   ├── lib/momentum.ts · lib/matchcontext.ts · lib/teamname.ts
     │   ├── api/scout/route.ts         ← the board  ·  api/pulse → the tape's 7 numbers
     │   ├── api/game · api/backtest · api/wallet
     │   ├── lib/scout.ts               ← Gamma sweep → fixtures + book grades
@@ -1560,6 +1568,89 @@ where the weak claim is the true one.
 
 ⚠️ ESPN is still needed by the **pressure arms**: they want shots, corners and
 possession, and Polymarket carries none of those.
+
+## The Game Center, second pass — what only this database can show (2026-09-11)
+
+Modelled on Sofascore's match page, differentiated by the one thing a stats site
+does not have: **results joined to closing prices**. Four tabs — Overview · Stats
+· Match · Markets — with `#stats`-style links that open the right one.
+
+| panel | source | what makes it ours |
+|---|---|---|
+| **Brief** | Claude (`claude-opus-5`, fallback 4.8) | told to use only the page's numbers; no tips; small samples flagged |
+| **Priced like this** | `priced_like.json` | every other market in the matches Pinnacle CLOSED at this price (47,740 on totals, 101,249 on 1X2) |
+| **Stats** | our `matches` + `match_odds` | HT/FT splits (last 5 / 10 / real venue / season), each game with its closing odds |
+| **Runs** | same, rarity from league base rates | "1 in N" at the league's own rate; only runs ≤5% shown, and the page says 68 are checked |
+| **Against the closing price** | same | wins / overs vs what those closing prices implied — labelled as variance on 10 games |
+| **Pressure curve** | `pressure_observations` | our agent's per-minute danger index, joined on PM's own `event_title` |
+| **Match** | ESPN summary | timeline, pitch from position codes, box score, commentary, table, venue/referee/TV |
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python priced_like_table.py      # rebuild site/app/lib/priced_like.json (reads ~145k matches)
+```
+
+🔑 **The Stats tab is only as fresh as Stage A — and Stage A's cache never
+expired.** On 2026-09-11 the European leagues stopped at 08-27 and the
+Bundesliga had no 2026-27 rows at all. A plain `--seasons 2026-27` re-run
+"worked" and changed almost nothing: `download_csv` returned any cached file
+as-is, so 21 of 22 leagues re-read their 08-28 snapshot and only the uncached
+Bundesliga got new rows (Premier League: 10 matches in the DB, 30 played).
+`--refresh` re-downloads (falling back to the cache if the server will not
+answer) and `--current-season` picks the live season from the date:
+
+```bash
+cd ingest && source .venv/bin/activate
+python stage_a_football_data.py --current-season --refresh --continue-on-error   # 869 matches, ~2 min
+```
+
+Daily in cron since 2026-09-11 behind `cron_guard.sh --daily 07:00 stage_a`
+(log `ingest/stage_a_cron.log`, crontab backup `reports/crontab_backup_2026-09-11.txt`).
+The tab still warns when a team's last game is 3+ weeks old.
+
+⚠️ **The brief after kick-off gets no prices.** Its first in-play version read
+Union at **6.06 while trailing 0-1 at 45'** and called it "an unusually wide
+line" — the board prices the score. From `started` (board OR ESPN) the facts
+carry `match_state: in play — prices withheld` and the cache key moves to its own
+phase (`pre` / `pre-xi` / `live`), so a pre-match brief is never overwritten by,
+or served as, the price-free one. Counts it would otherwise tally itself (H2H
+draws — it once said three of four) are pre-computed in the facts.
+
+💸 **Brief cost scales with fixtures, not visitors**: `unstable_cache` keyed on
+slug + phase, 12h, so ≤3 Opus calls per fixture ever. Refused beyond 72h before
+kick-off or 6h after it, so a crawler walking old slugs cannot buy one per URL.
+~11s cold. A failure is thrown, never returned, so it is not cached.
+
+**Team identity** (`teamform.resolveTeams`): `agent/team_aliases.json` first —
+including its `__NOT_IN_MODEL__` verdicts, because "Inter Miami" scores 1.0
+against our "Inter" under token containment — then `teamScore` over canonical
+names + `team_aliases`, then **pairing**: two clubs on one board have shared a
+competition inside 420 days, which is what separates Rangers from Queens Park
+Rangers. Ties fail closed.
+
+**Sides are never read from PM's title order.** ESPN is matched in both
+orientations and returns `swapped`; the venue split, venue-scoped runs and the
+brief all follow ESPN's `homeAway`. The pressure curve follows api-football's
+`home`/`away` on its own rows.
+
+ESPN traps, each of which produced a plausible page:
+- `passPct` arrives as a FRACTION (0.8) beside `possessionPct` as a percent (65.7).
+- `lastFiveGames[].score` is not from the team's side — Union's 2-4 home defeat
+  read "4-2 · L". Rebuilt from `homeTeamId` + the two scores.
+- A fixture is filed under its **US-Eastern** date; the index asks for both.
+- `formationPlace` is not ordered by line; the pitch is drawn from position codes.
+
+`teamname.shortTeam` replaced "first two words", which labelled every tile of
+"1. FC Union Berlin" as **"1. FC"**. The priced-like block finds headlines BY
+label, so server and client share the one function.
+
+⚠️ **The pressure curve is public on the Game Center.** It shows our agent's
+danger index per minute — the reading the private arms trade on — not the trades.
+A decision for the operator, flagged when it shipped.
+
+**Two `next dev` in one folder**: `next.config.mjs` reads `NEXT_DIST_DIR`
+(unset in production) so a second session can preview on its own build dir —
+`np-site-gc` in `.claude/launch.json`, port 3107, `.next-gc/`.
 
 ## Live stats coverage — measured 2026-08-19
 
