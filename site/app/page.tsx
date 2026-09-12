@@ -6,11 +6,14 @@ import { useRouter } from 'next/navigation'
 import { AppShell } from './components/AppShell'
 import {
   IconAll,
+  IconBoard,
   IconClock,
   IconDrop,
   IconInsights,
+  IconLab,
   IconLive,
   IconStar,
+  IconWallet,
 } from './components/icons'
 import type { BookGrade, ScoutFixture } from './lib/scout'
 import { useSession } from './lib/useSession'
@@ -432,13 +435,44 @@ export default function ScoutPage() {
       </div>
 
       <div className="np-wrap">
+        {/* The intro says what the site is FOR. "All of today's football,
+            priced" described the list below it and left a first-time visitor
+            to work out the rest. Agents are not named here until the private
+            agents ship — a line promising them would point at the old page. */}
         <div className="sc-head">
-          <h1 className="sc-h1">All of today&apos;s football, priced</h1>
+          <p className="sc-eyebrow">NOPREDICTIONS · Polymarket football research</p>
+          <h1 className="sc-h1">Research any Polymarket football bet before you place it</h1>
           <p className="sc-h1-sub">
-            The games everyone is on, biggest first — live prices in decimal odds, and every
-            other fixture Polymarket has open underneath.
+            Every game on today&apos;s board is below, biggest first, in decimal odds. Open one and
+            you get how the matches the sharpest bookmaker priced the same way actually ended, both
+            teams&apos; form against their closing odds, the line-ups, and a plain-English brief.
+            No tips — the numbers, and you decide.
           </p>
+          <nav className="sc-does" aria-label="What you can do here">
+            <a href="#games">
+              <IconBoard />
+              <div>
+                <b>Open a game</b>
+                <span>Every fixture below has its own page</span>
+              </div>
+            </a>
+            <Link href="/lab">
+              <IconLab />
+              <div>
+                <b>Test a theory</b>
+                <span>Backtest your idea on 111,475 real games</span>
+              </div>
+            </Link>
+            <Link href="/wallet">
+              <IconWallet />
+              <div>
+                <b>Read a trader</b>
+                <span>Any Polymarket wallet&apos;s full record</span>
+              </div>
+            </Link>
+          </nav>
         </div>
+        <div id="games" />
 
         {/* ── the games leading the card ── */}
         {!loading && !error && headline.length > 0 && (

@@ -3,9 +3,9 @@ import './globals.css'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nopredictions.com'),
-  title: 'NOPREDICTIONS — Today’s football, priced',
+  title: 'NOPREDICTIONS — Research Polymarket football before you bet',
   description:
-    'Every football market Polymarket has open today, biggest first, in decimal odds. Test your own betting theory against 111,475 real games, and read any trader’s whole record.',
+    'Every football game on Polymarket today, in decimal odds. Open one to see how matches priced the same way actually ended, both teams’ form against their closing odds, the line-ups and a plain-English brief. Test your own betting theory on 111,475 real games.',
   alternates: { canonical: '/' },
   icons: {
     icon: [
@@ -15,9 +15,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'NOPREDICTIONS — Today’s football, priced',
+    title: 'NOPREDICTIONS — Research Polymarket football before you bet',
     description:
-      'Every football market Polymarket has open today, biggest first, in decimal odds — plus a lab for your own betting theories and a reader for any trader’s record.',
+      'Every football game on Polymarket today, with the numbers behind the price: how matches priced the same way ended, form against the closing odds, line-ups and a brief.',
     type: 'website',
     url: 'https://nopredictions.com',
     siteName: 'NOPREDICTIONS',
@@ -25,9 +25,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'NOPREDICTIONS — Today’s football, priced',
+    title: 'NOPREDICTIONS — Research Polymarket football before you bet',
     description:
-      'Every football market Polymarket has open today, biggest first, in decimal odds — plus a lab for your own betting theories and a reader for any trader’s record.',
+      'Every football game on Polymarket today, with the numbers behind the price: how matches priced the same way ended, form against the closing odds, line-ups and a brief.',
     images: ['/banner.jpg'],
   },
 }
