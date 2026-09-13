@@ -16,17 +16,28 @@ import {
   IconWallet,
 } from './components/icons'
 import type { BookGrade, ScoutFixture } from './lib/scout'
+import {
+  dayTimeText,
+  formatName,
+  priceText,
+  timeText,
+  useOddsFormat,
+  zoneLabel,
+  type OddsFormat,
+} from './lib/display'
+import { OddsToggle } from './components/OddsToggle'
 import { useSession } from './lib/useSession'
 import { useWatchlist } from './lib/useWatchlist'
 
 // ── formatting ───────────────────────────────────────────────────────────────
 //
-// Prices are decimal odds everywhere on this site. A probability is what a
-// model thinks; the decimal is what you pay.
+// Prices are held as probabilities and written in the reader's own format —
+// American, decimal or implied — by lib/display. A probability is what a model
+// thinks; the odds are what you pay.
 
-function odds(p: number | null | undefined): string {
+function odds(p: number | null | undefined, f: OddsFormat): string {
   if (p == null || p <= 0.01 || p >= 0.99) return '—'
-  return (1 / p).toFixed(2)
+  return priceText(p, f)
 }
 
 function money(v: number | null | undefined): string {
@@ -36,15 +47,17 @@ function money(v: number | null | undefined): string {
   return `$${v.toFixed(0)}`
 }
 
+/** Kick-off in the reader's own zone. The zone is named once, in the column
+ *  head, rather than on every row. */
 function clock(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   const mins = Math.round((d.getTime() - Date.now()) / 60000)
-  if (mins < 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (mins < 0) return timeText(d)
   if (mins < 60) return `${mins}m`
   if (mins < 24 * 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`
-  return d.toLocaleDateString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+  return dayTimeText(d)
 }
 
 // ── book grade ───────────────────────────────────────────────────────────────
@@ -223,6 +236,7 @@ function Row({
   onToggleWatch: (slug: string) => void
 }) {
   const router = useRouter()
+  const oddsFmt = useOddsFormat()
   return (
     /* The whole row navigates, not just the two links inside it. Those links
        stay, and they are what makes this reachable from a keyboard — the row
@@ -263,10 +277,10 @@ function Row({
         <LiveState f={f} />
       </td>
 
-      <td className="sc-c-odd np-num">{odds(f.oneX2.home)}</td>
-      <td className="sc-c-odd np-num">{odds(f.oneX2.draw)}</td>
-      <td className="sc-c-odd np-num">{odds(f.oneX2.away)}</td>
-      <td className="sc-c-odd sc-c-o25 np-num">{odds(f.over25)}</td>
+      <td className="sc-c-odd np-num">{odds(f.oneX2.home, oddsFmt)}</td>
+      <td className="sc-c-odd np-num">{odds(f.oneX2.draw, oddsFmt)}</td>
+      <td className="sc-c-odd np-num">{odds(f.oneX2.away, oddsFmt)}</td>
+      <td className="sc-c-odd sc-c-o25 np-num">{odds(f.over25, oddsFmt)}</td>
 
       <td className="sc-c-vol np-num">{money(f.volumeUsd)}</td>
       <td className="sc-c-go">
@@ -290,6 +304,10 @@ export default function ScoutPage() {
   const [comp, setComp] = useState<string | null>(null)
   const [allComps, setAllComps] = useState(false)
   const { me } = useSession()
+  const oddsFmt = useOddsFormat()
+  // Named once, in the column head. Computed on the client: the server runs in
+  // UTC and has no reader to ask.
+  const zone = useMemo(() => zoneLabel(), [])
   // Local for everyone, mirrored to Postgres for Pro. The Supabase client is
   // only loaded when there is a Pro session to load it for.
   const { slugs: watchlist, toggle: toggleWatch, synced } = useWatchlist(me?.plan === 'pro')
@@ -440,13 +458,13 @@ export default function ScoutPage() {
             to work out the rest. Agents are not named here until the private
             agents ship — a line promising them would point at the old page. */}
         <div className="sc-head">
-          <p className="sc-eyebrow">NOPREDICTIONS · Polymarket football research</p>
-          <h1 className="sc-h1">Research any Polymarket football bet before you place it</h1>
+          <p className="sc-eyebrow">NOPREDICTIONS · Prediction-market research</p>
+          <h1 className="sc-h1">See if the price is wrong — before you trade it</h1>
           <p className="sc-h1-sub">
-            Every game on today&apos;s board is below, biggest first, in decimal odds. Open one and
-            you get how the matches the sharpest bookmaker priced the same way actually ended, both
-            teams&apos; form against their closing odds, the line-ups, and a plain-English brief.
-            No tips — the numbers, and you decide.
+            Today&apos;s Polymarket football, biggest markets first. Open a game to check its price
+            against how matches priced the same way actually ended, both teams&apos; form against the
+            closing line, and the book you would be trading into — plus the line-ups and a
+            plain-English brief. No tips: the numbers, and you decide.
           </p>
           <nav className="sc-does" aria-label="What you can do here">
             <a href="#games">
@@ -505,20 +523,20 @@ export default function ScoutPage() {
 
                   <div className="sc-big-odds">
                     <span className="sc-big-odd">
-                      <em>1</em>
-                      <b className="np-num">{odds(f.oneX2.home)}</b>
+                      <em>Home</em>
+                      <b className="np-num">{odds(f.oneX2.home, oddsFmt)}</b>
                     </span>
                     <span className="sc-big-odd">
-                      <em>X</em>
-                      <b className="np-num">{odds(f.oneX2.draw)}</b>
+                      <em>Draw</em>
+                      <b className="np-num">{odds(f.oneX2.draw, oddsFmt)}</b>
                     </span>
                     <span className="sc-big-odd">
-                      <em>2</em>
-                      <b className="np-num">{odds(f.oneX2.away)}</b>
+                      <em>Away</em>
+                      <b className="np-num">{odds(f.oneX2.away, oddsFmt)}</b>
                     </span>
                     <span className="sc-big-odd sc-big-odd-alt">
                       <em>O2.5</em>
-                      <b className="np-num">{odds(f.over25)}</b>
+                      <b className="np-num">{odds(f.over25, oddsFmt)}</b>
                     </span>
                   </div>
 
@@ -561,6 +579,8 @@ export default function ScoutPage() {
           </div>
 
           <div className="sc-bar-right">
+            {/* Below 1100px the nav has no room for it, so it lives here. */}
+            <OddsToggle className="np-odds-bar" />
             <label className="sc-sort">
               <span className="sc-sort-key">Sort</span>
               <select
@@ -611,13 +631,15 @@ export default function ScoutPage() {
                   <th className="sc-c-n">#</th>
                   <th className="sc-c-star" />
                   <th className="sc-c-fixture">Fixture</th>
-                  <th className="sc-c-state">Starts</th>
-                  <th className="sc-c-odd" title="Home win — decimal odds at Polymarket's mid">1</th>
-                  <th className="sc-c-odd" title="Draw — decimal odds at Polymarket's mid">X</th>
-                  <th className="sc-c-odd" title="Away win — decimal odds at Polymarket's mid">2</th>
+                  <th className="sc-c-state" title={`Kick-off, in your time zone (${zone})`}>
+                    Starts{zone && <span className="sc-th-zone">{zone}</span>}
+                  </th>
+                  <th className="sc-c-odd" title={`Home win — ${formatName(oddsFmt)} at Polymarket's mid`}>Home</th>
+                  <th className="sc-c-odd" title={`Draw — ${formatName(oddsFmt)} at Polymarket's mid`}>Draw</th>
+                  <th className="sc-c-odd" title={`Away win — ${formatName(oddsFmt)} at Polymarket's mid`}>Away</th>
                   <th
                     className="sc-c-odd sc-c-o25"
-                    title="Over 2.5 goals — decimal odds at Polymarket's mid"
+                    title={`Over 2.5 goals — ${formatName(oddsFmt)} at Polymarket's mid`}
                   >
                     O2.5
                   </th>

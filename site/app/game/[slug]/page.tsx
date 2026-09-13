@@ -7,7 +7,8 @@ import type { MatchContext } from '../../lib/matchcontext'
 import { tradeable, type Look, type Pulse } from '../../lib/looks'
 import { useSession } from '../../lib/useSession'
 import { useWatchlist } from '../../lib/useWatchlist'
-import { SETTLED_BAND, money, odds, pct, signed } from './fmt'
+import { SETTLED_BAND, money, odds, oddsDec, pct, signed } from './fmt'
+import { kickoffText, oddsText, useOddsFormat } from '../../lib/display'
 
 function ordinal(n: number): string {
   const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
@@ -80,7 +81,7 @@ function MatchHero({ data, ctx }: { data: GameData; ctx: MatchContext | null }) 
           </span>
         ) : kickoff ? (
           <span className="gc-hero-ko np-num">
-            {kickoff.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            {kickoffText(kickoff)}
           </span>
         ) : null}
       </div>
@@ -136,6 +137,7 @@ function MatchHero({ data, ctx }: { data: GameData; ctx: MatchContext | null }) 
 // ── the prices, as tiles ─────────────────────────────────────────────────────
 
 function OddsTiles({ headlines }: { headlines: Headline[] }) {
+  const oddsFmt = useOddsFormat()
   if (headlines.length === 0) return null
   return (
     <section className="gc-section">
@@ -144,7 +146,7 @@ function OddsTiles({ headlines }: { headlines: Headline[] }) {
         {headlines.map((h) => (
           <div key={h.label} className={`gc-tile${h.isMid ? ' is-mid' : ''}`}>
             <span className="gc-tile-k">{h.label}</span>
-            <span className="gc-tile-v np-num">{h.odds ? h.odds.toFixed(2) : '—'}</span>
+            <span className="gc-tile-v np-num">{oddsDec(h.odds, oddsFmt)}</span>
             <span className="gc-tile-sub">
               {h.isMid ? (
                 <span className="gc-tile-warn" title="No order book — this is a Gamma mid, a number rather than a price you can pay.">
@@ -186,6 +188,7 @@ function PriceChart({
   headlines: Headline[]
 }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const oddsFmt = useOddsFormat()
 
   const shown = series.filter((s) => !hidden.has(s.label))
 
@@ -245,11 +248,13 @@ function PriceChart({
       {geom ? (
         <div className="gc-chart">
           <svg viewBox={`0 0 ${geom.W} ${geom.H}`} className="gc-chart-svg" role="img"
-               aria-label="Decimal odds over time for this fixture's main markets">
+               aria-label="Prices over time for this fixture's main markets">
             {geom.ticks.map((t) => (
               <g key={t.v}>
                 <line x1={geom.PAD_L} y1={t.y} x2={geom.W - 8} y2={t.y} className="gc-chart-grid" />
-                <text x={6} y={t.y + 5} className="gc-chart-tick">{t.v.toFixed(t.v < 10 ? 2 : 0)}</text>
+                <text x={6} y={t.y + 5} className="gc-chart-tick">
+                  {oddsFmt === 'decimal' ? t.v.toFixed(t.v < 10 ? 2 : 0) : oddsText(t.v, oddsFmt)}
+                </text>
               </g>
             ))}
             {geom.lines.map((l) => (
@@ -283,7 +288,7 @@ function PriceChart({
             >
               <span className="gc-legend-dot" style={{ background: SERIES_COLOUR[i % SERIES_COLOUR.length] }} />
               {s.label}
-              {o && <b className="np-num">{o.toFixed(2)}</b>}
+              {o && <b className="np-num">{oddsDec(o, oddsFmt)}</b>}
             </button>
           )
         })}
@@ -300,6 +305,7 @@ function PriceChart({
 // ── the last twenty minutes ──────────────────────────────────────────────────
 
 function PulseList({ pulse }: { pulse: Pulse[] }) {
+  const oddsFmt = useOddsFormat()
   if (pulse.length === 0) return null
   return (
     <section className="gc-section">
@@ -312,7 +318,7 @@ function PulseList({ pulse }: { pulse: Pulse[] }) {
               {p.question.split(':').pop()?.trim()} — {p.outcome}
             </span>
             <span className="gc-pulse-price np-num">
-              {odds(p.from)} → {odds(p.to)}
+              {odds(p.from, oddsFmt)} → {odds(p.to, oddsFmt)}
             </span>
           </li>
         ))}
@@ -329,6 +335,7 @@ const CALL_LABEL: Record<Look['call'], string> = {
 
 function LookRow({ look }: { look: Look }) {
   const [open, setOpen] = useState(false)
+  const oddsFmt = useOddsFormat()
   const can = tradeable(look)
 
   return (
@@ -337,7 +344,7 @@ function LookRow({ look }: { look: Look }) {
         <span className={`gc-call gc-call-${look.call}`}>{CALL_LABEL[look.call]}</span>
         <span className="gc-look-side">{look.side}</span>
         <span className="gc-look-odds">
-          {look.odds.toFixed(2)}
+          {oddsDec(look.odds, oddsFmt)}
           <i>{pct(look.prob)}</i>
         </span>
       </div>
@@ -345,7 +352,7 @@ function LookRow({ look }: { look: Look }) {
       <div className="gc-look-nums">
         <span>
           <em>measured</em>
-          <b>{look.fairOdds ? look.fairOdds.toFixed(2) : '—'}</b>
+          <b>{oddsDec(look.fairOdds, oddsFmt)}</b>
           <i>{pct(look.fairProb)}</i>
         </span>
         <span className={look.edgePp != null && look.edgePp > 0 ? 'gc-pos' : 'gc-neg'}>
@@ -482,6 +489,7 @@ interface BoardRow {
 
 function Board({ groups }: { groups: MarketGroup[] }) {
   const [open, setOpen] = useState(false)
+  const oddsFmt = useOddsFormat()
 
   const { rows, quoted } = useMemo(() => {
     const rows: BoardRow[] = []
@@ -529,7 +537,7 @@ function Board({ groups }: { groups: MarketGroup[] }) {
               <tr key={i}>
                 <td className="gc-board-q">{r.question.split(':').pop()?.trim()}</td>
                 <td>{r.outcome}</td>
-                <td className="gc-r gc-mono">{odds(r.ask)}</td>
+                <td className="gc-r gc-mono">{odds(r.ask, oddsFmt)}</td>
                 <td className="gc-r gc-mono">{r.spreadPp.toFixed(1)}pp</td>
                 <td className="gc-r gc-mono">{money(r.depthUsd)}</td>
               </tr>

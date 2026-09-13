@@ -1,13 +1,20 @@
-// Formatting shared by the Game Center's panels. Decimal odds everywhere — the
-// reader thinks in them — with the probability beside, never instead.
+// Formatting shared by the Game Center's panels. Prices follow the reader's
+// odds format (lib/display), with the probability beside, never instead.
+
+import { dateText, oddsText, priceText, type OddsFormat } from '../../lib/display'
 
 export const SETTLED_BAND = 0.01
 
-export function odds(p: number | null | undefined): string {
+export function odds(p: number | null | undefined, f: OddsFormat): string {
   if (p == null || p <= 0 || p >= 1) return '—'
   if (p <= SETTLED_BAND) return 'settled ✗'
   if (p >= 1 - SETTLED_BAND) return 'settled ✓'
-  return (1 / p).toFixed(2)
+  return priceText(p, f)
+}
+
+/** Decimal odds held as a number — our closing prices — in the reader's format. */
+export function oddsDec(dec: number | null | undefined, f: OddsFormat): string {
+  return oddsText(dec, f)
 }
 
 export function pct(p: number | null | undefined, digits = 0): string {
@@ -44,12 +51,11 @@ export function oneIn(chance: number): string {
 
 export { shortTeam as shortName } from '../../lib/teamname'
 
+/** Sep 13 in the US, 13 Sep elsewhere — see lib/display on why the zone decides. */
 export function dayMonth(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  return dateText(new Date(iso))
 }
 
 export function dayMonthYear(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+  return dateText(new Date(iso), true)
 }

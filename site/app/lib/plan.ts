@@ -14,23 +14,14 @@
  */
 
 import { getSql } from './db'
+import { FREE_DAILY_LIMIT, QUOTA_RESET_TEXT, QUOTA_TZ, type MeteredFeature } from './planTerms'
+
+// The limits, the price and the reset boundary live in planTerms, because the
+// pages print them too. Re-exported so server code keeps a single import.
+export { FREE_DAILY_LIMIT, PRICING } from './planTerms'
+export type { MeteredFeature } from './planTerms'
 
 export type Plan = 'free' | 'pro'
-export type MeteredFeature = 'lab' | 'wallet'
-
-/** What a free account gets per UTC day, per feature. */
-export const FREE_DAILY_LIMIT: Record<MeteredFeature, number> = {
-  lab: 3,
-  wallet: 3,
-}
-
-/** Price, in one place, so the pricing page and Stripe cannot drift apart. */
-export const PRICING = {
-  monthlyUsd: 19,
-  yearlyUsd: 190,
-  /** Two months free, stated rather than left for the reader to work out. */
-  yearlySavingUsd: 19 * 12 - 190,
-} as const
 
 export interface Entitlement {
   plan: Plan
@@ -122,7 +113,7 @@ export async function entitlement(
       from public.usage_events
      where user_id = ${userId}
        and feature = ${feature}
-       and created_at >= date_trunc('day', now() at time zone 'utc')
+       and created_at >= (date_trunc('day', now() at time zone ${QUOTA_TZ}::text) at time zone ${QUOTA_TZ}::text)
   `
   return {
     plan: 'free',
@@ -172,7 +163,7 @@ export async function claimUse(
         from public.usage_events
        where user_id = ${userId}
          and feature = ${feature}
-         and created_at >= date_trunc('day', now() at time zone 'utc')
+         and created_at >= (date_trunc('day', now() at time zone ${QUOTA_TZ}::text) at time zone ${QUOTA_TZ}::text)
     `
     if (n >= limit) {
       return {
@@ -198,7 +189,7 @@ export function refusalMessage(e: Entitlement): string {
     return 'Sign in to run this — free accounts get 3 a day.'
   }
   if (e.reason === 'quota_exhausted') {
-    return `That is today's ${e.limit} on the free plan. Pro removes the limit, or the count resets at 00:00 UTC.`
+    return `That is today's ${e.limit} on the free plan. Pro removes the limit, or the count resets at ${QUOTA_RESET_TEXT}.`
   }
   return 'Not allowed.'
 }

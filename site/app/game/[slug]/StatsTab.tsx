@@ -8,7 +8,8 @@ import { useState } from 'react'
 import type { FormStats, H2HGame, MarketRecord, TeamContext, TeamForm, TeamGame } from '../../lib/teamform'
 import type { EspnMatch } from '../../lib/espnMatch'
 import { StreakChip } from './Insights'
-import { dayMonth, dayMonthYear, frac, rateOf, shortName, type Count } from './fmt'
+import { dayMonth, dayMonthYear, frac, oddsDec, rateOf, shortName, type Count } from './fmt'
+import { useOddsFormat } from '../../lib/display'
 
 type SplitKey = 'last5' | 'last10' | 'venue' | 'season'
 
@@ -154,6 +155,7 @@ function Pill({ r }: { r: 'W' | 'D' | 'L' | string }) {
 
 function GameList({ games }: { games: TeamGame[] }) {
   const [all, setAll] = useState(false)
+  const oddsFmt = useOddsFormat()
   const shown = all ? games : games.slice(0, 8)
   return (
     <>
@@ -173,7 +175,7 @@ function GameList({ games }: { games: TeamGame[] }) {
                 <i className={g.gf > 0 && g.ga > 0 ? 'on' : ''} title="Both teams scored">B</i>
               </span>
               <span className="gcx-games-odds gc-mono" title={g.oddsSource === 'pinnacle' ? 'Pinnacle closing odds on this team' : 'Market-average closing odds on this team'}>
-                {g.odds ? g.odds.toFixed(2) : ''}
+                {g.odds ? oddsDec(g.odds, oddsFmt) : ''}
               </span>
             </li>
           )

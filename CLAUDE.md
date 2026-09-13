@@ -2124,6 +2124,41 @@ Next: factory universes on this tape (match odds, draw, every totals line, BTTS,
 HT result, exact score, first to score, corners), once there are enough settled
 games to test on.
 
+## US SaaS pivot — PR 1, the surface (2026-09-13)
+
+By the user's decision on 2026-09-13, the public product is **"see if the price
+is wrong before you trade it"**, aimed at the US market. The agent stays in the
+repo as the method, not the pitch. PR 1 changes only how the existing board is
+written for a US reader. No new data, no new sport.
+
+| | |
+|---|---|
+| `app/lib/display.ts` | The ONLY place a price or a time becomes text. Odds are American, decimal or implied, remembered per browser (`localStorage np.odds`). The default is keyed on the reader's **time zone**: a US zone gets American odds and a 12-hour clock, anything else decimal and 24-hour. Never keyed on browser language, which renders "quarta, 9/09" on a Portuguese machine. |
+| `components/OddsToggle.tsx` | In the nav from 1100px, in Scout's bar below that, and in the phone menu sheet. The buttons are written as the format itself: +150 · 2.50 · 40%. |
+| Times | In the reader's own zone, named (`ET` / `CT` / `MT` / `PT` for US zones). Computed client-side only, because the server runs in UTC and has no reader. |
+| Quota day | Ends at **midnight ET** (`planTerms.QUOTA_TZ`); it was 00:00 UTC. No migration: `usage_events` stores instants and a day is a window over them. The table had 0 rows at the switch. |
+| `app/lib/planTerms.ts` | Price, limits and reset text, safe to import from the client. The pricing page no longer types its own 19/190; `plan.ts` re-exports. |
+| Copy | Hero and metadata lead with the sentence. Scout's 1/X/2 is now Home/Draw/Away. Pricing drops the agent row and the /agent/ours link. Footer: 18+, a research tool not a tip service, we do not place trades or hold funds, 1-800-GAMBLER. |
+
+⚠️ **Left alone on purpose:**
+- The Claude match brief still writes decimal odds. It is cached per fixture, not per reader.
+- The agent's operator-only pages stay decimal.
+- Wallet prices stay in PM share cents.
+- Dropping-odds' "↓14.1%" is still the fall of the decimal.
+
+⚠️ **The agent side is unchanged:** all paper, nothing live, and no arm near its
+verdict gate.
+
+**Blockers for the rest of the pivot:**
+- **Auth is down.** The Supabase free plan is over quota (402) until the owner
+  buys Pro.
+- **No payments or email.** There are no Stripe keys and no email provider on
+  Vercel.
+- **The Odds API key is on the free tier:** 500 credits a month, 424 left on
+  09-13. Recording US books across every sport needs a paid plan.
+- **No reliable host for recorders.** They need an always-on machine, and this
+  Mac sleeps ~85% of the day.
+
 ## CLV framework (how we measure edge)
 
 We have both Pinnacle opening and closing odds, so CLV is measurable now:

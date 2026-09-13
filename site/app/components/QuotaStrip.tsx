@@ -12,6 +12,7 @@
 
 import Link from 'next/link'
 import type { Quota } from '../lib/useSession'
+import { QUOTA_RESET_TEXT } from '../lib/planTerms'
 
 export function QuotaStrip({
   quota,
@@ -45,8 +46,8 @@ export function QuotaStrip({
     <div className={`np-quota${out ? ' is-out' : ''}`}>
       {out ? (
         <span>
-          That is today&apos;s <b className="np-num">{quota.limit}</b>. The count resets at
-          00:00 UTC.
+          That is today&apos;s <b className="np-num">{quota.limit}</b>. The count resets at{' '}
+          {QUOTA_RESET_TEXT}.
         </span>
       ) : (
         <span>

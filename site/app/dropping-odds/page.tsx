@@ -25,12 +25,13 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import type { Mover, MoversMeta } from '../lib/movers'
+import { kickoffText, priceText, useOddsFormat, type OddsFormat } from '../lib/display'
 
 // ── formatting ───────────────────────────────────────────────────────────────
 
-function odds(p: number | null | undefined): string {
+function odds(p: number | null | undefined, f: OddsFormat): string {
   if (p == null || p <= 0.005 || p >= 0.995) return '—'
-  return (1 / p).toFixed(2)
+  return priceText(p, f)
 }
 
 function money(v: number): string {
@@ -50,16 +51,15 @@ function dropPct(m: Mover['move']): number {
 function kickoff(iso: string | null, hours: number | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
-  // ⚠️ Pinned to en-GB rather than the browser's locale. The site is English
-  //    throughout, and an empty locale array renders "quarta, 9/09" on a
-  //    Portuguese machine and "Wed, 9 Sep" on an English one — the same page
-  //    reading differently to two people, in a column of times they might
-  //    compare. 24-hour clock for the same reason: these are kickoff times.
-  const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+  // ⚠️ Never the browser's locale: an empty locale array renders "quarta,
+  //    9/09" on a Portuguese machine and "Wed, 9 Sep" on an English one — the
+  //    same page reading differently to two people comparing a column of
+  //    times. The format follows the reader's ZONE instead (lib/display):
+  //    "Sun, Sep 13, 1:00 PM ET" in New York, "Sun 13 Sep, 18:00 BST" in
+  //    London. English for both, and the zone is always named.
   const rel =
     hours == null ? '' : hours < 1 ? ` · ${Math.round(hours * 60)}m` : ` · T−${hours.toFixed(0)}h`
-  return `${day} ${time}${rel}`
+  return `${kickoffText(d)}${rel}`
 }
 
 // ── the price path ───────────────────────────────────────────────────────────
@@ -107,6 +107,7 @@ function Spark({ points, w = 96, h = 26 }: { points: number[]; w?: number; h?: n
 // ── one row ──────────────────────────────────────────────────────────────────
 
 function Row({ f }: { f: Mover }) {
+  const oddsFmt = useOddsFormat()
   return (
     <Link href={`/game/${f.slug}`} className="do-row">
       <div className="do-c-match">
@@ -134,8 +135,8 @@ function Row({ f }: { f: Mover }) {
         <span className="np-num do-pp">{f.move.pp.toFixed(1)}pp</span>
       </div>
 
-      <div className="do-c-was np-num">{odds(f.move.before)}</div>
-      <div className="do-c-now np-num">{odds(f.move.now)}</div>
+      <div className="do-c-was np-num">{odds(f.move.before, oddsFmt)}</div>
+      <div className="do-c-now np-num">{odds(f.move.now, oddsFmt)}</div>
 
       <div className="do-c-trend">
         <Spark points={f.spark} />
@@ -174,6 +175,7 @@ export default function DroppingOddsPage() {
   const [showThin, setShowThin] = useState(false)
   const [meta, setMeta] = useState<MoversMeta | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const oddsFmt = useOddsFormat()
 
   useEffect(() => {
     let cancelled = false
@@ -244,12 +246,12 @@ export default function DroppingOddsPage() {
                 <div className="do-top-odds">
                   <span>
                     <em>24H AGO</em>
-                    <b className="np-num do-top-was">{odds(top.move.before)}</b>
+                    <b className="np-num do-top-was">{odds(top.move.before, oddsFmt)}</b>
                   </span>
                   <span className="do-top-arrow" aria-hidden="true">→</span>
                   <span>
                     <em>NOW</em>
-                    <b className="np-num do-top-now">{odds(top.move.now)}</b>
+                    <b className="np-num do-top-now">{odds(top.move.now, oddsFmt)}</b>
                   </span>
                 </div>
 

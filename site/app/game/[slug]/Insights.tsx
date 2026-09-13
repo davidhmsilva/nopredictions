@@ -11,6 +11,7 @@ import type { Momentum } from '../../lib/momentum'
 import type { PricedLike, PricedLikeBlock } from '../../lib/pricedLike'
 import type { Streak, TeamContext } from '../../lib/teamform'
 import { odds, oneIn, pct, shortName, signed } from './fmt'
+import { priceText, timeText, useOddsFormat } from '../../lib/display'
 
 // ── the brief ────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ export function BriefCard({ slug }: { slug: string }) {
         <span className="gcx-brief-tag">Brief</span>
         <span className="gcx-brief-by">
           {brief
-            ? `Written by AI from the numbers on this page · ${new Date(brief.writtenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${brief.inPlay ? 'after kick-off, so no prices — how the sides arrived' : brief.lineups ? 'line-ups in' : 'before line-ups'}`
+            ? `Written by AI from the numbers on this page · ${timeText(new Date(brief.writtenAt))} · ${brief.inPlay ? 'after kick-off, so no prices — how the sides arrived' : brief.lineups ? 'line-ups in' : 'before line-ups'}`
             : 'Written by AI from the numbers on this page'}
         </span>
       </div>
@@ -82,6 +83,7 @@ function PricedBlock({ title, basis, block, comparable }: {
   block: PricedLikeBlock
   comparable: boolean
 }) {
+  const oddsFmt = useOddsFormat()
   const anyPm = block.lines.some((l) => l.pmAsk != null)
   return (
     <div className="gcx-pl-block">
@@ -105,10 +107,10 @@ function PricedBlock({ title, basis, block, comparable }: {
               <tr key={l.key}>
                 <td>{l.label}</td>
                 <td className="gc-r gc-mono">{pct(l.rate)}</td>
-                <td className="gc-r gc-mono">{l.rate ? (1 / l.rate).toFixed(2) : '—'}</td>
+                <td className="gc-r gc-mono">{l.rate ? priceText(l.rate, oddsFmt) : '—'}</td>
                 {anyPm && comparable && (
                   <td className={`gc-r gc-mono${l.pmIsMid ? ' gcx-dim' : ''}`} title={l.pmIsMid ? 'No order book — a Gamma mid' : undefined}>
-                    {l.pmAsk != null ? odds(l.pmAsk) : '—'}
+                    {l.pmAsk != null ? odds(l.pmAsk, oddsFmt) : '—'}
                   </td>
                 )}
                 {anyPm && comparable && (
@@ -126,7 +128,10 @@ function PricedBlock({ title, basis, block, comparable }: {
 }
 
 export function PricedLikeCard({ pl }: { pl: PricedLike | null | undefined }) {
+  const oddsFmt = useOddsFormat()
   if (!pl || (!pl.totals && !pl.result)) return null
+  // In implied mode the price IS the percentage, so it is not printed twice.
+  const also = (p: number) => (oddsFmt === 'implied' ? '' : ` (${pct(p)})`)
   return (
     <section className="gc-section">
       <h2 className="gc-h2">Matches priced like this one</h2>
@@ -138,7 +143,7 @@ export function PricedLikeCard({ pl }: { pl: PricedLike | null | undefined }) {
       <div className="gcx-pl">
         {pl.totals && (
           <PricedBlock
-            title={`Over 2.5 at ${odds(pl.totals.prob)} (${pct(pl.totals.prob)})`}
+            title={`Over 2.5 at ${odds(pl.totals.prob, oddsFmt)}${also(pl.totals.prob)}`}
             basis={`closed ${pct(pl.totals.lo)}–${pct(pl.totals.hi)}${pl.totals.avgGoals ? ` · ${pl.totals.avgGoals.toFixed(2)} goals a game, ${pl.totals.avgHtGoals?.toFixed(2)} before half time` : ''}`}
             block={pl.totals}
             comparable={pl.comparable}
@@ -146,7 +151,7 @@ export function PricedLikeCard({ pl }: { pl: PricedLike | null | undefined }) {
         )}
         {pl.result && (
           <PricedBlock
-            title={`Home win at ${odds(pl.result.prob)} (${pct(pl.result.prob)})`}
+            title={`Home win at ${odds(pl.result.prob, oddsFmt)}${also(pl.result.prob)}`}
             basis={`closed ${pct(pl.result.lo)}–${pct(pl.result.hi)}`}
             block={pl.result}
             comparable={pl.comparable}

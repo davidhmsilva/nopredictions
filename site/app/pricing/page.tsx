@@ -18,9 +18,12 @@ import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import { useSession } from '../lib/useSession'
+import { PRICING, QUOTA_RESET_TEXT } from '../lib/planTerms'
 
-const MONTHLY_USD = 19
-const YEARLY_USD = 190
+// From planTerms, the same constants the server and Stripe read. This page
+// used to type its own 19 and 190, and nothing kept the two in step.
+const MONTHLY_USD = PRICING.monthlyUsd
+const YEARLY_USD = PRICING.yearlyUsd
 
 type Period = 'monthly' | 'yearly'
 
@@ -33,7 +36,8 @@ const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
   { k: 'Game Center on any fixture', free: '✓', pro: '✓' },
   { k: 'Dropping odds — where the money went', free: '✓', pro: '✓', href: '/dropping-odds' },
   { k: 'Insights — what we measured, including the failures', free: '✓', pro: '✓', href: '/insights' },
-  { k: 'Our agent’s full paper record', free: '✓', pro: '✓', href: '/agent/ours' },
+  // The agent's paper record left this table on 2026-09-13. It is the
+  // operator's own and private now, and it was never what a plan sells.
   { k: 'Lab — a theory replayed over 111,475 games', free: '3 a day', pro: 'Unlimited', href: '/lab' },
   { k: 'Wallet — any trader’s record rebuilt from their fills', free: '3 a day', pro: 'Unlimited', href: '/wallet' },
   { k: 'Watchlist', free: 'This browser', pro: 'Every device' },
@@ -42,7 +46,7 @@ const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
 /** The three lines on each card. Short on purpose: the card is the decision,
  *  the table below is the detail. */
 const FREE_POINTS = [
-  'The whole board, the Game Center, the movers and the record',
+  'The whole board, the Game Center and the movers',
   'Three Lab tests and three wallet reads a day',
   'No card, ever',
 ]
@@ -225,8 +229,8 @@ export default function PricingPage() {
             ))}
           </div>
           <p className="pr-reset">
-            Free counts reset at 00:00 UTC. A refused run never costs you one — if a
-            test fails on our side, you get it back.
+            Free counts reset at {QUOTA_RESET_TEXT}. A refused run never costs you one — if
+            a test fails on our side, you get it back.
           </p>
         </section>
 
@@ -236,17 +240,17 @@ export default function PricingPage() {
             instead of an unbuilt feature. */}
         <div className="pr-next">
           <strong>Not built yet, and not part of what you would be paying for:</strong>{' '}
-          alerts when a fixture kicks off or its book first grades clean. When they
-          exist they go to Pro, and this page will move them into the table above.
+          email alerts when a game on your watchlist is about to start, when its book first
+          grades clean, or when its price moves. When they exist they go to Pro, and this
+          page will move them into the table above.
         </div>
 
         <div className="np-note pr-honest">
-          <strong>What Pro is not.</strong> It is not a tip service and it does not give
-          you the agent’s picks to follow. The agent trades on paper, no strategy is
-          near its verdict gate, and{' '}
-          <Link href="/agent/ours">its own record says so</Link>. What you are paying
-          for is unlimited use of tools that measure — a backtest against Pinnacle’s
-          closing line, and a trader’s record rebuilt from their actual fills.
+          <strong>What Pro is not.</strong> It is not a tip service, and nothing on this
+          site tells you what to bet. We do not place trades, and we never hold anyone’s
+          money. What you are paying for is unlimited use of two tools that measure — a
+          backtest against Pinnacle’s closing line, and a trader’s record rebuilt from
+          their actual fills.
         </div>
       </div>
     </AppShell>

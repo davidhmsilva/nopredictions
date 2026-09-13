@@ -13,6 +13,7 @@ import {
   IconWallet,
 } from './icons'
 import { invalidateSession, useSession } from '../lib/useSession'
+import { OddsToggle } from './OddsToggle'
 
 /** The tabs, in the order a bettor uses them on a matchday:
  *  where is the edge → can I test my own idea → what is the agent doing →
@@ -272,6 +273,10 @@ function AccountActions() {
         <>
           <button className="np-sheet-scrim" aria-label="Close menu" onClick={() => setSheet(false)} />
           <div className="np-sheet" role="dialog" aria-label="Menu">
+            <div className="np-sheet-odds">
+              <span>Odds</span>
+              <OddsToggle />
+            </div>
             {showAccount ? (
               <>
                 <Link className="np-sheet-item" href="/account" onClick={() => setSheet(false)}>
@@ -345,6 +350,7 @@ export function AppNav() {
           </nav>
 
           <div className="np-nav-right">
+            <OddsToggle className="np-odds-nav" />
             <NavSearch />
             <AccountActions />
           </div>
@@ -376,10 +382,14 @@ export function AppFooter() {
           Every number on this site is measured, and the ones that are not measured say so.
           Nothing here is a tip.
         </div>
+        {/* What a US reader expects at the foot of anything about betting: the
+            age line, what this is and is not, and where to get help. "Paper
+            only, no real money" described the agent, not the site. */}
         <div className="np-footer-legal">
-          PAPER ONLY — NO REAL MONEY · 18+ · NOT FINANCIAL OR BETTING ADVICE · PAST RESULTS DO
-          NOT PREDICT FUTURE RESULTS
+          18+ · A RESEARCH TOOL, NOT A TIP SERVICE · WE DO NOT PLACE TRADES OR HOLD FUNDS · NOT
+          FINANCIAL OR BETTING ADVICE · PAST RESULTS DO NOT PREDICT FUTURE RESULTS
         </div>
+        <div className="np-footer-legal">GAMBLING PROBLEM? CALL 1-800-GAMBLER</div>
       </div>
     </footer>
   )

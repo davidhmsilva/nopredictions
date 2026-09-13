@@ -7,6 +7,7 @@ import { AppShell } from '../../components/AppShell'
 import { WalletReport } from '../../components/WalletReport'
 import { WalletContents } from '../../components/WalletContents'
 import type { WalletProfile } from '../../lib/wallet'
+import { QUOTA_RESET_TEXT } from '../../lib/planTerms'
 
 // A big wallet is tens of thousands of fills; the request runs for a while and
 // a bare spinner for 20 seconds reads as a hang. These say what is happening.
@@ -81,7 +82,7 @@ export default function WalletPage() {
             <p>
               {gate === 'signed_out'
                 ? 'Rebuilding a trader’s whole record is the expensive half of this site. A free account gets three a day, and takes an email and a password.'
-                : 'Free accounts get three wallet reads a day. The count resets at 00:00 UTC — or Pro removes the limit.'}
+                : `Free accounts get three wallet reads a day. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit.`}
             </p>
             <div className="np-btn-row">
               {gate === 'signed_out' ? (

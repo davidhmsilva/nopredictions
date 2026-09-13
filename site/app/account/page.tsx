@@ -18,6 +18,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '../components/AppShell'
 import { supabaseBrowser } from '../lib/supabaseBrowser'
 import { useSession, invalidateSession, type Quota } from '../lib/useSession'
+import { QUOTA_RESET_TEXT } from '../lib/planTerms'
 
 /** One metered tool, with what is left drawn rather than described. */
 function Meter({ label, href, q }: { label: string; href: string; q: Quota | null }) {
@@ -174,7 +175,7 @@ function AccountInner() {
         <section className="ac-card">
           <div className="ac-card-head">
             <h2>Today</h2>
-            {!isPro && <span className="ac-reset np-num">resets 00:00 UTC</span>}
+            {!isPro && <span className="ac-reset np-num">resets {QUOTA_RESET_TEXT}</span>}
           </div>
 
           <div className="ac-meters">

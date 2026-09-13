@@ -8,6 +8,8 @@ import { AppShell } from '../components/AppShell'
 import { QuotaStrip } from '../components/QuotaStrip'
 import { ToolChips, ToolFacts, ToolForm, ToolHead, ToolOutput } from '../components/ToolPage'
 import { useSession } from '../lib/useSession'
+import { oddsText, useOddsFormat } from '../lib/display'
+import { QUOTA_RESET_TEXT } from '../lib/planTerms'
 
 // ── types mirrored from the API route ───────────────────────────────────────
 
@@ -157,6 +159,7 @@ export default function LabPage() {
   // page reload — so the session is re-read after every attempt, refused ones
   // included (a refusal is how you find out the count is already zero).
   const { me, refresh } = useSession()
+  const oddsFmt = useOddsFormat()
 
   function pushLine(text: string, cls = 'lp-term-dim') {
     setTermLines(prev => [...prev, { text, cls }])
@@ -329,7 +332,7 @@ export default function LabPage() {
             <p>
               {gate === 'signed_out'
                 ? 'Replaying a theory over 111,475 games costs us a model call, so it sits behind a free account. Three a day, no card.'
-                : 'Free accounts get three Lab tests a day. The count resets at 00:00 UTC — or Pro removes the limit.'}
+                : `Free accounts get three Lab tests a day. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit.`}
             </p>
             <div className="tp-gate-actions">
               {gate === 'signed_out' ? (
@@ -453,7 +456,7 @@ export default function LabPage() {
                     <div className="bt-metric-k">HIT RATE</div>
                   </div>
                   <div className="bt-metric">
-                    <div className="bt-metric-v">{s.avgOdds != null ? s.avgOdds.toFixed(2) : '—'}</div>
+                    <div className="bt-metric-v">{oddsText(s.avgOdds, oddsFmt)}</div>
                     <div className="bt-metric-k">AVG ODDS</div>
                   </div>
                   <div className="bt-metric">
