@@ -1296,6 +1296,51 @@ put the whole box-score apparatus at **+0.0008 pseudo-R²** over free state and
 [[finding-ask-move-no-signal]] at **−0.00042 CI[−0.00104,+0.00019]** — a zero.
 Swapping feeds removes a failure mode. It does not make the signal work.
 
+### Leagues api-football never covers — ESPN fills the stat block (2026-09-13)
+
+On 2026-09-12, **49 Polymarket-listed fixtures** reached the first-half arms
+with no reading at all: api-football confirms (`coverage.fixtures.
+statistics_fixtures = false`) that it publishes no statistics for their
+competitions. The whole-cycle fallback above never engaged, because
+api-football was not refusing; it simply had nothing.
+
+`espn_stats.AF_UNCOVERED_TO_ESPN` maps six of them, **keyed on api-football's
+league ID** because "Primera División" is three countries in one day's feed:
+
+| api-football id | league | ESPN |
+|---|---|---|
+| 43 | National League (ENG) | `eng.5` |
+| 255 | USL Championship | `usa.usl.1` |
+| 489 | USL League One | `usa.usl.l1` |
+| 129 | Primera Nacional (ARG) | `arg.2` |
+| 299 | Primera División (VEN) | `ven.1` |
+| 162 | Primera División (CRC) | `crc.1` |
+
+Uruguay is uncovered too, but ESPN has no stats for it, so it is left out.
+J2, Slovakia, Kazakhstan, K League 2 and others did not resolve under the codes
+tried.
+
+`LiveMatchTracker._enrich_from_espn` differs from `_poll_espn`: **api-football
+still owns the fixture** (a positive id, its minute and its score) and ESPN
+supplies only the stat block. It makes one request per league per cycle,
+outside the quota latch and the cycle budget. It fails closed on no match, on
+no stats yet, and on **ESPN's score disagreeing with api-football's** (a lagged
+goal or a wrong pairing). Rows carry `stats_source='espn'`, `has_inside=False`,
+so **never pool them with api-football rows.**
+
+Matching was checked offline against the 2026-09-12 boards: **34/34 in the
+mapped leagues.** Five first looked like misses; they are filed under the
+previous US-Eastern date and pair 1.00/1.00 on the right day. The live
+scoreboard shows the current ET day, so that does not bite in production.
+
+🐛 **Fixed on the way:** `_carry_stats_forward` copied the stat values but not
+`source`/`has_inside`. A fresh snapshot defaults to api-football with
+shots-in-box, so any carried ESPN block was relabelled on the way through, and
+the index scored its missing shots-in-box as a measured zero.
+
+`tests/test_espn_uncovered_leagues.py`, 6 cases. ⚠️ A daemon restart is required
+for any of it to apply.
+
 ## The site has accounts and a paid plan (2026-09-08)
 
 `nopredictions.com` was four free tabs. It is now a product with a free tier

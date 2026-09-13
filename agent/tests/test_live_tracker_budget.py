@@ -63,6 +63,7 @@ def _no_espn(monkeypatch):
     party — so the fallback is stubbed empty here, and the tests that are ABOUT
     the fallback stub it with content of their own."""
     monkeypatch.setattr(lt.espn_stats, "live_fixtures", lambda *a, **k: [])
+    monkeypatch.setattr(lt.espn_stats, "fetch_league", lambda *a, **k: [])
 
 
 @pytest.fixture

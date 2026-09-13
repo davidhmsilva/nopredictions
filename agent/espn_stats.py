@@ -74,6 +74,34 @@ LEAGUES: dict[str, str] = {
     "bra.1": "Brasileirão",
     "arg.1": "Liga Profesional Argentina",
     "jpn.1": "J1 League",
+    # Leagues api-football lists live but publishes NO statistics for — see
+    # AF_UNCOVERED_TO_ESPN below. Checked on the 2026-09-12 scoreboards: every
+    # event carried shots, except one of two in Costa Rica.
+    "eng.5": "National League",
+    "usa.usl.1": "USL Championship",
+    "usa.usl.l1": "USL League One",
+    "arg.2": "Primera Nacional",
+    "ven.1": "Primera División (VEN)",
+    "crc.1": "Primera División (CRC)",
+}
+
+# api-football league id -> ESPN code, for competitions api-football CONFIRMS it
+# has no statistics for (`coverage.fixtures.statistics_fixtures = false`, all six
+# checked 2026-09-13). On 2026-09-12 these held 33 of the 49 Polymarket-listed
+# fixtures the first-half arms skipped for want of any reading.
+#
+# Keyed on the league ID, never the name: "Primera División" was three countries
+# in one day's feed. Uruguay's is uncovered too, but ESPN carries no stats for it
+# either, so it is left out rather than mapped to an empty board. A wrong code
+# returns someone else's fixtures silently; team matching (a tie fails closed)
+# and the score check in live_tracker are the guard behind this table.
+AF_UNCOVERED_TO_ESPN: dict[int, str] = {
+    43: "eng.5",        # National League (England)
+    255: "usa.usl.1",   # USL Championship
+    489: "usa.usl.l1",  # USL League One
+    129: "arg.2",       # Primera Nacional (Argentina)
+    299: "ven.1",       # Primera División (Venezuela)
+    162: "crc.1",       # Primera División (Costa Rica)
 }
 
 _TIMEOUT = 12

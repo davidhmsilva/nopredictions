@@ -398,6 +398,12 @@ def _carry_stats_forward(snap: 'StatSnapshot', prev: 'StatSnapshot | None') -> N
         setattr(snap, field, getattr(prev, field))
     snap.stats_minute = prev.stats_minute
     snap.stats_fetched_at = prev.stats_fetched_at
+    # The feed travels with its values. A fresh snapshot defaults to
+    # api-football with shots-in-box, so without this a carried ESPN block is
+    # relabelled on the way through and danger_index scores ESPN's missing
+    # shots-in-box as a measured zero.
+    snap.source = prev.source
+    snap.has_inside = prev.has_inside
 
 
 class LiveMatchTracker:
@@ -577,6 +583,9 @@ class LiveMatchTracker:
             self.enrich_status = {}
             report = Counter()
             candidates = []
+            # (fid, ESPN code) for fixtures api-football will never have stats for
+            # but ESPN does — served after the paid loop, one request per league.
+            espn_wanted: list[tuple[int, str]] = []
             for fid in fixture_ids_with_stats:
                 latest = self.snapshots[fid][-1]
                 if fid in inline_stats:
@@ -599,6 +608,10 @@ class LiveMatchTracker:
                 league, league_id = info.get('league', ''), info.get('league_id')
                 covered = self.league_has_stats(league_id)
                 if covered is False:
+                    espn_code = espn_stats.AF_UNCOVERED_TO_ESPN.get(league_id)
+                    if espn_code:
+                        espn_wanted.append((fid, espn_code))
+                        continue
                     self.enrich_status[fid] = 'league has no stats coverage (api)'
                     report['league uncovered (api)'] += 1
                     continue
@@ -645,6 +658,11 @@ class LiveMatchTracker:
             for rank, fid, latest in candidates[ENRICH_BUDGET_PER_CYCLE:]:
                 self.enrich_status[fid] = 'over cycle budget'
                 report['over budget'] += 1
+
+            # Outside the quota latch and the cycle budget on purpose: ESPN has
+            # no allowance to spend, and none of these would ever get a paid call.
+            if espn_wanted:
+                self._enrich_from_espn(espn_wanted, report)
 
             self.last_enrich_report = dict(report)
             if report:
@@ -818,6 +836,61 @@ class LiveMatchTracker:
             return 'ok'
         except Exception as exc:
             return f'error {type(exc).__name__}'
+
+    def _enrich_from_espn(self, wanted: list[tuple[int, str]], report: Counter) -> None:
+        """Stats from ESPN for fixtures in competitions api-football CONFIRMS it
+        will never publish statistics for (espn_stats.AF_UNCOVERED_TO_ESPN).
+
+        Not the same thing as `_poll_espn`, which replaces a whole refused
+        cycle and has no api-football fixture to hang a reading on. Here
+        api-football still owns the fixture — its id, minute and score — and
+        ESPN supplies only the stat block. One request per LEAGUE covers every
+        fixture in it.
+
+        The reading is the same quantity measured with fewer terms (no xG, no
+        shots-in-box), so the snapshot is tagged `source='espn'`,
+        `has_inside=False` and every consumer writes both to its row. Never pool
+        it with api-football's.
+        """
+        by_code: dict[str, list[int]] = defaultdict(list)
+        for fid, code in wanted:
+            by_code[code].append(fid)
+        for code, fids in by_code.items():
+            board = [f for f in espn_stats.fetch_league(code) if f.live]
+            for fid in fids:
+                status = self._fill_from_espn(fid, board)
+                self.enrich_status[fid] = status
+                report[status] += 1
+
+    def _fill_from_espn(self, fid: int, board: list) -> str:
+        """Copy one ESPN stat block onto this poll's snapshot, or say why not."""
+        snap = self.snapshots[fid][-1]
+        info = self.fixture_info.get(fid) or {}
+        uncovered = 'league has no stats coverage (api); espn:'
+        fx = espn_stats.match_fixture(info.get('home', ''), info.get('away', ''),
+                                      board, info.get('league'))
+        if fx is None:
+            return f'{uncovered} no fixture matched'
+        if fx.minute is None or not fx.has_stats:
+            return f'{uncovered} no stats yet'
+        # Two feeds, one match: disagreeing on the score means one of them lags
+        # a goal or the names paired the wrong fixture. Both fail closed — a lag
+        # costs a poll, a wrong pairing would put another match's pressure here.
+        if (fx.home_stats.goals, fx.away_stats.goals) != (snap.home_goals, snap.away_goals):
+            return f'{uncovered} score disagrees'
+
+        snap.source, snap.has_inside = 'espn', False
+        snap.home_shots_on, snap.away_shots_on = fx.home_stats.shots_on, fx.away_stats.shots_on
+        snap.home_shots_total, snap.away_shots_total = fx.home_stats.shots_total, fx.away_stats.shots_total
+        snap.home_corners, snap.away_corners = fx.home_stats.corners, fx.away_stats.corners
+        snap.home_possession, snap.away_possession = fx.home_stats.possession, fx.away_stats.possession
+        # ESPN measures neither. has_inside=False and the absent xG already tell
+        # danger_index these are "not measured"; a carried value would lie.
+        snap.home_shots_inside = snap.away_shots_inside = 0
+        snap.home_xg = snap.away_xg = 0.0
+        # True at ESPN's clock, which can sit a minute either side of api-football's.
+        snap.stats_minute, snap.stats_fetched_at = fx.minute, time.time()
+        return 'ok (espn)'
 
     def _parse_stats(self, snap: StatSnapshot, stats: list[dict], is_home: bool):
         """Parse api-football statistics array into a snapshot."""
