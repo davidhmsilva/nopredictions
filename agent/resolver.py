@@ -417,6 +417,8 @@ def _backfill_match_ids(conn):
             LIMIT 1
         ) e ON true
         WHERE pt.match_id IS NULL AND pt.result IS NULL
+          AND pt.strategy_id NOT IN (SELECT id FROM strategies
+                                      WHERE source = 'lab' OR rules->>'self_settling' = 'true')
     """)
     rows = cur.fetchall()
     if not rows:
@@ -493,6 +495,11 @@ def run() -> list[dict]:
             WHERE pt.result IS NULL
               AND m.home_score IS NOT NULL
               AND m.away_score IS NOT NULL
+              -- Lab agents settle themselves, by the TOKEN they bought
+              -- (lab_strategy_runner.settle). This path reads the outcome
+              -- label, and the Polymarket path below maps "first outcome won"
+              -- to a win — which is a LOSS on an Under.
+              AND pt.strategy_id NOT IN (SELECT id FROM strategies WHERE source = 'lab')
         """)
 
         for trade in cur.fetchall():
@@ -540,6 +547,8 @@ def run() -> list[dict]:
             FROM paper_trades pt
             JOIN pm_markets pm ON pm.id = pt.market_id
             WHERE pt.result IS NULL
+              AND pt.strategy_id NOT IN (SELECT id FROM strategies
+                                          WHERE source = 'lab' OR rules->>'self_settling' = 'true')
               AND pm.resolution_time IS NOT NULL
               AND pm.resolution_time <= NOW()
         """)

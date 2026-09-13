@@ -7,7 +7,6 @@ import {
   PRESSURE_STRATEGY_IDS,
   PRESSURE_V2_STRATEGY_ID,
   V2_WINDOW,
-  fetchPressureTrades,
   inV2Window,
 } from '../lib/supabase'
 import { formatOutcome, extractMatchName } from './TradeCard'
@@ -73,13 +72,20 @@ function PressureClock({
   )
 }
 
+const NO_PRESSURE = new Map<number, PressureTrade>()
+
 export function StrategyDetail({
   strategy,
   trades,
+  pressure = NO_PRESSURE,
   onBack,
 }: {
   strategy: Strategy
   trades: PaperTrade[]
+  /** Per-entry match state, read on the server with the owner check
+   *  (/api/agents/trades). It used to be fetched here with the anon key;
+   *  db/050 takes that read away. */
+  pressure?: Map<number, PressureTrade>
   onBack: () => void
 }) {
   // Scroll to top whenever a new strategy is opened (desktop + mobile).
@@ -88,16 +94,9 @@ export function StrategyDetail({
   }, [strategy.id])
 
   // Both pressure agents bet on WHEN a goal arrives, so the clock is the point
-  // of the strategy, not decoration. It is not on paper_trades — see
-  // fetchPressureTrades — so it is fetched only for these strategies.
+  // of the strategy, not decoration. It is not on paper_trades, so it arrives
+  // separately, as the `pressure` prop.
   const isPressure = PRESSURE_STRATEGY_IDS.includes(strategy.id)
-  const [pressure, setPressure] = useState<Map<number, PressureTrade>>(new Map())
-  useEffect(() => {
-    if (!isPressure) return
-    let live = true
-    fetchPressureTrades().then((m) => { if (live) setPressure(m) })
-    return () => { live = false }
-  }, [isPressure])
 
   // Two strategies own no paper_trades of their own and resolve their rows from
   // someone else's. 9 ("Live Polymarket") takes every trade actually submitted

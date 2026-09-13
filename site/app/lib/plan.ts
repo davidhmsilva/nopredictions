@@ -56,6 +56,8 @@ interface ProfileRow {
   plan: Plan
   plan_status: string | null
   current_period_end: Date | null
+  /** 'owner' = the site's operator (db/049). Set by hand in SQL, never by a client. */
+  role?: string | null
 }
 
 /** Pro until the period they paid for actually ends.
@@ -65,6 +67,8 @@ interface ProfileRow {
  *  event that flips the row, but a webhook can be missed — so the date is
  *  checked here too rather than trusted to have arrived. */
 function isPro(p: ProfileRow | undefined): boolean {
+  // The operator's own account is unmetered: it is the one testing everything.
+  if (p?.role === 'owner') return true
   if (!p || p.plan !== 'pro') return false
   if (!p.current_period_end) return true
   return p.current_period_end.getTime() > Date.now()
@@ -73,11 +77,25 @@ function isPro(p: ProfileRow | undefined): boolean {
 export async function planOf(userId: string): Promise<Plan> {
   const sql = getSql()
   const rows = await sql<ProfileRow[]>`
-    select plan, plan_status, current_period_end
+    select plan, plan_status, current_period_end, role
       from public.profiles
      where id = ${userId}
   `
   return isPro(rows[0]) ? 'pro' : 'free'
+}
+
+/** Plan and role together — the agents page needs both. */
+export async function accountOf(userId: string): Promise<{ plan: Plan; role: 'user' | 'owner' }> {
+  const sql = getSql()
+  const rows = await sql<ProfileRow[]>`
+    select plan, plan_status, current_period_end, role
+      from public.profiles
+     where id = ${userId}
+  `
+  return {
+    plan: isPro(rows[0]) ? 'pro' : 'free',
+    role: rows[0]?.role === 'owner' ? 'owner' : 'user',
+  }
 }
 
 /** What this user may do right now, without spending anything. */
@@ -89,7 +107,7 @@ export async function entitlement(
 
   const sql = getSql()
   const [profile] = await sql<ProfileRow[]>`
-    select plan, plan_status, current_period_end
+    select plan, plan_status, current_period_end, role
       from public.profiles
      where id = ${userId}
   `
@@ -134,7 +152,7 @@ export async function claimUse(
   const sql = getSql()
   return sql.begin(async (tx) => {
     const [profile] = await tx<ProfileRow[]>`
-      select plan, plan_status, current_period_end
+      select plan, plan_status, current_period_end, role
         from public.profiles
        where id = ${userId}
     `

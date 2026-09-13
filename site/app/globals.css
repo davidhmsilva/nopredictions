@@ -4235,6 +4235,50 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
    below where this lands a heading, or a click marks the previous section. */
 .wallet-section[id] { scroll-margin-top: calc(var(--nav-h) + 52px); }
 
+/* ── Agents — the signed-in user's own (2026-09-11) ─────────────────────── */
+.ag-mine { max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }
+.ag-mine-head h1 { font-size: 28px; line-height: 1.2; margin: 6px 0 6px; color: var(--white); }
+.ag-mine-limits, .ag-mine-status, .ag-mine-empty { color: var(--grey); font-size: 14px; line-height: 1.55; }
+.ag-mine-empty a { color: var(--white); }
+.ag-mine-section { margin-top: 36px; }
+.ag-mine-section > .tp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ag-mine .is-pos { color: var(--green); }
+.ag-mine .is-neg { color: var(--red); }
+.ag-list { display: grid; gap: 14px; margin-top: 14px; }
+.ag-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: rgba(255, 255, 255, .02);
+  padding: 16px 18px;
+}
+.ag-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ag-card-head h3 { margin: 0; font-size: 16px; line-height: 1.35; color: var(--white); }
+.ag-card-interp { margin: 6px 0 0; color: var(--grey); font-size: 13px; line-height: 1.5; }
+.ag-card-rows { margin: 14px 0 0; display: grid; gap: 8px; }
+.ag-card-rows > div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; font-size: 13px; }
+.ag-card-rows dt { color: var(--grey); text-transform: uppercase; letter-spacing: .04em; font-size: 11px; padding-top: 2px; }
+.ag-card-rows dd { margin: 0; color: var(--white); line-height: 1.5; }
+.ag-card-blocker { margin: 12px 0 0; font-size: 13px; }
+.ag-card-small { margin: 10px 0 0; color: var(--grey); font-size: 12px; }
+.ag-card-trades { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--border); }
+.ag-card-trades li {
+  display: grid; grid-template-columns: 64px 1fr 52px 56px; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--grey);
+}
+.ag-card-trade-what { color: var(--white); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-card-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.ag-card-error { margin: 10px 0 0; color: var(--red); font-size: 13px; }
+@media (max-width: 560px) {
+  .ag-card-rows > div { grid-template-columns: 1fr; gap: 2px; }
+  .ag-card-trades li { grid-template-columns: 56px 1fr 44px; }
+  .ag-card-trades li > :last-child { grid-column: 3; }
+}
+
+/* Lab — keep a tested theory as an agent */
+.bt-save { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 18px 0 6px; }
+.bt-save .bt-text { margin: 0; }
+.bt-save-note { color: var(--grey); font-size: 13px; line-height: 1.5; max-width: 460px; }
+
 /* ===========================================================================
    GAME CENTER, second pass (2026-09-11) — tabs, team form, the match, and the
    panels only a database of results joined to closing prices can draw.

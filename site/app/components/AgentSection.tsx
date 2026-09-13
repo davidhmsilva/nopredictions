@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { fmtPnl, fmtPct, byRecordThenPnl } from '../lib/helpers'
-import type { PaperTrade, Strategy } from '../lib/supabase'
+import type { PaperTrade, PressureTrade, Strategy } from '../lib/supabase'
 import { SectionWrap, SectionTitle, Spinner } from './ui'
 import { TradeCard } from './TradeCard'
 import { StrategyDetail } from './StrategyDetail'
@@ -10,10 +10,13 @@ import { StrategyDetail } from './StrategyDetail'
 export function AgentSection({
   trades,
   strategies,
+  pressure,
   loading,
 }: {
   trades: PaperTrade[]
   strategies: Strategy[]
+  /** Passed straight through to StrategyDetail. */
+  pressure?: Map<number, PressureTrade>
   loading: boolean
 }) {
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null)
@@ -26,6 +29,7 @@ export function AgentSection({
         <StrategyDetail
           strategy={selectedStrategy}
           trades={trades}
+          pressure={pressure}
           onBack={() => setSelectedStrategy(null)}
         />
       </SectionWrap>

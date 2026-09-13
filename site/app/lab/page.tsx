@@ -150,7 +150,8 @@ export default function LabPage() {
   const [termLines, setTermLines] = useState<{ text: string; cls: string }[]>([])
   const [result, setResult] = useState<ApiResult | null>(null)
   const [gate, setGate] = useState<'signed_out' | 'quota' | null>(null)
-  const [, setLastHypothesis] = useState('')
+  const [lastHypothesis, setLastHypothesis] = useState('')
+  const [saved, setSaved] = useState<{ id?: number; error?: string; busy?: boolean } | null>(null)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   // The counter above the box has to move when a run spends one, without a
   // page reload — so the session is re-read after every attempt, refused ones
@@ -167,6 +168,7 @@ export default function LabPage() {
     timers.current = []
     setResult(null)
     setGate(null)
+    setSaved(null)
     setPhase('running')
     setLastHypothesis(hypothesis)
     setTermLines([{ text: `> test "${hypothesis}"`, cls: 'lp-term-cmd' }])
@@ -234,6 +236,32 @@ export default function LabPage() {
       timers.current.forEach(clearTimeout)
       pushLine('✗ ERROR — network or server failure', 'lp-term-warn')
       setPhase('done')
+    }
+  }
+
+  /** Keep this theory as an agent. The server re-runs the backtest from the
+   *  spec rather than trusting the numbers on this page — see lib/agents. */
+  async function saveAgent() {
+    if (!result?.spec || saved?.busy) return
+    if (!me?.user) {
+      window.location.href = '/login?next=%2Flab'
+      return
+    }
+    setSaved({ busy: true })
+    try {
+      const res = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hypothesis: lastHypothesis,
+          interpretation: result.interpretation ?? '',
+          spec: result.spec,
+        }),
+      })
+      const d = await res.json()
+      setSaved(d.ok ? { id: d.id } : { error: d.error ?? 'Could not save it.' })
+    } catch {
+      setSaved({ error: 'Network error — nothing was saved.' })
     }
   }
 
@@ -387,6 +415,31 @@ export default function LabPage() {
                 <p className="bt-text bt-interp">{result!.interpretation}</p>
               </>
             )}
+
+            <div className="bt-save">
+              {saved?.id ? (
+                <p className="bt-text">
+                  Saved to <Link href="/agent">your agents</Link>. It trades nothing until you
+                  switch it on there.
+                </p>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="lp-btn-primary bt-submit"
+                    disabled={saved?.busy}
+                    onClick={saveAgent}
+                  >
+                    {saved?.busy ? 'SAVING…' : 'SAVE AS AN AGENT'}
+                  </button>
+                  <span className="bt-save-note">
+                    Keeps the theory and this backtest. Switch it on later to paper-trade
+                    today&apos;s Polymarket boards with it.
+                  </span>
+                  {saved?.error && <p className="bt-text bt-neg">{saved.error}</p>}
+                </>
+              )}
+            </div>
 
             {s.n > 0 && (
               <>

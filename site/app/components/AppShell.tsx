@@ -26,7 +26,7 @@ export const TABS: {
 }[] = [
   { href: '/',       label: 'Scout',  hint: "Today's boards", Icon: IconBoard },
   { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
-  { href: '/agent',  label: 'Agent',  hint: 'Yours, and ours', Icon: IconAgent },
+  { href: '/agent',  label: 'Agents', hint: 'Yours',          Icon: IconAgent },
   { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
 ]
 
