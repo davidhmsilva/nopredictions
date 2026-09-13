@@ -99,6 +99,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── priced_like_table.py           ← Game Center "priced like this" + league base rates ✅ NEW
 │   ├── late_goals_observer.py         ← Over Late Goals — paper observation only ✅
 │   ├── resolver.py                    ← resolves trades + calculates CLV ✅
+│   ├── lab_strategy_runner.py         ← paper-trades users' saved Lab agents ✅ NEW
 │   ├── tools/
 │   │   └── db.py                      ← DB read/write helpers
 │   └── _archive/                      ← retired research pipeline
@@ -112,12 +113,14 @@ riding the AI + prediction-markets wave simultaneously.
     ├── app/
     │   ├── page.tsx                   ← SCOUT — the matchday board (home)
     │   ├── lab/page.tsx               ← LAB — hypothesis tester (was /test)
-    │   ├── agent/page.tsx             ← AGENT — the paper record (was /dashboard)
+    │   ├── agent/page.tsx             ← AGENTS — the signed-in user's own, private
     │   ├── wallet/                    ← WALLET — analyser, now a public tab
     │   ├── login · account · pricing  ← accounts and the paid plan ✅ NEW
     │   ├── auth/callback/route.ts     ← OAuth / magic-link code exchange
     │   ├── api/me · api/stripe/{checkout,portal,webhook}
     │   ├── lib/plan.ts                ← tiers + the quota gate (server only)
+    │   ├── lib/agents.ts              ← a user's agents: owner check in the SQL
+    │   ├── api/agents/…               ← list · save · run/pause/archive · trades
     │   ├── lib/stripe.ts              ← inert without keys, by design
     │   ├── lib/supabaseEnv.ts         ← url + anon key, shared, with fallback
     │   ├── lib/supabaseBrowser.ts     ← client half — NEVER merge with the server half
@@ -1557,6 +1560,75 @@ an ACCESS EXCLUSIVE lock, so a batched migration dies on a statement timeout
 while the daemons write. One table at a time with `set lock_timeout` got 17 of
 18; the last was blocked by the transaction leak below.
 
+## Agents belong to users; the Lab builds them (2026-09-11)
+
+The product changed shape again, by the user's decision: **an agent is a
+user's, and private**. The pressure arms are the operator's own agents, shown
+to him on `/agent` behind a sign-in — there is no public record any more
+(`/agent/ours` and `/dashboard` redirect to `/agent`). A public leaderboard of
+agents users CHOOSE to publish is the next step; until it exists the site shows
+no publish button.
+
+| | |
+|---|---|
+| `db/049` | `profiles.role` ('owner' = unlimited), and on `strategies`: `owner_id`, `source` ('agent' hand-written / 'lab'), `theory`, `interpretation`, `spec`, `backtest`, `run_status`, `run_blocker`, `is_public` |
+| `db/050` | drops the public read of `paper_trades`/`strategies` and their views. ⚠️ **Written, NOT applied** — apply only after the site that reads through `/api/agents` is deployed |
+| `site/app/lib/agents.ts` | every read/write, owner check in the SQL, over DATABASE_URL. The saved backtest is **recomputed on the server** from the spec — a leaderboard cannot rank on numbers a browser posted |
+| `/api/agents` · `/api/agents/[id]` · `/api/agents/trades` | list + save · run/pause/archive · the record |
+| Lab | **SAVE AS AN AGENT** under a result |
+| `agent/lab_strategy_runner.py` | paper-trades running Lab specs; `--settle` settles them by the TOKEN bought |
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python lab_strategy_runner.py --spec '{"market":"ou25","side":"over","leagues":null}' --window 1440
+python lab_strategy_runner.py --once          # one cycle over saved, running agents
+python lab_strategy_runner.py --settle
+python -m pytest tests/test_lab_strategy_runner.py -q
+```
+
+What the runner refuses, each a way a live trade would stop being the tested
+rule: a competition outside the 22 backtest leagues (mapped by tag, ambiguity
+fails closed); entering earlier than 45' before kick-off (the backtest bought at
+the close); **trusting Polymarket's title order** for home/away — any rule that
+needs sides requires ESPN to confirm orientation or the fixture is skipped; a
+book with spread > 0.05 or < $50 ask depth; filters it cannot compute live
+(form, rest days → paused, reason in `run_blocker`). The resolver now skips
+`source='lab'` trades: it maps "first outcome won" to a win, which is a LOSS on
+an Under.
+
+Measured on the first dry run over 24h of boards: 1,590 fixtures, 87 fits for
+"Over 2.5, all leagues", 24 for "home favourite" with orientation confirmed.
+
+Two Gamma facts found building it:
+- **Upcoming fixtures need a date-bounded query.** Unbounded, `order=startTime`
+  opens on hundreds of stale never-closed events from February — twelve pages in
+  it had not reached September, and the runner saw 0 fixtures. `end_date_min/max`
+  as plain DATES works (a fixture's `endDate` IS its kick-off).
+- **O/U 2.5 lives in the `"<fixture> - More Markets"` sibling event**, never the
+  main one. Other siblings (Halftime Result, Exact Score, Total Corners) carry
+  their own `sportsMarketType`, and are skipped by title as well.
+
+⚠️ Plan limits in `AGENT_LIMITS` (free keeps 5 / runs 1, pro 50 / 10) are a
+starting point, not a pricing decision.
+
+## The public key could rewrite the public record — closed 2026-09-11
+
+db/045 turned RLS on but never took the GRANTS back. Supabase's default
+privileges give `anon` and `authenticated` everything on every table `postgres`
+creates, so both held INSERT/UPDATE/DELETE/TRUNCATE on **all 50 relations**.
+RLS blocked most of it — **not the views**: v_pressure_trades,
+v_ht_pressure_trades, v_fav_ht_trades and v_research_log are auto-updatable and
+run as their owner, so a PATCH/DELETE through them over PostgREST skips the base
+table's RLS. Proven with a no-op PATCH on pt#5926 (value set to itself): the
+view returned the row as updated. `won` on v_pressure_trades IS
+`goal_before_ft` — the public results were rewritable with the key in the JS.
+
+`db/048`: every write revoked from both roles on every relation, except the
+three with a policy (watchlist + alerts for authenticated, waitlist insert for
+anon). Same probe afterwards: `permission denied for view` (401); all site reads
+still 200. 🔑 **Default privileges changed too: a NEW table grants the client
+nothing** — a table the site must read now needs an explicit `GRANT SELECT`.
+
 ## A transaction held open across HTTP — fixed 2026-09-08
 
 The thing that blocked that last table: a backend `idle in transaction` for
@@ -1840,6 +1912,217 @@ Changed on the strength of the above:
   strategy that was specified. The first-half arm's 25 was p92 and is p88 — kept.
 
 ---
+
+## NFL Every Game — one bet on every NFL game (paper, 2026-09-13)
+
+By the user's decision: every NFL game Polymarket lists gets exactly one bet, of
+the agent's choosing, with profit as the objective. Strategy **"NFL Every Game"**,
+hypothesis `H-NFL-SHARP`, table `nfl_candidates` (db/051), cron `*/5`.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python nfl_agent.py --once --dry-run   # the board, nothing written, no credits spent
+python nfl_agent.py --once             # what cron runs: bet, read closes, settle
+python nfl_agent.py --report           # EDGE vs FORCED, net of fee, CLV
+python nfl_model.py --validate
+python -m pytest tests/test_nfl_agent.py -q
+```
+
+**The choice is the strategy.** Per game it prices every full-match token —
+moneyline, ~30 spreads, ~40 totals, both sides, ~150 — against the de-vigged
+Pinnacle line (Odds API; a median of other books until Pinnacle posts) and buys
+the best net EV at the CLOB ask, fee included.
+- **EDGE**: EV ≥ 1.5% where PM's line is the same half-point Pinnacle quotes
+  (`sharp_exact`), ≥ 3% where it is read off the model (`sharp_model`); from
+  24h out; quarter-Kelly on 100u, 0.5-3u; needs a sharp snapshot fresh for its
+  distance to kick-off.
+- **FORCED**: inside 40 min with no bet, the best EV on the board whatever its
+  sign, 0.5u. This is what "every game" costs. Never pool the two in a yield.
+
+🔑 **Pinnacle quotes whole numbers, PM only half-points** — so even PM's main
+spread is usually not directly comparable (Pinnacle −6 vs PM −6.5). `nfl_model.py`
+does the translation: P(margin = k) ∝ Normal(μ, σ) × m(k), key-number factors
+fitted by IPF on nflverse 2012-2025 (**m(3) = 2.67, m(7) = 1.74, m(1) = 0.82**),
+with **μ and σ solved per game from Pinnacle's spread AND moneyline**. One
+global σ ran 1.3-2.1pp short of Pinnacle's own ML on every 6.5+ favourite; the
+per-game fit reproduces all 14 week-1 MLs within 0.5pp.
+
+⚠️ **Measured model error, and the haircuts sized to it.** Totals match the
+empirical rate within one SE out to ±14.5 points. Spreads miss by 2-4pp in both
+directions (1-3.5pt favourite covering s+3.5: 0.333 real vs 0.364 model;
+6-7.5pt favourite by 15+: 0.307 vs 0.266). So spread alternates are docked
+1.0pp + 0.35pp/point (cap 4pp) and not priced beyond 10 points; totals 0.5 +
+0.1/pt. The first dry run, before those haircuts, wanted Eagles −14.5 at 0.22 —
+8.5 points out, exactly the tail where the model was least checked.
+
+**Week 1, first board (13 games):** best token per game −2.4% to +0.8% EV —
+the soccer finding again (PM's mid sits on Pinnacle; the loss is spread + fee).
+No EDGE bet; today's bets are FORCED. Expect FORCED to lose ~1-2%.
+
+- Odds API: 3 credits per snapshot (3 markets, ≤10 books), rationed by the
+  nearest unbet game (180 / 45 / 20 min freshness at 24h / 150m / 40m), plus one
+  close read at ≤12 min for games already bet (`clv` = sharp close fair / entry
+  − 1). Below 60 credits only forced bets and closes may fetch.
+- Self-settling from the CLOB winner flag; a 50-50 tie pays 0.5/entry
+  (`void`). ⚠️ `resolver.py` now skips `rules->>'self_settling' = 'true'` — it
+  maps "first outcome won" to a win, which is wrong for any Under or dog.
+- Sides come from outcome labels through PM's `teams` list; the pricing is
+  team-relative, so home/away never matters. Gamma's `bestBid/bestAsk` are
+  outcome 0's; outcome 1 trades at `1 − ask / 1 − bid`.
+- ⚠️ The cron interpreter is **Python 3.9**: no same-quote nested f-strings.
+- 🐛 **`strategies_id_seq` was handing out an id that already existed** (19,
+  `is_called = false` — s19 was inserted with an explicit id). The first real
+  run died on it; `setval` fixed it 2026-09-13. Any new strategy insert — the
+  Lab's SAVE AS AN AGENT included — would have hit the same wall.
+  `pm_markets_id_seq` sits at 18,180 under one stray row at 1,865,334; harmless
+  until the sequence gets there, left alone.
+
+⚠️ **Corrected the same day, at the user's challenge.** The FORCED "~1-2% loss"
+above is the cost of TAKING, not of the price: on the 48 tokens Pinnacle prices
+exactly, average EV is −4.00% at the ask and **+0.53% at the bid** (median
++0.63%, 35/48 positive — an upper bound; fills and adverse selection are not
+modelled, and [[finding-maker-adverse-selection]] went against resting bids in
+soccer). PM also pays makers here: $500/day pools (`rewardsDailyRate`) on the
+ML, spreads, totals and 1H spreads of every game, for ≥1000 shares within 2.5¢,
+and fees are `takerOnly`. And "n ≥ 200 bets, a season" was bad statistics: P&L
+at ~2.0 odds needs ~9,600 bets to see +2% (200 gives ±14pp), CLV needs tens, and
+whether PM misprices Pinnacle is answered by `nfl_candidates` (~1,000 priced
+tokens per snapshot) in days, with no bets. Also measured: **0 violations in
+13,801 ladder pairs** (no internal arbitrage), and **~163 of ~381 markets per
+game settle before the final whistle** (end of Q1, half time, end of Q3) —
+three settlement windows per game against soccer's one.
+
+### Who pays — the NFL profit map (2026-09-13)
+
+The user's correction, taken as the frame: the premise is PROFIT, and a taker's
+pricing edge against Pinnacle is one mechanism out of many. Start from *who pays
+you and why*. Measured the same afternoon:
+
+| payer | mechanism | measured |
+|---|---|---|
+| the platform | liquidity rewards — `clobRewards` on ML, spreads, totals, 1H spreads of all 13 week-1 games, **started 2026-09-13**; score ((v−s)/v)²·size, sampled each minute, paid daily, one-sided at 1/3 | 53 markets — but pools are switched on only **~1 day before kick-off** (the 12 games of 09-13 + SNF; MNF and week 2 none) and **every book is cleared at kick-off** (`clearBookOnStart = True`). The rate is per day, the window is hours: a 1000-share quote 1¢ off mid on all 43 real-book rewarded markets from 15:15Z to each kick-off ≈ **$96 on ≈$42k of collateral (0.23%)**, before fills. Best: Cowboys −3.5 $18, 1H Lions −4.5 $7 (alone). ⚠️ My first "≈5-10%/day" multiplied a daily rate by a day the pool does not run and read placeholder books (Bucs −20.5 1H "at 0.49") as empty ones — corrected the same hour |
+| impatient takers | spread capture as maker; being the only maker on empty books (props: **2 of 292** have a book) | exact tokens +0.53% at the bid (ceiling) |
+| the rules | props resolve **"Under" if the player does not play** (books void) → Under worth + P(inactive); ML tie → 50-50; quarter markets exclude OT, game totals include it | read from each market's `description` |
+| time | ~163 markets/game settle mid-game (Q1, half, Q3); garbage-time near-certainties | `nfl_live_recorder.py` records it from today |
+| parlay buyers | Combos are RFQ: makers quote in 400ms, payout ≈ product of legs + the maker's margin — a quoter's business | not yet: needs quoter access |
+| — | internal ladder arbitrage | **dead: 0 of 13,801 pairs** |
+| — | futures logic (SB ≤ conference) · MVP Σbid 1.016 | **dead**: constraint holds on 33 teams; 37 legs of fee eat the 1.6% |
+| — | wind ≥15, cold, referees, rest, home dogs vs the CLOSE | **dead vs the close** (all inside the 95% band, n=65-3,794); alive only if PM lags Pinnacle |
+
+`nfl_live_recorder.py` (cron every minute, 15 min before kick-off to 5h after):
+every market of every live game from Gamma, the CLOB book of the six main
+families via one `POST /books`, and ESPN's scoreboard with per-play win
+probability (`situation.lastPlay.probability`). Files, not the DB (quota):
+`agent/data/nfl_live/YYYY-MM-DD.jsonl.gz`, one gzip member per minute.
+
+## Strategy factory — thousands of specs, out of sample, paper bots (2026-09-13)
+
+By the user's direction: stop testing one hypothesis at a time. A strategy is a
+JSON spec; a grid generates thousands; the engine backtests them out of sample
+with the false-discovery rate controlled; the ones that pass paper-trade on the
+live tape; the forward record ranks and promotes them. `agent/factory/`,
+`agent/factory_cli.py`, db/052 + db/053.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python factory_cli.py universes                      # what can be traded, on which features
+python factory_cli.py grid [--universe U] [--register] [--refresh]
+python factory_cli.py backtest --spec '{"universe": "soccer_inplay_next_goal", "where": [["minute","between",[80,89]],["abs_diff","==",2]], "price": {"odds_min": 2.2, "odds_max": 4}}'
+python factory_cli.py leaderboard
+python factory_cli.py run --dry-run
+python -m pytest tests/test_factory.py -q
+```
+
+| universe | price | tape |
+|---|---|---|
+| `soccer_inplay_next_goal` | real CLOB ask | `pressure_observations`, 31k fixture-minutes / 1,209 fixtures since 08-14 |
+| `soccer_inplay_ht_over05` | real CLOB ask | `ht_pressure_observations`, 15k / 1,107 |
+| `soccer_inplay_fav_ht` | real CLOB ask | `fav_ht_observations`, 34k / 1,834 |
+| `soccer_settled` | real CLOB ask | `settled_market_observations`, 800 |
+| `soccer_prematch_close` / `_open` | de-vigged Pinnacle + 0.6pp half-spread | `bt_features`, 101k matches 2012-2026 (`_open` cannot see the close) |
+| `nfl_prematch` | de-vigged consensus + 0.5pp | nflverse 2012-2025, ML / spread / total |
+
+- **A spec is a trigger:** entry is the FIRST row of a fixture where every
+  condition holds, at that row's ask, and pays the taker fee in and out
+  (`cash_out` sells at the bid of the same token at the exit minute).
+  `where` may only name a universe's features, all known at that moment.
+- **Pass** = Benjamini-Hochberg q ≤ 0.10 on train (per universe) AND positive
+  on the held-out test period (in-play: last 30% of fixtures by date;
+  pre-match: from 2022-07 / NFL 2021). `cal` = every qualifying row, not just
+  the first, averaged per fixture: the higher-powered arm.
+- **Status:** candidate (passed, no live tape) · **explore** (positive on
+  train, test and cal without passing FDR; paper is free and the forward
+  record is the only unbiased test) · paper · promoted · retired. Promotion out
+  of explore/paper is BH-controlled across EVERY active strategy (`fwd_q`), so
+  200 bots cannot produce a champion by chance. Promoted = shortlist for real
+  money, a person's decision.
+- The live bots read the same tables the in-play daemons write, through the
+  same loaders: backtest and paper cannot drift apart. Crons: `run` every
+  minute, `settle` every 10, `grid --refresh --register` daily at 06:00.
+
+**First run: 12,796 specs, 0 passed.** Per universe the count significant on
+train sat at or BELOW chance (next goal 4 vs ≈13, pre-match close 5 vs ≈30),
+and every train champion reversed on test (NG 70-79' one goal +28.9% → −10.8%;
+tier-2 away longshots after steam +35.8% → −56.2%). The calibration arm agrees:
+**0 of 347 in-play specs with ≥60 fixtures had a CI clear of zero** (chance ≈
+9); median −0.5pp next goal, −4.0pp HT 0.5, −2.6pp favourite at HT.
+- Pre-match is well powered (n 200-2,000 per spec): **the sharp close is not
+  beaten after PM's costs by any form, rest, tier, goals-average or
+  steam/drift rule tested.** That is a conclusion.
+- In-play is not: a median tested spec had 66 train and 28 test entries — a
+  5-10% edge is invisible at that n either way. It grows every day, and the
+  06:00 re-run will say more each week.
+- Worth watching, not a result: *next goal 80-89' with a two-goal margin at
+  2.2-4* is positive on train and test in several variants (cal +6 to +12pp,
+  CIs crossing zero).
+
+12 explore strategies are paper-trading from 2026-09-13 (10 next goal, 1 HT
+0.5, 1 favourite HT). ⚠️ The in-play tapes span obs_versions whose pressure
+axis changed (xG estimated from 09-11): a spec filtering on `pressure_*`
+mixes two scales; `obs_version` is a feature so it can be pinned.
+
+## Every in-play soccer market, every minute (2026-09-13)
+
+`agent/soccer_live_recorder.py` — DATA ONLY. The in-play tapes before it covered
+four families; Polymarket lists ~70 markets per game across sibling events
+("- More Markets", "- Halftime Result", "- Exact Score", "- First Team to Score",
+"- Second Half Result", "- Total Corners"). This records all of them from 10 min
+before kick-off to kick-off + 2h45 (the post-whistle window included), each
+minute, from the **CLOB book** — Gamma's quote lags it, and in-play that lag is
+the whole question.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python soccer_live_recorder.py --once          # cron, every minute
+python soccer_live_recorder.py --settle        # cron, every 30 min: how each market resolved
+python soccer_live_recorder.py --summary       # what today's files hold
+python -m pytest tests/test_soccer_live_recorder.py -q
+```
+
+Measured on the first run (Sunday 18:25Z): **52 games (20 live), 3,859 markets,
+3,735 books, ~980 of them two-sided**, 7.6s per cycle. `POST /books` returns 500
+books in 0.46s, so the whole board is ~8 requests a minute. Families: exact
+score 884, totals 289, team totals 288, team corners 240, corners 211, spreads
+193, 1H/2H team totals 192 each, match odds 156, halftime result 156, second-half
+result 156, first to score 156, 1H/2H totals 144 each, BTTS full/1H/2H 48 each…
+
+Files in `agent/data/soccer_live/` (not the DB — over quota; gitignored):
+`YYYY-MM-DD.meta.jsonl.gz` (each market once a day, with a day index `i`),
+`YYYY-MM-DD.jsonl.gz` (one line per minute: game state from PM's own
+`live/score/period/elapsed` + rows `[i, bid, bid_size, ask, ask_size,
+bid_usd_top3, ask_usd_top3, last, closed]`), `outcomes.jsonl` (resolutions).
+`iter_snapshots(day)` / `load_meta(day)` / `load_outcomes()` read them back.
+🔑 Rows carry the day index, not the condition id: 66 characters of random hex do
+not compress, and keyed by id a snapshot was 186KB gzipped against **~40KB**
+now (~30MB on a busy day).
+
+⚠️ Match statistics are not recorded here on purpose: join `pressure_observations`
+on event title and time. A second api-football consumer is how the key was
+drained before (the s18 settle cron, 143k calls in a day).
+
+Next: factory universes on this tape (match odds, draw, every totals line, BTTS,
+HT result, exact score, first to score, corners), once there are enough settled
+games to test on.
 
 ## CLV framework (how we measure edge)
 
