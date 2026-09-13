@@ -71,6 +71,9 @@ agent/.pressure_heartbeat
 # Local runtime state: committing them would hand another machine a spend total
 # that is not its own and ration it against a day it never had.
 agent/.af_calls_*.json
+# nfl_agent: the last Odds API snapshot (credits are rationed) and its run lock
+agent/.nfl_odds_cache.json
+agent/.nfl_agent.lock
 agent/.af_tmp_*
 
 # Row-level audit dumps — 12.8MB of CSV whose rows all still exist in Postgres.
@@ -84,3 +87,13 @@ stuck_trades_*.csv
 ingest/_deleted_*.csv
 
 .next-gc/
+# strategy factory: pickled tapes (rebuilt from the DB) and cron locks
+agent/factory/cache/
+agent/.factory_*.lock
+# soccer_live_recorder: every in-play soccer market, every minute (large, machine-local)
+agent/data/soccer_live/
+agent/.soccer_live_recorder.lock
+agent/.soccer_live_settle.lock
+# nfl_live_recorder: raw in-play recordings (large, machine-local) and its lock
+agent/data/nfl_live/
+agent/.nfl_live_recorder.lock
