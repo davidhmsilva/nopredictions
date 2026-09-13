@@ -943,9 +943,49 @@ the shared `_fetch_book` helper returns None for exactly those. `book_missing` i
 recorded as a finding, not skipped as an error. Whether the quote exists at all
 is one of the two things this observer is for.
 
-Verdict gate: n >= 200 `would_enter` rows, `rule_correct` >= 0.99, and a yield CI
-clear of zero after the taker fee. 🔑 The fee is why the cheap end works at all:
-`0.05·p·(1−p)` is 1.25pp at p=0.50 and **0.05pp at p=0.01**.
+Verdict gate: n >= 200 `would_enter` rows, `rule_correct` >= 0.99 **measured on
+the `would_enter` rows themselves**, and a yield CI clear of zero after the taker
+fee. 🔑 The fee is why the cheap end works at all: `0.05·p·(1−p)` is 1.25pp at
+p=0.50 and **0.05pp at p=0.01**.
+
+### First `rule_correct` audit — phantom goals (2026-09-13)
+
+Full data: `reports/sweep_rule_audit_2026-09-13.md`. obs_version 1, 09-04 → 09-13.
+
+| phase | settled rows | rule wrong | `would_enter` | wrong entries |
+|---|--:|--:|--:|--:|
+| `post_whistle` | 235,389 / 692 fx | **0** | 2 | 0 |
+| `halftime` | 6,319 / 169 fx | **0** | 0 | — |
+| `in_match` | 22,871 | 21 (7 fx) | 19 | **3** |
+
+**All 21 wrong verdicts are one cause: the live feed showed a goal that did not
+stand.** Seoul E-Land v Suwon read 0-2 from 65' to 68' and then 0-1 again, and
+Pyramids read 2-0 at 89' and finished 1-0. Criciúma, CRB, Austin, Bucheon and
+Kharkiv failed the same way. There are zero parsing, side or logic errors. The
+rules are sound; a live score is not, and a whistle score has already been
+through VAR.
+
+🔑 **Rule errors select themselves into entries.** `in_match` `rule_correct` is
+99.91% over all rows and **84.2% (16/19) over `would_enter`**, about 170× worse.
+When our score is wrong the market is priced on the true score, and that looks
+like edge (wrong entries 18-32pp, right ones 5-55pp, so no price threshold
+separates them). Worse, `rule_correct` undercounts: **6 of 19 entries were
+bought on a phantom score**, and 3 of those "won" only because the match
+cooperated (Criciúma "0-0 → No" was bought at a real 0-0 in the 8th minute).
+Hypothetical in_match P&L: +$1.51 on $423 gross, ≈ −$2.5 net; +$76.51 without
+the three.
+
+⚠️ The error is one-sided, as in db/038: every `in_match` rule fires on "a goal
+happened", so a phantom fabricates entries and never removes one. Austin and
+Bucheon show only against the **half-time** score, because a later goal restored
+the full-time total.
+
+Proposed, **not implemented** (needs obs_version 2; never pool v1 `in_match`
+rows with it): a goal must have stood ≥ 5 min (the longest phantom lasted
+~4 min), and/or PM's own ladder must confirm the score (the late-goals
+`book_confirmed` pattern — Seoul's O/U 1.5 was asked at 0.67 while we read it
+as settled). The book is still the binding constraint: 24 `would_enter` rows in
+9 days.
 
 ## Wallet analyser — the GSX- method, codified (2026-09-05)
 
