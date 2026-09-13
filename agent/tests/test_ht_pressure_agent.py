@@ -23,9 +23,93 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import fav_pressure_agent as fav  # noqa: E402
 import first_half_table as fht  # noqa: E402
 import ht_pressure_agent as ht  # noqa: E402
 from live_tracker import PressureSignals  # noqa: E402
+
+
+# ── settlement (2026-09-13) ──────────────────────────────────────────────────
+# The outcome is score.halftime. It used to be the /fixtures/events goal count,
+# which reads an EMPTY list — no event coverage, or an ESPN (negative) id — as
+# "no goal": 11,426 rows over 278 fixtures disagreed with the half-time score.
+# And never our own tape: the minute sits at 45 through the break and into the
+# second half.
+
+class _SettleCur:
+    def __init__(self, conn):
+        self.conn, self._rows = conn, []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, params=None):
+        self.conn.log.append((sql, params))
+        if "SELECT id, fixture_id" in sql:
+            self._rows = self.conn.pending
+        elif "max(observed_at)" in sql:
+            self._rows = self.conn.last_seen
+        else:
+            self._rows = []
+
+    def fetchall(self):
+        return self._rows
+
+
+class _SettleConn:
+    autocommit = True                   # db_txn.atomic reads it
+
+    def __init__(self, pending, last_seen):
+        self.pending, self.last_seen, self.log = pending, last_seen, []
+
+    def cursor(self, cursor_factory=None):
+        return _SettleCur(self)
+
+    def commit(self):
+        pass
+
+    def writes(self, fragment):
+        return [p for s, p in self.log if fragment in s]
+
+
+def _pending(fid, trade=None):
+    return {"id": 1, "fixture_id": fid, "minute": 20, "paper_trade_id": trade,
+            "entered": trade is not None}
+
+
+def _seen(**delta):
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone.utc) - timedelta(**delta)
+
+
+def test_an_empty_events_list_is_not_a_goalless_half(monkeypatch):
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: {7: (1, 0)})
+    monkeypatch.setattr(ht, "_first_half_goals_api", lambda fid: (0, None))
+    conn = _SettleConn([_pending(7)], [(7, _seen(minutes=50))])
+    assert ht.settle(conn) == 1
+    assert conn.writes("SET ht_goals") == [(1, True, None, "api", 1)]
+
+
+def test_an_unanswered_fixture_waits_and_is_never_read_off_the_tape(monkeypatch):
+    called: list[int] = []
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: {})
+    monkeypatch.setattr(ht, "_first_half_goals_api", lambda fid: called.append(fid) or (0, None))
+    conn = _SettleConn([_pending(7, trade=42)], [(7, _seen(minutes=50))])
+    assert ht.settle(conn) == 0
+    assert conn.writes("UPDATE") == []
+    assert called == []                 # no minute is asked without a goal
+
+
+def test_an_espn_id_is_closed_without_an_outcome_past_the_horizon(monkeypatch):
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: {})
+    conn = _SettleConn([_pending(-401841222)],
+                       [(-401841222, _seen(hours=fav.SETTLE_API_MAX_AGE_H + 1))])
+    assert ht.settle(conn) == 0
+    assert conn.writes("'no_api'") == [(1,)]
+    assert conn.writes("SET ht_goals") == []
 
 
 # ── PM market discovery ──────────────────────────────────────────────────────

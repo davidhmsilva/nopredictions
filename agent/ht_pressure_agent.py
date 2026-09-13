@@ -100,7 +100,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.extras
@@ -934,7 +934,7 @@ def _first_half_goals_api(fixture_id: int) -> tuple[int | None, int | None]:
             return None, None
         body = resp.json()
         if body.get("errors"):
-            return None, None                 # quota/rate — fall back to the tape
+            return None, None                 # quota/rate — no minute this run
         goals, first = 0, None
         for ev in body.get("response", []):
             detail = (ev.get("detail") or "").lower()
@@ -952,14 +952,9 @@ def _first_half_goals_api(fixture_id: int) -> tuple[int | None, int | None]:
         return None, None
 
 
-# A fixture is only settled once its tape has actually reached the break. Calling
-# a match we stopped watching at 30' a "no goal" would bias every result toward
-# the null — the same trap the late-goals observer fell into by trusting a clock
-# nobody checked.
-TAPE_HT_MINUTE = 43
-
-
 def settle(conn) -> int:
+    import fav_pressure_agent as fav    # local: fav imports this module at its top
+
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """SELECT id, fixture_id, minute, paper_trade_id, entered
@@ -976,42 +971,56 @@ def settle(conn) -> int:
     fixture_ids = sorted({r["fixture_id"] for r in pending})
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT fixture_id, minute, goals_total
+            """SELECT fixture_id, max(observed_at)
                  FROM ht_pressure_observations
-                WHERE fixture_id = ANY(%s)""",
+                WHERE fixture_id = ANY(%s)
+                GROUP BY fixture_id""",
             (fixture_ids,),
         )
-        tape: dict[int, list[tuple[int, int]]] = {}
-        for fid, minute, goals in cur.fetchall():
-            tape.setdefault(fid, []).append((minute, goals))
+        last_seen: dict[int, datetime] = dict(cur.fetchall())
 
     # Every api-football call FIRST, with no transaction open. Fetching inside
     # the write loop is how a read transaction came to be held for eight
     # minutes while Python did HTTP — see db_txn.py.
-    api_cache: dict[int, tuple[int | None, int | None]] = {
-        fid: _first_half_goals_api(fid) for fid in fixture_ids
-    }
+    #
+    # The OUTCOME is score.halftime — status-gated, batched, the favourite
+    # arm's own function (2026-09-13). It used to be the /fixtures/events goal
+    # count, which reads an EMPTY list as "no goal": leagues without event
+    # coverage, and every ESPN (negative) id, came back as 0 goals under source
+    # 'api' — 11,426 rows over 278 fixtures disagreed with the half-time score.
+    # Nor is there a tape fallback any more: the minute sits at 45 through the
+    # break and into the second half, so a tape that "reached 43'" proves
+    # nothing about the half-time score.
+    horizon = datetime.now(timezone.utc) - timedelta(hours=fav.SETTLE_API_MAX_AGE_H)
+    traded = {r["fixture_id"] for r in pending if r["paper_trade_id"]}
+    live = {fid for fid in fixture_ids if last_seen.get(fid) and last_seen[fid] >= horizon}
+    ht_cache = fav._halftime_scores(sorted(live | traded))
+    # The minute of the first goal is display only, and asked only where the
+    # half-time score says there was one.
+    minute_cache = {fid: _first_half_goals_api(fid)[1]
+                    for fid, (h, a) in ht_cache.items() if h + a > 0}
 
-    settled = 0
+    settled = unsettleable = 0
     with conn.cursor() as cur:
         for r in pending:
             fid = r["fixture_id"]
-            obs = tape.get(fid, [])
-            last_minute = max((m for m, _ in obs), default=r["minute"])
-            tape_goals = max((g for m, g in obs if m <= 45), default=0)
-
-            api_goals, api_minute = api_cache.get(fid, (None, None))
-
-            if api_goals is not None:
-                ht_goals, goal_minute, src = api_goals, api_minute, "api"
-            elif tape_goals > 0:
-                # The tape can prove a goal happened; it cannot prove one did not.
-                scored = [m for m, g in obs if g > 0]
-                ht_goals, goal_minute, src = tape_goals, (min(scored) if scored else None), "poll"
-            elif last_minute >= TAPE_HT_MINUTE:
-                ht_goals, goal_minute, src = 0, None, "poll"
-            else:
-                continue                      # not settleable yet, and not guessed
+            ht_score = ht_cache.get(fid)
+            if ht_score is None:
+                if fid in live or fid in traded:
+                    continue                  # not answered yet: ask next run
+                # Past the horizon and never answered: closed with no outcome,
+                # so it costs nothing on the next run and is never guessed.
+                cur.execute(
+                    """UPDATE ht_pressure_observations
+                          SET goal_minute_source = 'no_api', settled_at = now()
+                        WHERE id = %s""",
+                    (r["id"],),
+                )
+                unsettleable += 1
+                continue
+            ht_goals = ht_score[0] + ht_score[1]
+            goal_minute = minute_cache.get(fid) if ht_goals else None
+            src = "api"
 
             won = ht_goals > 0
             # Both writes or neither — a settled observation whose trade never

@@ -828,8 +828,6 @@ def _close_rows_without_a_favourite(conn) -> int:
     return closed
 
 
-TAPE_HT_MINUTE = 43
-
 
 def settle(conn) -> int:
     closed = _close_rows_without_a_favourite(conn)
@@ -853,26 +851,22 @@ def settle(conn) -> int:
     fixture_ids = sorted({r["fixture_id"] for r in pending})
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT fixture_id, minute, home_goals, away_goals, observed_at
-                 FROM fav_ht_observations WHERE fixture_id = ANY(%s)""",
+            """SELECT fixture_id, max(observed_at)
+                 FROM fav_ht_observations WHERE fixture_id = ANY(%s)
+                GROUP BY fixture_id""",
             (fixture_ids,),
         )
-        tape: dict[int, list[tuple[int, int, int]]] = {}
-        last_seen: dict[int, datetime] = {}
-        for fid, minute, hg, ag, seen in cur.fetchall():
-            tape.setdefault(fid, []).append((minute, hg, ag))
-            if fid not in last_seen or seen > last_seen[fid]:
-                last_seen[fid] = seen
+        last_seen: dict[int, datetime] = dict(cur.fetchall())
 
     # Every api-football call FIRST, with no transaction open. This loop used
     # to sit inside the write cursor, which is how a read transaction came to
     # be held for eight minutes while Python did HTTP — see db_txn.py.
     horizon = datetime.now(timezone.utc) - timedelta(hours=SETTLE_API_MAX_AGE_H)
-    api_cache = _halftime_scores(
-        [fid for fid in fixture_ids if last_seen.get(fid) and last_seen[fid] >= horizon]
-    )
+    traded = {r["fixture_id"] for r in pending if r["paper_trade_id"]}
+    live = {fid for fid in fixture_ids if last_seen.get(fid) and last_seen[fid] >= horizon}
+    api_cache = _halftime_scores(sorted(live | traded))
 
-    settled = 0
+    settled = unsettleable = 0
     with conn.cursor() as cur:
         for r in pending:
             fid = r["fixture_id"]
@@ -880,14 +874,26 @@ def settle(conn) -> int:
             src = "api"
 
             if ht is None:
-                # Our own tape, and only once it actually reached the break —
-                # a fixture we stopped watching at 30' is not a settled draw.
-                obs = tape.get(fid, [])
-                near_ht = [o for o in obs if o[0] >= TAPE_HT_MINUTE]
-                if not near_ht:
+                # NEVER settled from our own tape (2026-09-13). api-football
+                # holds the minute at 45 through the break and into the second
+                # half, so the tape carries dozens of "45'" rows — first-half
+                # flaps and second-half goals under one label. The old
+                # max-by-minute took the first of them: Dunkerque v
+                # Saint-Etienne led 0-1 at the break (43'), was booked 0-0, and
+                # pt#5977 lost. 239 rows over 10 fixtures had the wrong outcome.
+                # An unanswered fixture simply waits for the next run.
+                if fid in live or fid in traded:
                     continue
-                last = max(near_ht, key=lambda o: o[0])
-                ht, src = (last[1], last[2]), "poll"
+                # Past the horizon and never answered: closed with no outcome,
+                # so it costs nothing on the next run and is never guessed.
+                cur.execute(
+                    """UPDATE fav_ht_observations
+                          SET ht_source = 'no_api', settled_at = now()
+                        WHERE id = %s""",
+                    (r["id"],),
+                )
+                unsettleable += 1
+                continue
 
             if r["fav_side"] is None:
                 continue
@@ -920,6 +926,8 @@ def settle(conn) -> int:
                         ("won" if won else "lost", won, r["paper_trade_id"]),
                     )
             settled += 1
+    if unsettleable:
+        log.info(f"closed {unsettleable} rows the API never answered (no outcome)")
     return settled
 
 

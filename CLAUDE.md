@@ -803,9 +803,9 @@ and that is the calibration arm the whole 100-game review runs on. The "too low"
 half is the uptime problem wearing a different hat: the tape stops when the Mac
 sleeps, so its maximum under-reads. All repaired against the API.
 
-**s17 and s18 were never affected** — both already ask api-football for the
-half-time score first and fall back to the tape only when it will not answer. All
-46 s17 and 31 s18 settled entries were re-checked and every one agrees.
+**s17 and s18 were thought unaffected** because both ask api-football first. They
+were not: the tape fallback and s17's events count were both wrong. See
+[s17/s18 settled off the tape](#s17s18-settled-off-the-tape-and-off-an-empty-events-list--fixed-2026-09-13).
 
 Fixed in `pressure_agent.py`: `_final_goals_api()` (batched `/fixtures?ids=`, 20
 per call, returns a total only for FT/AET/PEN — a missing key means "not
@@ -815,6 +815,47 @@ claims more goals than the match ever had; and the paper trade now settles on
 **`final_goals > target_line`** — the line the token was actually bought on —
 rather than "the score moved off what we read at entry", because where the tape
 was wrong at entry the LINE is wrong too. `final_goals_source` on every row.
+
+## s17/s18 settled off the tape AND off an empty events list — fixed 2026-09-13
+
+Found from one paper trade: s18 pt#5977, Dunkerque v Saint-Étienne. The
+favourite led **0-1 at half time (43')**, which api-football and ESPN both
+confirm, and the trade was booked **lost**. The same shape as db/038: a
+settlement that trusted something other than the half-time score.
+
+1. **The tape fallback (both arms).** When the API did not answer, settle read
+   our own poll tape. api-football holds `minute` at **45 through the break and
+   into the second half**, so the tape carries dozens of "45'" rows, first-half
+   flaps and second-half goals under the same label. s18's `max(near_ht,
+   key=minute)` returned the first of them, a 0-0 flap one minute after the goal.
+   s17's "tape reached 43', so 0 goals" fails the same way. **239 s18 rows over
+   10 fixtures and 428 s17 rows over 12 fixtures had the wrong outcome.** That
+   includes pt#5914 (Moreirense v Benfica) and pt#5977, both booked lost when
+   they had won.
+2. **s17's API path read an empty list as "no goal".** Its outcome was the
+   `/fixtures/events` goal count. Leagues without event coverage return `[]`,
+   and so does every ESPN (negative) id, which was being sent to api-football.
+   Both were booked as **0 goals under source `'api'`**: **11,426 rows over 278
+   fixtures** disagreed with `score.halftime`, 91% of them "no goal" where there
+   was one. No s17 entry was affected; the calibration arm was.
+
+Fixed in both `settle()` functions:
+- The outcome comes **only** from `score.halftime`, via
+  `fav_pressure_agent._halftime_scores` (batched, status-gated, never sends
+  ESPN ids). `_first_half_goals_api` now only supplies the minute shown on the
+  site.
+- **No tape fallback.** An unanswered fixture waits for the next run. Past
+  `SETTLE_API_MAX_AGE_H`, a row with no trade is closed with **no outcome**
+  (`'no_api'`), so it costs no call on the next run. A traded fixture keeps
+  being asked.
+
+Repaired, with the before-state in `reports/ht_settlement_repair_2026-09-13.json`:
+s18 622 rows / 260 flips, s17 12,413 rows / 11,854 flips, all tagged
+`'api_repair'`. The s17 ESPN-id rows: 32 verified on ESPN (`'espn_repair'`), 74
+unverifiable and left with no outcome (`'no_api'`). pt#5914 and pt#5977 → won.
+⚠️ On the API path only rows whose **outcome** was wrong were repaired. s17
+`'api'` rows where the events count differs from the half-time score but the
+outcome agrees still carry the events count in `ht_goals`.
 
 ## Rationing one api-football key — day vs evening (2026-09-06)
 

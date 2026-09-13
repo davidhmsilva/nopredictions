@@ -436,6 +436,7 @@ class _Cur:
 
     def execute(self, sql, params=None):
         self.conn.sql.append(sql)
+        self.conn.params.append(params)
         if sql.lstrip().startswith("UPDATE"):
             self.rowcount, self._rows = 0, []
         elif "SELECT id, fixture_id" in sql:
@@ -448,8 +449,10 @@ class _Cur:
 
 
 class _Conn:
+    autocommit = True                   # db_txn.atomic reads it
+
     def __init__(self, pending, tape):
-        self.pending, self.tape, self.sql = pending, tape, []
+        self.pending, self.tape, self.sql, self.params = pending, tape, [], []
 
     def cursor(self, cursor_factory=None):
         return _Cur(self)
@@ -467,11 +470,63 @@ def test_settle_never_asks_about_rows_without_a_favourite_or_stale_fixtures(monk
     conn = _Conn(
         pending=[{"id": 1, "fixture_id": 5, "minute": 20, "fav_side": "home", "paper_trade_id": None},
                  {"id": 2, "fixture_id": 6, "minute": 20, "fav_side": "away", "paper_trade_id": None}],
-        tape=[(5, 20, 0, 0, stale), (6, 20, 0, 0, now - timedelta(hours=1))],
+        tape=[(5, stale), (6, now - timedelta(hours=1))],     # (fixture, last seen)
     )
-    assert fa.settle(conn) == 0         # neither reached the break on the tape
-    assert asked == [[6]]               # 5 is past the horizon: tape only, no call
+    assert fa.settle(conn) == 0         # the API answered neither
+    assert asked == [[6]]               # 5 is past the horizon: no call
     closes = [s for s in conn.sql if s.lstrip().startswith("UPDATE")]
     assert closes and "fav_side IS NULL" in closes[0]
+    assert any("'no_api'" in s for s in closes)    # 5 closed with no outcome
     pending_sql = next(s for s in conn.sql if "SELECT id, fixture_id" in s)
     assert "fav_side IS NOT NULL" in pending_sql
+
+
+# ── settlement: never from our own tape (2026-09-13) ─────────────────────────
+# pt#5977, Dunkerque v Saint-Etienne: the API did not answer, api-football held
+# the minute at 45 through the break, and the tape's FIRST "45'" row was a 0-0
+# flap a minute after Saint-Etienne's 43' goal. A 0-1 half-time lead for the
+# favourite was booked as a loss.
+
+def _recent():
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone.utc) - timedelta(minutes=40)
+
+
+def test_an_unanswered_fixture_waits_and_is_never_read_off_the_tape(monkeypatch):
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: {})
+    conn = _Conn(
+        pending=[{"id": 1, "fixture_id": 1552470, "minute": 15, "fav_side": "away",
+                  "paper_trade_id": 5977}],
+        tape=[(1552470, _recent())],
+    )
+    assert fa.settle(conn) == 0
+    writes = [s for s in conn.sql
+              if s.lstrip().startswith("UPDATE") and "fav_side IS NULL" not in s]
+    assert writes == []
+
+
+def test_a_traded_fixture_is_asked_past_the_horizon_and_never_closed_blind(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    stale = datetime.now(timezone.utc) - timedelta(hours=fa.SETTLE_API_MAX_AGE_H + 1)
+    asked: list[list[int]] = []
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: asked.append(list(ids)) or {})
+    conn = _Conn(
+        pending=[{"id": 1, "fixture_id": 9, "minute": 20, "fav_side": "home", "paper_trade_id": 77}],
+        tape=[(9, stale)],
+    )
+    assert fa.settle(conn) == 0
+    assert asked == [[9]]
+    assert not [s for s in conn.sql if "'no_api'" in s]
+
+
+def test_the_outcome_is_the_half_time_score_read_from_the_favourites_side(monkeypatch):
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: {1552470: (0, 1)})
+    conn = _Conn(
+        pending=[{"id": 1, "fixture_id": 1552470, "minute": 15, "fav_side": "away",
+                  "paper_trade_id": 5977}],
+        tape=[(1552470, _recent())],
+    )
+    assert fa.settle(conn) == 1
+    sent = list(zip(conn.sql, conn.params))
+    assert [p for s, p in sent if "SET ht_home_goals" in s] == [(0, 1, True, "api", 1)]
+    assert [p for s, p in sent if "UPDATE paper_trades" in s] == [("won", True, 5977)]
