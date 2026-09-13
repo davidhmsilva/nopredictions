@@ -196,6 +196,11 @@ export function dateText(d: Date, withYear = false): string {
   )
 }
 
+/** A day heading: Sunday, Sep 13 · Sunday 13 Sept. */
+export function dayHeading(d: Date): string {
+  return d.toLocaleDateString(locale(), { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
 /** A kick-off standing on its own, with the zone named: Sun, Sep 13, 1:00 PM ET. */
 export function kickoffText(d: Date): string {
   const s = d.toLocaleString(locale(), {

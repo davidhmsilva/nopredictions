@@ -26,6 +26,7 @@ import {
   type OddsFormat,
 } from './lib/display'
 import { OddsToggle } from './components/OddsToggle'
+import { SportBar } from './components/SportBar'
 import { useSession } from './lib/useSession'
 import { useWatchlist } from './lib/useWatchlist'
 
@@ -393,6 +394,7 @@ export default function ScoutPage() {
 
   return (
     <AppShell>
+      <SportBar />
       {/* ── category bar: state on the left, competition on the right ── */}
       <div className="sc-cats">
         <div className="sc-cats-inner">

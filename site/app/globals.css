@@ -2746,6 +2746,69 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   letter-spacing: .04em; color: var(--grey2);
 }
 
+/* ── the sport bar and the US sports boards ──────────────────────────────────
+   One row of sports above Scout's own chips; the boards reuse Scout's head and
+   bar and draw each game as a block — away, @home, then a line per venue. */
+.sp-bar {
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  overflow-x: auto; scrollbar-width: none;
+}
+.sp-bar::-webkit-scrollbar { display: none; }
+.sp-bar-inner { max-width: 1240px; margin: 0 auto; padding: 8px 20px; display: flex; gap: 4px; }
+.sp-tab {
+  flex-shrink: 0; padding: 6px 13px; border-radius: 999px; white-space: nowrap;
+  font-size: 13px; font-weight: 550; color: var(--grey); text-decoration: none;
+  transition: background .12s, color .12s;
+}
+.sp-tab:hover { color: var(--white); background: var(--bg2); }
+.sp-tab.is-on { color: var(--white); background: var(--bg3); }
+
+.sp-day { margin-top: 20px; }
+.sp-day-h {
+  margin: 0 0 6px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--grey);
+}
+.sp-day .sc-table-wrap { margin-bottom: 0; overflow-x: auto; }
+.sp-table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.sp-table thead th {
+  padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--grey2);
+}
+.sp-table td { padding: 5px 8px; vertical-align: middle; }
+.sp-table th.sp-c-px, .sp-table td.sp-c-px { width: 120px; text-align: right; }
+.sp-game { border-bottom: 1px solid var(--border); }
+.sp-game:hover { background: var(--bg2); }
+.sp-table td.sp-c-when { width: 104px; padding-top: 9px; vertical-align: top; white-space: nowrap; }
+.sp-game.is-live td.sp-c-when { box-shadow: inset 2px 0 0 var(--red); }
+.sp-time { color: var(--grey); }
+.sp-team { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.sp-logo { display: inline-block; width: 18px; height: 18px; flex-shrink: 0; object-fit: contain; }
+.sp-name { color: var(--white); font-weight: 550; }
+.sp-name em { margin-right: 5px; font-style: normal; font-weight: 400; color: var(--grey2); }
+.sp-score { margin-left: 4px; color: var(--white); font-weight: 700; }
+.sp-c-px { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--white); }
+.sp-c-px.is-best { color: var(--green); font-weight: 650; background: rgba(34,197,94,.07); }
+.sp-c-px.is-dim, .sp-c-px.is-empty { color: var(--grey2); }
+.sp-meta td { padding: 1px 8px 10px; }
+.sp-venue {
+  display: inline-flex; align-items: center; gap: 8px; margin-right: 20px;
+  font-size: 11.5px; color: var(--grey2); white-space: nowrap;
+}
+.sp-venue b { color: var(--grey); font-weight: 600; }
+.sp-venue.is-clean > span:first-of-type { color: var(--green); }
+.sp-venue.is-none > span:first-of-type { color: var(--amber); }
+.sp-venue a { color: var(--grey); text-decoration: none; }
+.sp-venue a:hover { color: var(--white); }
+.sp-foot { max-width: 80ch; margin: 26px 0 44px; font-size: 12px; line-height: 1.6; color: var(--grey2); }
+.sp-foot b { color: var(--grey); font-weight: 600; }
+@media (max-width: 760px) {
+  .sp-bar-inner { padding: 8px 14px; }
+  .sp-table td.sp-c-when { width: 70px; }
+  .sp-table th.sp-c-px, .sp-table td.sp-c-px { width: 82px; }
+  .sp-venue { display: flex; margin: 2px 0; }
+}
+
 /* ===========================================================================
    CATEGORY BAR  (.sc-cats)
    =========================================================================== */

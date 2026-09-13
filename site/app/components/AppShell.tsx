@@ -14,6 +14,7 @@ import {
 } from './icons'
 import { invalidateSession, useSession } from '../lib/useSession'
 import { OddsToggle } from './OddsToggle'
+import { SPORT_KEYS } from '../lib/sportsMeta'
 
 /** The tabs, in the order a bettor uses them on a matchday:
  *  where is the edge → can I test my own idea → what is the agent doing →
@@ -32,7 +33,10 @@ export const TABS: {
 ]
 
 function isActive(pathname: string, href: string): boolean {
-  if (href === '/') return pathname === '/' || pathname.startsWith('/game')
+  // Scout owns every board: soccer at "/", each US sport at its own path.
+  if (href === '/') {
+    return pathname === '/' || pathname.startsWith('/game') || SPORT_KEYS.some((k) => pathname === `/${k}`)
+  }
   return pathname === href || pathname.startsWith(href + '/')
 }
 

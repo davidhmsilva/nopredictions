@@ -2159,6 +2159,42 @@ verdict gate.
 - **No reliable host for recorders.** They need an always-on machine, and this
   Mac sleeps ~85% of the day.
 
+## US sports boards: Kalshi and Polymarket on ESPN's schedule (2026-09-13)
+
+Six pages, `/nfl` `/cfb` `/mlb` `/nba` `/nhl` `/wnba`, linked from a sport bar
+above Scout; soccer stays at `/`. Each page lists every game either exchange
+has in the next N days (NFL 9, MLB 3, the rest 7), with both moneylines at the
+ask.
+- `lib/sports.ts` is the server half and `lib/sportsMeta.ts` the client-safe
+  types.
+- `/api/sports/[sport]` is cached like Scout: an L1 cache plus
+  `unstable_cache`, 60s.
+
+| | |
+|---|---|
+| Spine | The ESPN scoreboard over the window (`dates=YYYYMMDD-YYYYMMDD`; college adds `groups=80` FBS + `81` FCS). It gives home/away, the start and the live score. **Do not set a User-Agent.** |
+| Kalshi | `/events?series_ticker=KX{NFL,NCAAF,MLB,NBA,NHL,WNBA}GAME&status=open&with_nested_markets=true`: public, no key. The date comes from the event ticker, and so does MLB's ET first pitch, which splits doubleheaders. Teams come from the market suffix plus `yes_sub_title`. Quote: `yes_bid/ask_dollars`; depth = `yes_ask_size_fp × ask`. |
+| Polymarket | Gamma `/events?tag_id=`: 450 NFL, 100351 CFB, 100381 MLB, 745 NBA, 899 NHL, 100254 WNBA. **Use tags, not series ids**: NFL's series id returned 0 events on 09-13. Sides come from each outcome's label against `teams[].ordering`, never from position. The quote is one `POST /books` for every placed token; Gamma's quote is the fallback and carries no depth. |
+| Placement | A market is shown only on an ESPN game where BOTH teams match on a whole name: abbreviation, location, display name, nickname, or Kalshi's city + initials ("New York M", "Chicago WS"). The ET date must agree (Polymarket: start within 3h). An ambiguous match, or two markets on one game, is dropped and counted on the page. Never a substring. |
+| Grade | Per venue, on the worse side. **clean**: ≤3¢ wide and ≥$250 at the ask. **thin**: ≤3¢ but under $250. **wide**: ≤10¢. **none**: anything else, which is where Kalshi's placeholder books land. |
+| Cheaper | The lower ask per side, marked only when both books grade above `none` and the gap is ≥ ½¢. It is **before fees** (Kalshi 0.07·p·(1−p), Polymarket its own), and the page says so. |
+
+**First run (Sunday evening, 2026-09-13):**
+- **NFL:** Kalshi 24/24, Polymarket 24/24. Every game is on both venues.
+- **MLB:** 39/39 and 38/38.
+- **College football:** with FBS only, 75 of 119 Kalshi and 75 of 128
+  Polymarket. The rest were FCS games. With group 81 added: **127 games,
+  Kalshi 118/119, Polymarket 127/128.**
+- **WNBA and NHL:** Polymarket only; Kalshi had no open events.
+- **NBA:** empty until the season starts.
+
+⚠️ **Not built yet:**
+- Spreads and totals: Kalshi's `KX*SPREAD`/`KX*TOTAL` ladders against
+  Polymarket's `spreads`/`totals`. Only the same line is comparable.
+- Sportsbooks (Pinnacle, DraftKings, FanDuel): need a paid Odds API plan.
+- A Game Center per US game: rows link out to both venues instead.
+- Alerts.
+
 ## CLV framework (how we measure edge)
 
 We have both Pinnacle opening and closing odds, so CLV is measurable now:
