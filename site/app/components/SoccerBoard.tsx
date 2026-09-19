@@ -716,6 +716,22 @@ export function SoccerBoard({ mode }: { mode: 'home' | 'all' }) {
                 </Link>
               ))}
             </div>
+            {/* Only once the session is known to be empty — rendering it while
+                it loads would flash an invitation at people already signed in. */}
+            {me && !me.user && (
+              <div className="hm-join">
+                <div className="hm-join-text">
+                  <b>Free to start. No card.</b>
+                  <span>
+                    An account gets you 3 Lab tests and 3 wallet reads a day, up to 5 agents of
+                    your own, and a watchlist.
+                  </span>
+                </div>
+                <Link href="/login?mode=signup&next=%2F" className="np-btn np-btn-primary">
+                  Create a free account <span aria-hidden="true">→</span>
+                </Link>
+              </div>
+            )}
           </section>
         )}
       </div>

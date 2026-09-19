@@ -32,7 +32,7 @@ export function QuotaStrip({
         <span>
           A free account gets <b className="np-num">3</b> {feature}s a day. No card.
         </span>
-        <Link href={`/login?next=${encodeURIComponent(next)}`}>Sign in or create one →</Link>
+        <Link href={`/login?mode=signup&next=${encodeURIComponent(next)}`}>Create one free, or sign in →</Link>
       </div>
     )
   }

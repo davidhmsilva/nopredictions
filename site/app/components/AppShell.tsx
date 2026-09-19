@@ -206,6 +206,10 @@ function AccountActions() {
       ? '/'
       : pathname
   const loginHref = `/login?next=${encodeURIComponent(next)}`
+  // Every "Sign up" opened the sign-IN form: /login defaults to it unless
+  // told otherwise, so a new visitor pressing the green button met a form
+  // for an account they did not have.
+  const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}`
 
   async function signOut() {
     setSheet(false)
@@ -244,11 +248,13 @@ function AccountActions() {
         <>
           <Link href="/pricing" className="np-btn-ghost np-wide-only">Pricing</Link>
           <Link href={loginHref} className="np-btn-ghost np-wide-only">Log in</Link>
-          <Link href={loginHref} className="np-btn-signup np-wide-only">Sign up</Link>
+          <Link href={signupHref} className="np-btn-signup np-wide-only">Sign up</Link>
         </>
       )}
 
-      {/* Phones: search, account, menu — the three that fit beside a logo. */}
+      {/* Phones: search, then who you are, then the menu. Signed out, "who
+          you are" is a Sign up button, not a person icon: the icon read as
+          an account already open, and nothing on a phone said how to get one. */}
       <button
         className="np-icon-btn np-narrow-only"
         onClick={() => setMobileSearch((v) => !v)}
@@ -257,13 +263,15 @@ function AccountActions() {
       >
         <IconSearch className="np-icn" />
       </button>
-      <Link
-        className="np-icon-btn np-narrow-only"
-        href={showAccount ? '/account' : loginHref}
-        aria-label={showAccount ? 'Your account' : 'Sign in'}
-      >
-        <IconAccount className="np-icn" />
-      </Link>
+      {showAccount ? (
+        <Link className="np-icon-btn np-narrow-only" href="/account" aria-label="Your account">
+          <IconAccount className="np-icn" />
+        </Link>
+      ) : (
+        <Link className="np-signup-pill np-narrow-only" href={signupHref}>
+          Sign up
+        </Link>
+      )}
       <button
         className="np-icon-btn np-narrow-only"
         onClick={() => setSheet((v) => !v)}
@@ -305,8 +313,8 @@ function AccountActions() {
                 <Link className="np-sheet-item" href={loginHref} onClick={() => setSheet(false)}>
                   Log in
                 </Link>
-                <Link className="np-sheet-item is-primary" href={loginHref} onClick={() => setSheet(false)}>
-                  Sign up
+                <Link className="np-sheet-item is-primary" href={signupHref} onClick={() => setSheet(false)}>
+                  Sign up — free
                 </Link>
                 <Link className="np-sheet-item" href="/pricing" onClick={() => setSheet(false)}>
                   Pricing

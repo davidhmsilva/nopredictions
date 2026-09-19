@@ -466,7 +466,10 @@ button { font-family: var(--font); }
 ═══════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
 
-  body { padding-bottom: 64px; } /* room for bottom nav */
+  /* Room for the fixed bottom tab bar (61px), plus the home-indicator inset
+     where the browser reports one. The only reservation: .np-main used to add
+     68px more, which left an empty band above the footer. */
+  body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 
   /* Grids → 2 columns */
   .rg-4   { grid-template-columns: 1fr 1fr; gap: 8px !important; }
@@ -2375,6 +2378,15 @@ button { font-family: var(--font); }
   padding: 7px 15px; cursor: pointer; white-space: nowrap; transition: background .12s;
 }
 .np-btn-signup:hover { background: #29d669; border-color: #29d669; }
+/* The phone header's way in when signed out — the same green, compact, in
+   the slot the account icon takes once there is an account. */
+.np-signup-pill {
+  align-items: center; height: 32px; padding: 0 13px; margin: 0 4px;
+  background: var(--green); border-radius: 999px; flex-shrink: 0;
+  color: #05140b; font-family: var(--font); font-size: 13px; font-weight: 650;
+  text-decoration: none; white-space: nowrap;
+}
+.np-signup-pill:active { background: #29d669; }
 
 .np-notice {
   position: absolute; top: calc(100% + 9px); right: 0; z-index: 70;
@@ -2471,7 +2483,6 @@ button { font-family: var(--font); }
   .np-nav-right { margin-left: auto; }
   .np-wrap { padding: 0 14px; }
   .np-h1 { font-size: 21px; }
-  .np-main { padding-bottom: 68px; }
 
   .np-mobile-tabs {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 60;
@@ -2913,8 +2924,19 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   margin-top: 6px; font-style: normal;
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em; color: var(--green);
 }
+/* Signed out only: what a free account is for, under what the site does. */
+.hm-join {
+  display: flex; align-items: center; gap: 18px; margin-top: 12px;
+  background: linear-gradient(160deg, rgba(34,197,94,.10), transparent 60%), var(--bg2);
+  border: 1px solid rgba(34,197,94,.30); border-radius: var(--r); padding: 16px 18px;
+}
+.hm-join-text b { display: block; font-size: 15px; font-weight: 650; color: var(--white); }
+.hm-join-text span { display: block; margin-top: 3px; font-size: 13px; color: var(--grey); line-height: 1.55; }
+.hm-join .np-btn { margin-left: auto; flex-shrink: 0; }
 @media (max-width: 760px) {
   .hm-more-grid { grid-template-columns: 1fr; }
+  .hm-join { flex-direction: column; align-items: stretch; gap: 12px; }
+  .hm-join .np-btn { margin-left: 0; justify-content: center; }
 }
 
 @media (max-width: 1240px) {
@@ -4671,3 +4693,60 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 @media (max-width: 760px) {
   .sc-head .sc-h1 { font-size: 22px; }
 }
+
+
+/* ===========================================================================
+   MOBILE POLISH  (2026-09-19) — phone widths, last in the file so it wins.
+   Measured rather than eyeballed: a script walked every page at 375, 390 and
+   430px and listed what ran off the screen, every field under 16px (iOS
+   Safari zooms the page into a focused field below that and leaves it zoomed),
+   every control a thumb has to hit that is under ~32px tall, and text under
+   10.5px. This block is the answer to that list; the reasons are beside it.
+   =========================================================================== */
+@media (max-width: 760px) {
+  /* 16px or iOS zooms on focus. !important because the fields' own classes
+     set 12.5-15px, and this rule has to win on every one of them. */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* The board's controls. The search was the third item on a row that does
+     not wrap and ran ~125px off a 375px screen, so the box showed "Filte".
+     Now two rows: the search on its own, then the count and the sort. The
+     right-hand group dissolves (display: contents) so its children flow in
+     the bar itself. The odds format leaves this bar on a phone — it is in
+     the ☰ sheet, and here it pushed the sort onto a third row. */
+  .sc-bar { gap: 10px; align-items: center; }
+  .sc-bar-right { display: contents; }
+  .sc-bar-left { width: auto; }
+  .sc-search { order: -1; flex: 1 1 100%; width: 100%; height: 40px; }
+  .sc-bar .np-odds-bar { display: none; }
+  .sc-sort { margin-left: auto; }
+  .sc-sort-key { display: none; }
+  .sc-sort select { height: 36px; }
+
+  /* Thumbs, not cursors. The hit area grows; what is drawn stays put. */
+  .sc-star {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 40px; margin: -10px -8px; font-size: 16px;
+  }
+  .sc-go { min-width: 34px; min-height: 34px; justify-content: center; }
+  .np-odds button { padding: 7px 11px; }
+  .gc-legend-item { padding: 7px 12px; }
+  .gc-why, .gc-more { font-size: 12px; padding: 10px 0; }
+  .ag-back { padding: 8px 0; margin-top: 10px; }
+
+  /* A floor for the small print: the 9-10px mono labels read as texture on a
+     phone held at arm's length. */
+  .np-badge, .np-footer-legal, .sc-th-zone, .gcx-brief-tag { font-size: 10.5px; }
+  .sc-comp, .sc-mkts, .sc-cat-n, .sc-sort-key { font-size: 11px; }
+  .sc-big-odd em, .ag-tile em { font-size: 10.5px; }
+  .tp-chips-label, .lg-label, .pr-buy-label { font-size: 11px; }
+  .pr-save, .in-lead-flag, .gcx-tab-new { font-size: 10.5px; }
+  .do-top-label, .do-top-sel-label, .do-when, .do-chip, .do-pp { font-size: 10.5px; }
+  .do-top-odds em, .do-thin-chev, .gcx-pill { font-size: 10.5px; }
+  .gc-board th, .gcx-table th { font-size: 10.5px; }
+}
+
