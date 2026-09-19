@@ -12,9 +12,11 @@ import { Sparkline, StatusBadge, ago, pct, settledOf, sinceText, tone, units } f
 
 type SortKey = 'status' | 'pl' | 'yield' | 'bets' | 'recent'
 
+// P&L first, by the user's call: what is making money is what they open this
+// page to see. Ties (no settled bets) sit between the winners and the losers.
 const SORTS: { id: SortKey; label: string }[] = [
+  { id: 'pl', label: 'Best P&L first' },
   { id: 'status', label: 'Running first' },
-  { id: 'pl', label: 'P&L' },
   { id: 'yield', label: 'Yield' },
   { id: 'bets', label: 'Most bets' },
   { id: 'recent', label: 'Last bet' },
@@ -81,10 +83,12 @@ function AgentCard({ a }: { a: AgentSummary }) {
 
 export function AgentsBoard({ agents, limits }: { agents: AgentSummary[]; limits: AgentLimits }) {
   const router = useRouter()
-  const [sort, setSort] = useState<SortKey>('status')
+  const [sort, setSort] = useState<SortKey>('pl')
   const [query, setQuery] = useState('')
 
-  const running = agents.filter((a) => a.run_status === 'running')
+  const running = agents
+    .filter((a) => a.run_status === 'running')
+    .sort((a, b) => b.pl_units - a.pl_units)
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     const hit = q
