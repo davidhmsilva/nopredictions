@@ -31,6 +31,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '../components/AppShell'
 import { takeSignupEmail } from '../lib/signupEmail'
 import { supabaseBrowser } from '../lib/supabaseBrowser'
+import { invalidateSession } from '../lib/useSession'
 
 const GOOGLE_ON = process.env.NEXT_PUBLIC_AUTH_GOOGLE === '1'
 const MAGIC_ON = process.env.NEXT_PUBLIC_AUTH_MAGIC_LINK === '1'
@@ -84,6 +85,11 @@ function LoginPageInner() {
       if (mode === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
+        // The header's answer to "who is signed in" is cached for the life of
+        // the page's JS (useSession), and a client-side push keeps that JS.
+        // Without this the next page reads the signed-OUT answer from before
+        // the sign-in and offers "Log in" to someone who just did.
+        invalidateSession()
         router.push(next)
         router.refresh()
         return
@@ -99,6 +105,7 @@ function LoginPageInner() {
       if (error) throw error
 
       if (data.session) {
+        invalidateSession()
         router.push(next)
         router.refresh()
       } else {
