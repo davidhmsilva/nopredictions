@@ -860,6 +860,78 @@ unverifiable and left with no outcome (`'no_api'`). pt#5914 and pt#5977 → won.
 `'api'` rows where the events count differs from the half-time score but the
 outcome agrees still carry the events count in `ht_goals`.
 
+## s16 rows settled before the whistle, and never again — fixed 2026-09-14
+
+Found through the weekend report: 17 factory trades entered on 09-13 at 46-65'
+never settled. `settle()` wrote a row as soon as EITHER horizon was known.
+`goal_next_10` is known ten minutes after the row, which is before the whistle
+for anything observed before ~70'. `_final_goals_api` had no full-time total
+yet, so the row went out with `final_goals` NULL and `settled_at` set.
+`pending` (`settled_at IS NULL`) never selected it again.
+
+| before the fix | rows | fixtures |
+|---|--:|--:|
+| settled with `final_goals` NULL | 546,187 | 10,749 |
+| … whose final was already on a later row of the same match | 519,483 | 10,162 |
+| NULL by minute | 15-34' ≈ 100% · 50' ≈ 65% · 65' ≈ 15% · 70-88' 0.5% | |
+
+🔑 **The final is a fact about the match, not about the row.** The 85' row of
+the same fixture was settled after the whistle and had the API's final all
+along, so almost everything completes with no API call. The factory only ever
+saw the minority of rows before 70' whose first settle came late. That cost its
+46-69' next-goal specs most of their power, so the "0 pass" on those specs said
+less than it seemed to.
+
+Tape finals (`poll`) had the same shape. They were taken the moment the tape
+passed 88' while the API had no full-time total (stoppage time, or a refused
+key), and never revisited. Compared with the API final already stored on the
+same match: 45,154 poll rows, 8,574 with a different total and 2,965 outcome
+flips. **7,206 read LOW** (the tape stopped before the last goal) and 1,368 read
+HIGH (a goal that did not stand). No paper trade changed result: the one the
+API contradicts, pt#5941 (Over 2.5), wins on either total.
+
+Changes in `pressure_agent.py`:
+- **`complete_finals()`** runs at the end of every settle, including runs with
+  nothing pending. It covers rows with a NULL or tape final whose fixture was
+  seen within `FINAL_API_MAX_AGE_H = 24`. Each row takes the API's answer, else
+  an API final stored on another row of the fixture, else the tape (only past
+  `MAX_MINUTE`, and only to fill a NULL). Two stored API finals that disagree
+  resolve nothing; 2 fixtures are in that state. Updates are set-based, 500
+  fixtures per statement, and every fetch happens before the first write.
+- The +10 horizon is dropped when it claims more goals than the final (555
+  rows). That is the db/038 rule, which could not run on a row settled before
+  its final existed.
+- **A trade pays only on an API final.** A tape-final trade waits for
+  `complete_finals`, which pays it from the API, or from the tape once the
+  fixture is `FINAL_API_MAX_AGE_H` old. A traded fixture is asked about however
+  old it is.
+- `_final_goals_api` never sends ESPN (negative) ids, and it stops at the first
+  refusal.
+
+The repair ran as `python pressure_agent.py --backfill-finals`. It used stored
+API finals only, with no API call and no tape, and completed **564,637 rows over
+10,201 fixtures** in 6 minutes. Before 70', rows with no final went from 76% to
+3.6%. The before-state (45,549 rows) is in
+`reports/pressure_final_backfill_2026-09-14.json`, and completed rows are tagged
+`'api_repair'`.
+⚠️ Some fixtures still have no stored API final: 535 carry NULL rows (26,704)
+and 517 carry tape rows (28,375). Fixtures inside the last 24h are asked about
+by the cron. Older ones need a run with the API once the key answers. No daemon
+restart is needed, because settle runs from cron.
+
+### The key ran out again on 2026-09-14, and the settle cron was never counted
+
+From ~14:00Z, `/status` answered *"You have reached the request limit for the
+day"*, and every `ids=` batch came back with *"Free plans do not have access to
+the Ids parameter"*. The tracker fell back to ESPN from ~16:00Z.
+`_final_goals_api` swallowed the error and sent every remaining batch anyway.
+
+`af_budget` flushed every 25 calls and never at exit. A short process like the
+settle cron seldom reaches 25, so it was never written: on Monday its counter
+still held Sunday's total. It now flushes at exit. By 18:00Z the recorded spend
+was ~3.5k (pressure 1,367 + sweep 2,160). What settle spent that day is unknown;
+from now on it is counted. So "whose calls exhaust the key" is still open.
+
 ## Rationing one api-football key — day vs evening (2026-09-06)
 
 The blackout is real and it is a **daily allowance that resets at 00:00 UTC** —
@@ -1572,7 +1644,7 @@ no publish button.
 | | |
 |---|---|
 | `db/049` | `profiles.role` ('owner' = unlimited), and on `strategies`: `owner_id`, `source` ('agent' hand-written / 'lab'), `theory`, `interpretation`, `spec`, `backtest`, `run_status`, `run_blocker`, `is_public` |
-| `db/050` | drops the public read of `paper_trades`/`strategies` and their views. ⚠️ **Written, NOT applied** — apply only after the site that reads through `/api/agents` is deployed |
+| `db/050` | drops the public read of `paper_trades`/`strategies` and their views. **Applied 2026-09-19**: the anon key gets `permission denied` on all eight; the site reads them only through `/api/agents` over DATABASE_URL. All 17 `source='agent'` strategies are owned by the operator's account |
 | `site/app/lib/agents.ts` | every read/write, owner check in the SQL, over DATABASE_URL. The saved backtest is **recomputed on the server** from the spec — a leaderboard cannot rank on numbers a browser posted |
 | `/api/agents` · `/api/agents/[id]` · `/api/agents/trades` | list + save · run/pause/archive · the record |
 | Lab | **SAVE AS AN AGENT** under a result |
@@ -1585,6 +1657,11 @@ python lab_strategy_runner.py --once          # one cycle over saved, running ag
 python lab_strategy_runner.py --settle
 python -m pytest tests/test_lab_strategy_runner.py -q
 ```
+
+In cron since 2026-09-19: `--once` every 5 minutes (entries only happen in the
+last 45' before kick-off) and `--settle` through `cron_guard.sh --gap 25
+lab_settle`, both into `agent/lab_runner.log`. With no Lab agent running a
+cycle exits before any network call; it never calls api-football.
 
 What the runner refuses, each a way a live trade would stop being the tested
 rule: a competition outside the 22 backtest leagues (mapped by tag, ambiguity
@@ -1934,10 +2011,15 @@ Pinnacle line (Odds API; a median of other books until Pinnacle posts) and buys
 the best net EV at the CLOB ask, fee included.
 - **EDGE**: EV ≥ 1.5% where PM's line is the same half-point Pinnacle quotes
   (`sharp_exact`), ≥ 3% where it is read off the model (`sharp_model`); from
-  24h out; quarter-Kelly on 100u, 0.5-3u; needs a sharp snapshot fresh for its
-  distance to kick-off.
+  24h out; 1u; needs a sharp snapshot fresh for its distance to kick-off.
 - **FORCED**: inside 40 min with no bet, the best EV on the board whatever its
-  sign, 0.5u. This is what "every game" costs. Never pool the two in a yield.
+  sign, 1u. This is what "every game" costs. Never pool the two in a yield.
+- **1u flat on both since 2026-09-19**, like every other agent (it was
+  quarter-Kelly 0.5-3u / 0.5u). The 15 earlier trades were restated to 1u —
+  stake and payout ×(1/stake), so no bet's result changed; before-state in
+  `reports/nfl_stake_restate_2026-09-19.json`. At that point: 12–3, +9.75u net,
+  on an average entry EV of −0.83% — 12 wins against 8.7 the prices implied,
+  i.e. variance, not a finding.
 
 🔑 **Pinnacle quotes whole numbers, PM only half-points** — so even PM's main
 spread is usually not directly comparable (Pinnacle −6 vs PM −6.5). `nfl_model.py`
