@@ -192,6 +192,7 @@ function AccountInner() {
       </div>
 
       <div className="ac-actions">
+        <Link href="/account/password" className="np-btn">Change password</Link>
         <button className="np-btn" onClick={signOut}>Sign out</button>
       </div>
     </div>

@@ -3343,6 +3343,10 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .lg-prefilled strong { color: var(--white); }
 
 .lg-wide { width: 100%; justify-content: center; }
+/* The card can carry a heading of its own — the reset page has no mode tabs. */
+.lg-card-h1 { font-size: 19px; font-weight: 650; color: var(--white); margin: 0 0 6px; }
+.lg-card .lg-sub { font-size: 13.5px; line-height: 1.6; margin: 0 0 16px; }
+.lg-card .np-btn.lg-wide { display: flex; margin-top: 12px; }
 
 .lg-or {
   display: flex; align-items: center; gap: 12px; margin: 16px 0;

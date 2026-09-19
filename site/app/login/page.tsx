@@ -108,6 +108,20 @@ function LoginPageInner() {
         invalidateSession()
         router.push(next)
         router.refresh()
+      } else if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        // 🔑 Supabase answers a sign-up for an address that ALREADY has an
+        //    account with an obfuscated user carrying no identities, so this
+        //    form cannot be used to find out who is registered. The page read
+        //    that as success and said "Account created", which is the one
+        //    thing it must not say. This keeps Supabase's silence — it does
+        //    not confirm the address is taken — and still tells someone who
+        //    is stuck what to do next.
+        setMode('signin')
+        setPassword('')
+        setNotice({
+          kind: 'info',
+          text: `If ${email} is new, its confirmation link is on the way. If it already has an account, no second one was made — sign in below, or use "Forgot your password?".`,
+        })
       } else {
         setNotice({
           kind: 'info',
@@ -119,6 +133,29 @@ function LoginPageInner() {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** A link that signs you in once and lands on /account/password to set a new
+   *  one. Worded so it says nothing about whether the address has an account. */
+  async function resetPassword() {
+    if (!email) {
+      setNotice({ kind: 'error', text: 'Enter your email first.' })
+      return
+    }
+    setBusy(true)
+    const supabase = supabaseBrowser()
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=%2Faccount%2Fpassword`,
+    })
+    setBusy(false)
+    setNotice(
+      error
+        ? { kind: 'error', text: error.message }
+        : {
+            kind: 'info',
+            text: `If ${email} has an account, a link to set a new password is on its way. It works once, and not for long.`,
+          }
+    )
   }
 
   async function withGoogle() {
@@ -224,6 +261,12 @@ function LoginPageInner() {
           </button>
         </form>
 
+        {mode === 'signin' && (
+          <button className="lg-link" onClick={resetPassword} disabled={busy} type="button">
+            Forgot your password?
+          </button>
+        )}
+
         {MAGIC_ON && (
           <button className="lg-link" onClick={withMagicLink} disabled={busy}>
             Email me a sign-in link instead
@@ -243,7 +286,7 @@ function LoginPageInner() {
             <>
               An account changes nothing about what this site claims. The agent is
               still paper and still says so on{' '}
-              <Link href="/agent/ours">its own record</Link>.
+              <Link href="/agent">its own record</Link>.
             </>
           )}
         </p>
