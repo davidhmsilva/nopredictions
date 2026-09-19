@@ -4638,22 +4638,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .sc-head .sc-h1 { font-size: 27px; line-height: 1.2; }
 .sc-head .sc-h1-sub { margin-top: 8px; max-width: 720px; font-size: 14px; line-height: 1.6; }
-.sc-does {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
-  margin-top: 16px; max-width: 780px;
-}
-.sc-does a {
-  display: flex; align-items: center; gap: 11px; min-width: 0;
-  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
-  padding: 10px 12px; color: var(--white); text-decoration: none;
-  transition: border-color .15s;
-}
-.sc-does a:hover { border-color: var(--green); }
-.sc-does svg { width: 18px; height: 18px; color: var(--green); flex: none; }
-.sc-does b { display: block; font-size: 13px; font-weight: 600; }
-.sc-does span { display: block; font-size: 11.5px; color: var(--grey); line-height: 1.4; }
 @media (max-width: 760px) {
-  .sc-does { grid-template-columns: 1fr; }
   .sc-head .sc-h1 { font-size: 22px; }
 }
-#games { scroll-margin-top: calc(var(--nav-h) + 12px); }

@@ -6,14 +6,11 @@ import { useRouter } from 'next/navigation'
 import { AppShell } from './components/AppShell'
 import {
   IconAll,
-  IconBoard,
   IconClock,
   IconDrop,
   IconInsights,
-  IconLab,
   IconLive,
   IconStar,
-  IconWallet,
 } from './components/icons'
 import type { BookGrade, ScoutFixture } from './lib/scout'
 import {
@@ -468,31 +465,7 @@ export default function ScoutPage() {
             closing line, and the book you would be trading into — plus the line-ups and a
             plain-English brief. No tips: the numbers, and you decide.
           </p>
-          <nav className="sc-does" aria-label="What you can do here">
-            <a href="#games">
-              <IconBoard />
-              <div>
-                <b>Open a game</b>
-                <span>Every fixture below has its own page</span>
-              </div>
-            </a>
-            <Link href="/lab">
-              <IconLab />
-              <div>
-                <b>Test a theory</b>
-                <span>Backtest your idea on 111,475 real games</span>
-              </div>
-            </Link>
-            <Link href="/wallet">
-              <IconWallet />
-              <div>
-                <b>Read a trader</b>
-                <span>Any Polymarket wallet&apos;s full record</span>
-              </div>
-            </Link>
-          </nav>
         </div>
-        <div id="games" />
 
         {/* ── the games leading the card ── */}
         {!loading && !error && headline.length > 0 && (
