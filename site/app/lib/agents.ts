@@ -73,6 +73,44 @@ export interface AgentSummary {
   pl_units: number
   yield_pct: number | null
   avg_clv: number | null
+  first_bet_at: string | null
+  last_bet_at: string | null
+  /** Cumulative P&L after each settled bet, oldest first, thinned to at most
+   *  SPARK_POINTS so a card can draw it without shipping every trade. */
+  spark: number[]
+}
+
+/** One paper trade as the agent page lists it. `context` is the match state
+ *  at entry for the in-play arms that record it (minute, score, pressure). */
+export interface AgentTrade {
+  id: number
+  placed_at: string
+  resolved_at: string | null
+  game_time: string | null
+  event: string
+  pick: string
+  entry_odds: number | null
+  stake_units: number
+  result: 'won' | 'lost' | 'void' | null
+  pl_units: number | null
+  clv: number | null
+  live_money: boolean
+  context: {
+    home: string | null
+    away: string | null
+    entry_minute: number | null
+    goals_at_entry: number | null
+    target_line: number | null
+    pressure_index: number | null
+  } | null
+}
+
+export interface AgentDetail {
+  agent: AgentSummary
+  trades: AgentTrade[]
+  /** Cumulative P&L after each settled bet, with its date, thinned to at most
+   *  CURVE_POINTS. */
+  curve: { t: string; pl: number }[]
 }
 
 export interface AgentLimits {
@@ -166,9 +204,33 @@ async function limitsFor(userId: string): Promise<AgentLimits> {
   return { unlimited: false, saved: cap.saved, running: cap.running, used_saved: saved, used_running: running }
 }
 
-export async function listAgents(userId: string): Promise<{ agents: AgentSummary[]; limits: AgentLimits }> {
+const SPARK_POINTS = 40
+const CURVE_POINTS = 240
+const TRADES_SHOWN = 500
+
+/** Keep at most `n` points of a series, always including the last one — the
+ *  number a curve ends on is the number printed next to it. */
+function thin<T>(xs: T[], n: number): T[] {
+  if (xs.length <= n) return xs
+  const out: T[] = []
+  const step = (xs.length - 1) / (n - 1)
+  for (let i = 0; i < n; i++) out.push(xs[Math.round(i * step)])
+  return out
+}
+
+function cumulative(pls: number[]): number[] {
+  let run = 0
+  return pls.map((x) => (run += x))
+}
+
+type SummaryRow = Omit<AgentSummary, 'spark'> & { pls: number[] | null }
+
+/** The summary rows, owner-checked. Membership comes from v_agent_trades
+ *  (db/054), the same rule v_strategy_performance counts by — so the curve on
+ *  a card always ends on the P&L printed beside it. */
+async function summaries(userId: string, onlyId?: number): Promise<AgentSummary[]> {
   const sql = getSql()
-  const rows = await sql<AgentSummary[]>`
+  const rows = await sql<SummaryRow[]>`
     select s.id, s.name, s.source, s.theory, s.interpretation, s.spec, s.backtest,
            s.run_status, s.run_blocker, s.is_public, s.created_at, s.promoted_at,
            p.parent_strategy_id,
@@ -179,65 +241,96 @@ export async function listAgents(userId: string): Promise<{ agents: AgentSummary
            coalesce(p.total_staked, 0)::float8     as staked,
            coalesce(p.pl_units, 0)::float8         as pl_units,
            p.yield_pct::float8                     as yield_pct,
-           p.avg_clv::float8                       as avg_clv
+           p.avg_clv::float8                       as avg_clv,
+           p.first_pick_at                         as first_bet_at,
+           p.latest_pick_at                        as last_bet_at,
+           curve.pls
       from public.strategies s
       left join public.v_strategy_performance p on p.strategy_id = s.id
+      left join lateral (
+        select array_agg((coalesce(pt.payout_units, 0) - pt.stake_units)::float8
+                         order by coalesce(pt.resolved_at, pt.placed_at), pt.id) as pls
+          from public.v_agent_trades m
+          join public.paper_trades pt on pt.id = m.paper_trade_id
+         where m.strategy_id = s.id and pt.result in ('won', 'lost')
+      ) curve on true
      where s.owner_id = ${userId}
        and s.retired_at is null
-     order by (s.run_status = 'running') desc, s.created_at desc
+       ${onlyId != null ? sql`and s.id = ${onlyId}` : sql``}
+     order by (s.run_status = 'running') desc, p.latest_pick_at desc nulls last, s.created_at desc
   `
-  return { agents: rows, limits: await limitsFor(userId) }
+  return rows.map(({ pls, ...a }) => ({ ...a, spark: thin(cumulative(pls ?? []), SPARK_POINTS) }))
 }
 
-/** Every paper trade of the user's agents, in the shape the record components
- *  already take (lib/supabase PaperTrade), plus the per-entry match state of
- *  the pressure arms. Numerics are cast to float8 because postgres.js hands
- *  `numeric` back as a string, and a component doing arithmetic on "1.000"
- *  concatenates instead of adding. */
-export async function agentTrades(userId: string) {
+export async function listAgents(userId: string): Promise<{ agents: AgentSummary[]; limits: AgentLimits }> {
+  return { agents: await summaries(userId), limits: await limitsFor(userId) }
+}
+
+/** One agent with its latest trades and its whole curve, or null when it does
+ *  not exist or is not this user's — the two are deliberately the same answer.
+ *  Numerics are cast to float8 because postgres.js hands `numeric` back as a
+ *  string, and arithmetic on "1.000" concatenates instead of adding. */
+export async function getAgent(userId: string, id: number): Promise<AgentDetail | null> {
+  const [agent] = await summaries(userId, id)
+  if (!agent) return null
+
   const sql = getSql()
-  const trades = await sql`
-    select pt.id, pt.strategy_id, pt.market_id, pt.outcome,
-           pt.entry_price::float8 as entry_price, pt.entry_odds::float8 as entry_odds,
-           pt.stake_units::float8 as stake_units,
-           pt.model_probability::float8 as model_probability,
-           pt.expected_edge::float8 as expected_edge,
-           pt.reasoning, pt.critic_assessment,
-           pt.confidence, pt.placed_at, pt.result,
-           pt.payout_units::float8 as payout_units,
-           pt.closing_price::float8 as closing_price, pt.clv::float8 as clv,
-           pt.resolved_at, pt.sharp_consensus_sources,
-           pt.pm_live, pt.pm_order_status,
-           pt.pm_order_size::float8 as pm_order_size, pt.pm_order_price::float8 as pm_order_price,
-           pt.pm_size_matched::float8 as pm_size_matched, pt.pm_executed_at,
-           pt.pm_current_value::float8 as pm_current_value,
-           pt.pm_cash_pnl::float8 as pm_cash_pnl, pt.pm_percent_pnl::float8 as pm_percent_pnl,
-           coalesce(pm.title, '—') as market_title,
-           s.name as strategy_name,
-           pm.resolution_time as game_time
-      from public.paper_trades pt
-      join public.strategies s on s.id = pt.strategy_id
-      left join public.pm_markets pm on pm.id = pt.market_id
-     where s.owner_id = ${userId}
-     order by pt.placed_at desc
-     limit 1000
-  `
-  const ids = trades.map((t) => t.id as number)
-  const pressure = ids.length
-    ? await sql`
-        select paper_trade_id, home, away, entry_minute, goals_at_entry,
-               target_line::float8 as target_line, entry_price::float8 as entry_price,
-               pressure_index::float8 as pressure_index, goal_minute, goal_minute_source,
-               won, final_goals
-          from (
-            select * from public.v_pressure_trades
-            union all select * from public.v_ht_pressure_trades
-            union all select * from public.v_fav_ht_trades
-          ) v
-         where paper_trade_id = any(${ids})
-      `
-    : []
-  return { trades, pressure }
+  const [trades, settled] = await Promise.all([
+    sql<(Omit<AgentTrade, 'context'> & { ctx_home: string | null; ctx_away: string | null;
+          entry_minute: number | null; goals_at_entry: number | null;
+          target_line: number | null; pressure_index: number | null })[]>`
+      select pt.id, pt.placed_at, pt.resolved_at,
+             pm.resolution_time                               as game_time,
+             coalesce(pm.title, '—')                          as event,
+             pt.outcome                                       as pick,
+             pt.entry_odds::float8                            as entry_odds,
+             pt.stake_units::float8                           as stake_units,
+             pt.result,
+             case when pt.result in ('won', 'lost')
+                  then (coalesce(pt.payout_units, 0) - pt.stake_units)::float8 end as pl_units,
+             pt.clv::float8                                   as clv,
+             coalesce(pt.pm_live, false)                      as live_money,
+             v.home as ctx_home, v.away as ctx_away, v.entry_minute, v.goals_at_entry,
+             v.target_line::float8 as target_line, v.pressure_index::float8 as pressure_index
+        from public.v_agent_trades m
+        join public.paper_trades pt on pt.id = m.paper_trade_id
+        left join public.pm_markets pm on pm.id = pt.market_id
+        left join (
+          select paper_trade_id, home, away, entry_minute, goals_at_entry, target_line, pressure_index
+            from public.v_pressure_trades
+          union all
+          select paper_trade_id, home, away, entry_minute, goals_at_entry, target_line, pressure_index
+            from public.v_ht_pressure_trades
+          union all
+          select paper_trade_id, home, away, entry_minute, goals_at_entry, target_line, pressure_index
+            from public.v_fav_ht_trades
+        ) v on v.paper_trade_id = pt.id
+       where m.strategy_id = ${id}
+       order by pt.placed_at desc, pt.id desc
+       limit ${TRADES_SHOWN}
+    `,
+    sql<{ t: string; pl: number }[]>`
+      select coalesce(pt.resolved_at, pt.placed_at) as t,
+             (coalesce(pt.payout_units, 0) - pt.stake_units)::float8 as pl
+        from public.v_agent_trades m
+        join public.paper_trades pt on pt.id = m.paper_trade_id
+       where m.strategy_id = ${id} and pt.result in ('won', 'lost')
+       order by coalesce(pt.resolved_at, pt.placed_at), pt.id
+    `,
+  ])
+
+  const running = cumulative(settled.map((r) => r.pl))
+  return {
+    agent,
+    trades: trades.map(({ ctx_home, ctx_away, entry_minute, goals_at_entry, target_line, pressure_index, ...t }) => ({
+      ...t,
+      context:
+        entry_minute != null || ctx_home != null
+          ? { home: ctx_home, away: ctx_away, entry_minute, goals_at_entry, target_line, pressure_index }
+          : null,
+    })),
+    curve: thin(settled.map((r, i) => ({ t: r.t, pl: running[i] })), CURVE_POINTS),
+  }
 }
 
 // ── writes ──────────────────────────────────────────────────────────────────
