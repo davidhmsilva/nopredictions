@@ -25,10 +25,11 @@
  *  phone the person came to sign in, not to read.
  */
 
-import { Suspense, useState, type FormEvent } from 'react'
+import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '../components/AppShell'
+import { takeSignupEmail } from '../lib/signupEmail'
 import { supabaseBrowser } from '../lib/supabaseBrowser'
 
 const GOOGLE_ON = process.env.NEXT_PUBLIC_AUTH_GOOGLE === '1'
@@ -58,8 +59,14 @@ function LoginPageInner() {
   const [mode, setMode] = useState<Mode>(params.get('mode') === 'signup' ? 'signup' : 'signin')
   // Prefilled by /welcome with the address the payment was made on. Using a
   // different one here puts the subscription on the wrong account, so the field
-  // is filled rather than left for the reader to remember.
+  // is filled rather than left for the reader to remember. It arrives through
+  // sessionStorage (lib/signupEmail.ts); `?email=` still works for old links.
   const [email, setEmail] = useState(prefilled ?? '')
+  useEffect(() => {
+    if (prefilled) return
+    const handed = takeSignupEmail()
+    if (handed) setEmail((cur) => cur || handed)
+  }, [prefilled])
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(

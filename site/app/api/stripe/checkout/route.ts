@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server'
 import { currentUser } from '../../../lib/supabaseAuth'
 import { getSql } from '../../../lib/db'
+import { LIVE, subscriptionsOf } from '../../../lib/billing'
 import { stripe, stripeConfigured, PRICE_IDS, siteUrl, type BillingPeriod } from '../../../lib/stripe'
 
 export const dynamic = 'force-dynamic'
@@ -73,6 +74,16 @@ export async function POST(request: Request) {
     customerId = g?.stripe_customer_id ?? null
   }
 
+  // Then Stripe itself. A grant only exists once a webhook has landed, so two
+  // checkouts opened before the first one's webhook would otherwise make two
+  // customers for one person — and the billing portal only ever shows one.
+  // (Stripe's email filter is case-sensitive; every customer made here is
+  // created lower-cased, which is what this looks up.)
+  if (!customerId) {
+    const found = await stripe().customers.list({ email, limit: 1 })
+    customerId = found.data[0]?.id ?? null
+  }
+
   if (!customerId) {
     const customer = await stripe().customers.create({
       email,
@@ -85,9 +96,38 @@ export async function POST(request: Request) {
       },
     })
     customerId = customer.id
-    if (user) {
-      await sql`update public.profiles set stripe_customer_id = ${customerId} where id = ${user.id}`
+  } else {
+    // 🔑 One subscription per person. A second checkout on top of a live
+    //    subscription is a second charge, and the plan sync would then have
+    //    two to reconcile. Someone signed in is sent to the portal, where
+    //    switching monthly to yearly is a change and not a new subscription.
+    //    ⚠️ The anonymous refusal does say that the address has a live
+    //    subscription. The alternative is taking a second payment from them.
+    const live = (await subscriptionsOf(customerId)).some((s) => LIVE.has(s.status))
+    if (live) {
+      if (!user) {
+        return NextResponse.json(
+          { error: 'That email already has a subscription. Sign in with it to manage billing.' },
+          { status: 409 }
+        )
+      }
+      const portal = await stripe().billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${siteUrl()}/account`,
+      })
+      return NextResponse.json({ url: portal.url, already: true })
     }
+  }
+
+  if (user) {
+    // Remember it on the account, unless the account already has one or the
+    // customer already belongs to another account (the column is unique).
+    await sql`
+      update public.profiles set stripe_customer_id = ${customerId}
+       where id = ${user.id}
+         and stripe_customer_id is null
+         and not exists (select 1 from public.profiles where stripe_customer_id = ${customerId})
+    `
   }
 
   const session = await stripe().checkout.sessions.create({
@@ -98,7 +138,9 @@ export async function POST(request: Request) {
     // account cannot read an account page, and sending them to one that says
     // "not signed in" immediately after taking their money is the worst
     // possible first screen.
-    success_url: `${siteUrl()}/welcome?email=${encodeURIComponent(email)}`,
+    // The session id, never the email: a query string ends up in request
+    // logs and browser history. /welcome reads the address back from Stripe.
+    success_url: `${siteUrl()}/welcome?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${siteUrl()}/pricing?cancelled=1`,
     allow_promotion_codes: true,
     subscription_data: {

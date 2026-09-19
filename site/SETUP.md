@@ -85,12 +85,15 @@ creates an account that waits on a confirmation email that may not arrive.
 
 Dashboard → Authentication → Providers / Emails.
 
-- **Email confirmation.** Supabase's built-in mailer is rate-limited to a
-  couple of messages an hour and is documented as test-only. So either:
-  - **turn OFF "Confirm email"** (Authentication → Providers → Email) and
-    password sign-up works immediately, or
-  - **set up SMTP** (Authentication → Emails → SMTP Settings) with Resend,
-    Postmark or similar, and leave confirmation on.
+- **Email confirmation stays ON.** ⛔ Do not turn it off. A payment made
+  before sign-up is held against the email (`pro_grants`, db/047), and
+  `handle_new_user()` hands it to whoever creates an account with that
+  address. With confirmation on, that is whoever can open the inbox. With it
+  off, anyone who knows a paying customer's address can sign up first and
+  take their Pro.
+  Supabase's built-in mailer is rate-limited to a couple of messages an hour
+  and is documented as test-only, so **set up SMTP** (Authentication → Emails →
+  SMTP Settings) with Resend, Postmark or similar.
 - **Redirect URLs.** Authentication → URL Configuration → Redirect URLs, add:
   - `https://www.nopredictions.com/auth/callback`
   - `http://localhost:3000/auth/callback`
@@ -105,25 +108,40 @@ and only once SMTP actually delivers.
 
 ### 3 · Stripe — turn on the paid plan
 
-1. Create the account, and stay in **Test mode** until a test purchase works
+1. Create the account and work in a **Sandbox** until a test purchase works
    end to end.
-2. Product "NOPREDICTIONS Pro" with two recurring prices: **$19/month** and
-   **$190/year**. Copy both price ids (`price_…`).
-3. `vercel env add` each of:
+2. Product "NOPREDICTIONS Pro" with two recurring prices in USD: **$19/month**
+   and **$190/year**. Copy both price ids (`price_…`).
+3. A **restricted key** (`rk_test_…`), not the secret key. It needs exactly:
+   Customers **write**, Checkout Sessions **write**, Subscriptions **read**,
+   Customer portal **write**. Anything else it answers 403, which is the point.
+4. `vercel env add <NAME> production` for each, and mark the two secrets
+   *Sensitive* in the Vercel dashboard:
 
    ```
-   STRIPE_SECRET_KEY       sk_test_…   (then sk_live_… when you go live)
+   STRIPE_SECRET_KEY       rk_test_…   (then rk_live_… when you go live)
    STRIPE_PRICE_MONTHLY    price_…
    STRIPE_PRICE_YEARLY     price_…
-   STRIPE_WEBHOOK_SECRET   whsec_…     (from step 4)
+   STRIPE_WEBHOOK_SECRET   whsec_…     (from step 5)
    ```
 
-4. Stripe → Developers → Webhooks → add endpoint
-   `https://www.nopredictions.com/api/stripe/webhook`, subscribed to:
+5. Stripe → Developers → Webhooks → add endpoint
+   `https://www.nopredictions.com/api/stripe/webhook`. ⚠️ **With `www`**: the
+   bare domain answers 307, and Stripe does not follow redirects. API version
+   `2026-08-26.dahlia` (the SDK's pin). Subscribe to exactly the `HANDLED` set
+   in `app/api/stripe/webhook/route.ts`:
    `checkout.session.completed`, `customer.subscription.created`,
-   `customer.subscription.updated`, `customer.subscription.deleted`.
+   `customer.subscription.updated`, `customer.subscription.deleted`,
+   `customer.subscription.paused`, `customer.subscription.resumed`,
+   `invoice.paid`, `invoice.payment_failed`.
    Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
-5. Redeploy, then buy Pro with card `4242 4242 4242 4242`.
+6. Settings → Billing → **Customer portal**: save it once. `/api/stripe/portal`
+   uses the default configuration, and until one is saved every "Manage
+   billing" click errors.
+7. Settings → Billing → **Invoices / Subscriptions and emails**: email
+   finalized invoices and receipts, turn on Smart Retries and the
+   failed-payment emails. That is the invoicing and dunning, with no code.
+8. Redeploy, then buy Pro with card `4242 4242 4242 4242`.
 
 **Test BOTH orders — they are different code paths and only one of them is the
 common case.**
@@ -133,6 +151,16 @@ common case.**
 - *Pay first, no account* — the funnel the pricing page leads with. Type an
   email on `/pricing`, pay, land on `/welcome`, then create an account with
   that same address. It should be Pro the moment you do.
+- *Pay twice.* Back to `/pricing` while Pro: signed in, it opens the billing
+  portal instead of a second checkout; signed out with the same email, it
+  refuses with "already has a subscription".
+- *Cancel.* In the portal, cancel immediately: `/account` should read FREE.
+
+The plan sync (`lib/billing.ts`) was checked on 2026-09-19 against the real
+tables with a fake Stripe client: active → canceled → a replayed event (stays
+canceled) → monthly cancelled + yearly active (Pro, on the yearly) → customer
+deleted, and a portal-edited email never getting its own grant. The profile
+branch needs an auth user and is only covered by the test purchase above.
 
 ⚠️ The pay-first path is written and **has never been run end to end**, because
 there is no Stripe account yet — the checkout route refuses at the keys check
