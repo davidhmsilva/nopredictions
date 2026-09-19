@@ -32,7 +32,7 @@ type Period = 'monthly' | 'yearly'
  *  not get this either", which is true but is not what a comparison is for. */
 const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
   { k: 'US sports — Kalshi and Polymarket side by side', free: '✓', pro: '✓', href: '/nfl' },
-  { k: 'Scout — every soccer board on Polymarket', free: '✓', pro: '✓', href: '/' },
+  { k: 'Every board — soccer and US sports', free: '✓', pro: '✓', href: '/' },
   { k: 'Live clock, score and book quality on every fixture', free: '✓', pro: '✓' },
   { k: 'Game Center on any fixture', free: '✓', pro: '✓' },
   { k: 'Dropping odds — where the money went', free: '✓', pro: '✓', href: '/dropping-odds' },

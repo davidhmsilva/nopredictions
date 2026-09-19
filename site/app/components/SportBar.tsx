@@ -3,8 +3,8 @@
 /** Which sport's board you are on.
  *
  *  The US sports lead, in the order a US bettor's season runs through them.
- *  Soccer keeps the home page — it is the board the site was built on, and
- *  every link already pointing at "/" still lands on it.
+ *  Soccer has its own page like the rest (/soccer); the home page shows only
+ *  the top of that board, so no tab is lit there.
  */
 
 import Link from 'next/link'
@@ -13,7 +13,7 @@ import { SPORT_KEYS, SPORT_META } from '../lib/sportsMeta'
 
 const ITEMS = [
   ...SPORT_KEYS.map((k) => ({ href: SPORT_META[k].path, label: SPORT_META[k].label })),
-  { href: '/', label: 'Soccer' },
+  { href: '/soccer', label: 'Soccer' },
 ]
 
 export function SportBar() {

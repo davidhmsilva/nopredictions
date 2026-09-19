@@ -2887,6 +2887,36 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-clear:hover { color: var(--white); border-color: var(--grey2); }
 .sc-count { font-size: 11.5px; color: var(--grey2); }
 
+/* ── home: the way to every game, and what else the site does ── */
+/* The home page lists the top of the board; everything else is one click on. */
+.hm-all { display: flex; justify-content: center; margin: -22px 0 40px; }
+.hm-all-btn { gap: 6px; }
+
+.hm-more { margin-bottom: 48px; }
+/* Drawn like every other section heading: the green rule. */
+.hm-more-h {
+  font-size: 16px; font-weight: 650; margin: 0 0 12px;
+  padding-left: 11px; border-left: 3px solid var(--green);
+}
+.hm-more-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hm-more-card {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 16px; text-decoration: none; color: var(--white);
+  transition: border-color .12s, background .12s;
+}
+.hm-more-card:hover { border-color: var(--grey2); background: var(--bg3); }
+.hm-more-icn { width: 20px; height: 20px; color: var(--green); margin-bottom: 4px; }
+.hm-more-card b { font-size: 15px; font-weight: 650; }
+.hm-more-card span { flex: 1; font-size: 13px; color: var(--grey); line-height: 1.55; }
+.hm-more-card em {
+  margin-top: 6px; font-style: normal;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em; color: var(--green);
+}
+@media (max-width: 760px) {
+  .hm-more-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 1240px) {
   .sc-big { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sc-big-card:nth-child(4) { display: none; }

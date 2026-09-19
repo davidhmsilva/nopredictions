@@ -26,16 +26,22 @@ export const TABS: {
   hint: string
   Icon: (p: { className?: string }) => JSX.Element
 }[] = [
-  { href: '/',       label: 'Scout',  hint: "Today's boards", Icon: IconBoard },
+  { href: '/',       label: 'Home',   hint: "Today's boards", Icon: IconBoard },
   { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
   { href: '/agent',  label: 'Agents', hint: 'Yours',          Icon: IconAgent },
   { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
 ]
 
 function isActive(pathname: string, href: string): boolean {
-  // Scout owns every board: soccer at "/", each US sport at its own path.
+  // Home owns every board: the top of soccer at "/", all of it at /soccer,
+  // and each US sport at its own path.
   if (href === '/') {
-    return pathname === '/' || pathname.startsWith('/game') || SPORT_KEYS.some((k) => pathname === `/${k}`)
+    return (
+      pathname === '/' ||
+      pathname === '/soccer' ||
+      pathname.startsWith('/game') ||
+      SPORT_KEYS.some((k) => pathname === `/${k}`)
+    )
   }
   return pathname === href || pathname.startsWith(href + '/')
 }
@@ -151,7 +157,7 @@ function NavSearch({
     const slug = v.match(
       /polymarket\.com\/(?:[a-z]{2}\/)?(?:event|sports\/[^/]+)\/([^/?#]+)/
     )?.[1]
-    router.push(slug ? `/game/${slug}` : `/?q=${encodeURIComponent(v)}`)
+    router.push(slug ? `/game/${slug}` : `/soccer?q=${encodeURIComponent(v)}`)
     onDone?.()
   }
 
@@ -306,7 +312,7 @@ function AccountActions() {
                   Pricing
                 </Link>
                 <div className="np-sheet-note">
-                  Scout, Agent and the Game Center work without an account.
+                  The boards, Agents and the Game Center work without an account.
                 </div>
               </>
             )}

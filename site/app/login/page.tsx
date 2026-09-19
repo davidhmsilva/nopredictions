@@ -256,7 +256,7 @@ function LoginPageInner() {
           {mode === 'signup' ? 'It takes an email and a password.' : 'Welcome back.'}
         </h1>
         <p className="lg-sub">
-          Scout, Dropping odds, the Game Center and the agent’s record never needed
+          The boards, Dropping odds, the Game Center and the agent’s record never needed
           one and never will. An account is for the two tools that do real work.
         </p>
 
