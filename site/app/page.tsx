@@ -452,18 +452,17 @@ export default function ScoutPage() {
       </div>
 
       <div className="np-wrap">
-        {/* The intro says what the site is FOR. "All of today's football,
-            priced" described the list below it and left a first-time visitor
-            to work out the rest. Agents are not named here until the private
-            agents ship — a line promising them would point at the old page. */}
+        {/* The intro says what the site is FOR, in one sentence. It was a
+            paragraph about Polymarket football that took a phone's whole first
+            screen before the first game; the site covers prediction markets,
+            not one venue (Kalshi sits beside Polymarket on the US boards), and
+            the board below is what a visitor came for. */}
         <div className="sc-head">
           <p className="sc-eyebrow">NOPREDICTIONS · Prediction-market research</p>
           <h1 className="sc-h1">See if the price is wrong — before you trade it</h1>
           <p className="sc-h1-sub">
-            Today&apos;s Polymarket football, biggest markets first. Open a game to check its price
-            against how matches priced the same way actually ended, both teams&apos; form against the
-            closing line, and the book you would be trading into — plus the line-ups and a
-            plain-English brief. No tips: the numbers, and you decide.
+            Prediction-market prices, checked against how games priced the same way actually
+            ended. No tips — the numbers, and you decide.
           </p>
         </div>
 
