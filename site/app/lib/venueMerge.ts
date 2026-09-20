@@ -19,6 +19,7 @@
 import type { KalshiFixture } from './kalshiSoccerTypes'
 import type { ScoutFixture } from './scoutTypes'
 import { placeVenue } from './venueMatch'
+import { etDateOf } from './etDate'
 import { bestFor, combinedVolume, gradeOf, type OutcomeKey, type Quote, type VenueBook } from './venues'
 
 /** The goals line both venues quote, and the one every measured table on this
@@ -41,6 +42,7 @@ export function kalshiBook(k: KalshiFixture): VenueBook {
     // row are answering the same question.
     grade: gradeOf([quotes.home, quotes.draw, quotes.away]),
     quotes,
+    source: 'kalshi',
   }
 }
 
@@ -58,7 +60,10 @@ export interface MergeResult {
  *  "not listed" rather than dropping the game. */
 export function mergeKalshi(fixtures: ScoutFixture[], kalshi: KalshiFixture[]): MergeResult {
   if (kalshi.length === 0) return { fixtures, placed: 0, dropped: 0 }
-  const { placed, dropped } = placeVenue(fixtures, (f) => f.slug, kalshi)
+  // Polymarket publishes an instant; Kalshi files by the Eastern date. Both
+  // sides are given the date so the join runs on the discriminator they share.
+  const dated = fixtures.map((f) => ({ ...f, etDate: etDateOf(f.kickoff) }))
+  const { placed, dropped } = placeVenue(dated, (f) => f.slug, kalshi)
   if (placed.size === 0) return { fixtures, placed: 0, dropped }
 
   const out = fixtures.map((f) => {

@@ -17,6 +17,7 @@
 
 import { fetchBook, teamScore } from './gamecenter'
 import { matchEspn, type EspnLive } from './espn'
+import { fetchBooks } from './clob'
 import {
   bestFor,
   combinedVolume,
@@ -415,7 +416,59 @@ function pmVenueBook(legs: Partial<Record<OutcomeKey, Mkt>>, slug: string, volum
     volume: volumeUsd > 0 ? volumeUsd : null,
     grade: gradeOf([quotes.home, quotes.draw, quotes.away]),
     quotes,
+    // Overwritten by `refreshVenueQuotes` where the book answers.
+    source: 'gamma',
   }
+}
+
+/** Re-read every compared outcome from the CLOB.
+ *
+ *  🔑 This is what makes "the cheaper exchange" a claim about a price you can
+ *     pay rather than about Gamma's cache. It costs about two requests for a
+ *     whole matchday. See lib/clob for the measurement that forced it.
+ *
+ *  Mutates in place and returns how many fixtures got a live book. A fixture
+ *  whose tokens the CLOB would not answer for keeps Gamma's quote and says so
+ *  in `source`. */
+export async function refreshVenueQuotes(
+  fixtures: ScoutFixture[],
+  legsBySlug: Map<string, Partial<Record<OutcomeKey, Mkt>>>
+): Promise<number> {
+  const tokens: string[] = []
+  for (const f of fixtures) {
+    const legs = legsBySlug.get(f.slug)
+    if (!legs) continue
+    for (const key of OUTCOMES) {
+      const id = legs[key]?.yesTokenId
+      if (id) tokens.push(id)
+    }
+  }
+  if (tokens.length === 0) return 0
+
+  const books = await fetchBooks(tokens).catch(() => new Map<string, Quote>())
+  if (books.size === 0) return 0
+
+  let refreshed = 0
+  for (const f of fixtures) {
+    const legs = legsBySlug.get(f.slug)
+    const pm = f.venues.find((v) => v.venue === 'polymarket')
+    if (!legs || !pm) continue
+    let any = false
+    for (const key of OUTCOMES) {
+      const id = legs[key]?.yesTokenId
+      const q = id ? books.get(id) : undefined
+      if (q) {
+        pm.quotes[key] = q
+        any = true
+      }
+    }
+    if (!any) continue
+    pm.source = 'clob'
+    pm.grade = gradeOf([pm.quotes.home, pm.quotes.draw, pm.quotes.away])
+    f.best = bestFor(f.venues)
+    refreshed++
+  }
+  return refreshed
 }
 
 /** The outcome that shortened most over 24 hours.
@@ -600,7 +653,13 @@ export async function refreshBook(markets: Mkt[]): Promise<BookQuality | null> {
 export function buildFixtures(
   events: Raw[],
   espn: EspnLive[] = []
-): { fixtures: ScoutFixture[]; marketsBySlug: Map<string, Mkt[]> } {
+): {
+  fixtures: ScoutFixture[]
+  marketsBySlug: Map<string, Mkt[]>
+  /** The market behind each compared outcome, so its token can be re-read from
+   *  the book. Gamma's quote is a fallback, not the price. */
+  legsBySlug: Map<string, Partial<Record<OutcomeKey, Mkt>>>
+} {
   const now = Date.now()
   const from = now - WINDOW_BACK_H * 3600_000
   const to = now + WINDOW_FWD_H * 3600_000
@@ -624,6 +683,7 @@ export function buildFixtures(
 
   const fixtures: ScoutFixture[] = []
   const marketsBySlug = new Map<string, Mkt[]>()
+  const legsBySlug = new Map<string, Partial<Record<OutcomeKey, Mkt>>>()
 
   for (const siblings of Array.from(byFixture.values())) {
     const canonical =
@@ -703,9 +763,10 @@ export function buildFixtures(
       move: moveOf(markets, teams.home, teams.away),
     })
     marketsBySlug.set(slug, markets)
+    legsBySlug.set(slug, legs)
   }
 
-  return { fixtures, marketsBySlug }
+  return { fixtures, marketsBySlug, legsBySlug }
 }
 
 /** The order the board opens in: the games people are actually betting.

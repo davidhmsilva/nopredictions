@@ -30,6 +30,8 @@
 
 import { unstable_cache } from 'next/cache'
 import { quoteOf, type Quote } from './venues'
+import { sameFixture } from './venueMatch'
+import { etDateOf } from './etDate'
 import type {
   KalshiFixture,
   KalshiLeg,
@@ -202,6 +204,23 @@ function splitTitle(title: string): { home: string; away: string } | null {
 
 const DRAW_RE = /^(tie|draw)$/i
 
+const MONTH: Record<string, string> = {
+  JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06',
+  JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12',
+}
+
+/** The Eastern date a Kalshi event is filed under, from its own ticker:
+ *  `KXBRASILEIROGAME-26SEP20VITCRU` → `20260920`.
+ *
+ *  🔑 This, not `occurrence_datetime`, is what the cross-venue join uses. The
+ *     latter is the expected settlement — kick-off plus about three hours —
+ *     and reading it as a start time silently drops every competition whose
+ *     games are expected to run longer. */
+export function kalshiEtDate(eventTicker: string): string | null {
+  const m = /-(\d{2})([A-Z]{3})(\d{2})/.exec(eventTicker)
+  return m && MONTH[m[2]] ? `20${m[1]}${MONTH[m[2]]}${m[3]}` : null
+}
+
 function legQuote(m: KMarket): Quote {
   const ask = num(m.yes_ask_dollars)
   const size = num(m.yes_ask_size_fp)
@@ -251,16 +270,18 @@ export function parseKalshiEvent(
   }
   if (!legs.home || !legs.away) return null
 
-  const kickoff = markets.map((m) => m.occurrence_datetime).find((x) => x) ?? null
+  const settles = markets.map((m) => m.occurrence_datetime).find((x) => x) ?? null
   const volume = markets.reduce((s, m) => s + (num(m.volume_fp) ?? 0), 0)
+  const eventTicker = String(ev.event_ticker ?? '')
 
   return {
-    eventTicker: String(ev.event_ticker ?? ''),
+    eventTicker,
     series,
     competition,
     home: teams.home,
     away: teams.away,
-    kickoff: kickoff ? new Date(kickoff).toISOString() : null,
+    settlesAt: settles ? new Date(settles).toISOString() : null,
+    etDate: kalshiEtDate(eventTicker),
     url: `https://kalshi.com/markets/${series.toLowerCase()}/${String(ev.event_ticker ?? '').toLowerCase()}`,
     legs,
     totals: {},
@@ -274,7 +295,6 @@ export function parseKalshiEvent(
  *  market's own field; the sentence around it is prose that can change. */
 export function parseKalshiTotals(ev: KEvent): {
   teams: { home: string; away: string }
-  kickoff: string | null
   totals: Record<string, KalshiLeg>
   volume: number
 } | null {
@@ -292,14 +312,8 @@ export function parseKalshiTotals(ev: KEvent): {
     totals[key] = { ticker: m.ticker, label: String(m.yes_sub_title ?? ''), quote: legQuote(m) }
   }
   if (Object.keys(totals).length === 0) return null
-  const kickoff = markets.map((m) => m.occurrence_datetime).find((x) => x) ?? null
   const volume = markets.reduce((s, m) => s + (num(m.volume_fp) ?? 0), 0)
-  return {
-    teams,
-    kickoff: kickoff ? new Date(kickoff).toISOString() : null,
-    totals,
-    volume,
-  }
+  return { teams, totals, volume }
 }
 
 /** Two spellings inside Kalshi's own feed. Deliberately not the cross-venue
@@ -396,11 +410,15 @@ async function events(seriesTicker: string): Promise<KEvent[] | null> {
   }
 }
 
-/** Fifteen minutes. Long enough that the 34-second sweep runs about four times
+/** ⚠️ The key carries a version because the Data Cache outlives a deploy, and
+ *     a fixture written under an older shape is served straight into the new
+ *     code. Bump it whenever `KalshiFixture` changes.
+ *
+ *  Fifteen minutes. Long enough that the 34-second sweep runs about four times
  *  an hour across the whole deployment, short enough that a game listed at
  *  lunchtime is on the board before kick-off. Next's Data Cache serves the
  *  stale index while it rebuilds, so only the very first call ever waits. */
-const indexShared = unstable_cache(sweepIndex, ['kalshi-soccer-index-v1'], {
+const indexShared = unstable_cache(sweepIndex, ['kalshi-soccer-index-v2'], {
   revalidate: 900,
   tags: ['kalshi-soccer'],
 })
@@ -461,7 +479,7 @@ async function pricedIndex(): Promise<KalshiSoccerIndex> {
 
 const TTL_MS = 45_000
 
-const pricedShared = unstable_cache(pricedIndex, ['kalshi-soccer-priced-v1'], {
+const pricedShared = unstable_cache(pricedIndex, ['kalshi-soccer-priced-v2'], {
   revalidate: TTL_MS / 1000,
   tags: ['kalshi-soccer'],
 })
@@ -490,4 +508,30 @@ export async function getKalshiSoccer(): Promise<KalshiSoccerIndex> {
     if (l1) return l1.idx
     throw e
   }
+}
+
+/** Kalshi's side of ONE fixture, for the Game Center.
+ *
+ *  ⚠️ Time-budgeted on purpose. A cold index is a 34-second sweep, and a
+ *     fixture page must not wait for it — it renders Polymarket's board with
+ *     no Kalshi column instead, which is the honest degradation. In practice
+ *     the index is warm: the football board asks for it every minute.
+ */
+export async function findKalshiFixture(
+  fixture: { home: string; away: string; kickoff: string | null },
+  budgetMs = 4000
+): Promise<KalshiFixture | null> {
+  if (!fixture.kickoff) return null
+  const idx = await Promise.race([
+    getKalshiSoccer().catch(() => null),
+    new Promise<null>((r) => setTimeout(() => r(null), budgetMs)),
+  ])
+  if (!idx) return null
+  // The same one-to-one rule the board uses: an exact kick-off agreement AND
+  // the alias-aware scorer, with the crossed orientation tested. Two
+  // candidates is not a match.
+  const hits = idx.fixtures.filter((k) =>
+    sameFixture({ ...fixture, etDate: etDateOf(fixture.kickoff) }, k)
+  )
+  return hits.length === 1 ? hits[0] : null
 }

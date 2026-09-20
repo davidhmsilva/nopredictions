@@ -75,23 +75,6 @@ export interface LiveStats {
   awayReds: number
 }
 
-export interface KalshiSide {
-  name: string
-  bid: number | null
-  ask: number | null
-}
-
-export interface KalshiComparison {
-  eventTicker: string
-  title: string
-  url: string
-  sides: KalshiSide[]
-  // Best cross-venue difference after BOTH venues' taker fees. Measured at
-  // zero net arbs across 57 fixtures: the gross ceiling is one tick against a
-  // ~3pp fee bar, so this is shown as a price comparison, never as an arb.
-  bestNetPp: number | null
-}
-
 /** The one thing on the page worth looking at.
  *
  *  Everything in here is either a price Polymarket is quoting right now or a
@@ -160,7 +143,7 @@ export interface GameData {
   movers: Mover[]
   groups: MarketGroup[]
   history: { tokenId: string; label: string; points: PricePoint[] } | null
-  kalshi: KalshiComparison | null
+  kalshi: import('./kalshiGame').KalshiGame | null
   /** Every other market in matches the sharpest book priced the same way. */
   pricedLike?: import('./pricedLike').PricedLike | null
   notes: string[]
@@ -458,98 +441,12 @@ async function fetchStats(
   }
 }
 
-// ── Kalshi ───────────────────────────────────────────────────────────────────
-
-/** The same fixture on the other venue.
- *
- *  Two things this must not do. It must not present a price difference as an
- *  arbitrage — we measured 57 fixtures quoted on both venues and found zero net
- *  arbs, because the gross ceiling is one tick against a ~3pp combined fee bar.
- *  And it must not quote a placeholder book: about a quarter of Kalshi's soccer
- *  markets sit at a fixed 0.02/0.81 on every outcome, where the mid is
- *  meaningless. Those are filtered on spread.
- */
-/** Kalshi's soccer game series, keyed by the competition name Polymarket uses.
- *
- *  Kalshi's /events endpoint has no free-text search and returns every open
- *  market across politics, economics and sport, so an unfiltered scan of the
- *  first page never reaches football at all. The series ticker has to be
- *  resolved up front. Only the competitions both venues actually list are here;
- *  a fixture outside them simply has no Kalshi column, which is the truth.
- */
-const KALSHI_SERIES: Array<[RegExp, string]> = [
-  [/premier league/i, 'KXEPLGAME'],
-  [/champions league/i, 'KXUCLGAME'],
-  [/europa league/i, 'KXUELGAME'],
-  [/la ?liga 2|laliga 2|segunda/i, 'KXLALIGA2GAME'],
-  [/la ?liga/i, 'KXLALIGAGAME'],
-  [/serie a/i, 'KXSERIEAGAME'],
-  [/bundesliga 2|2\. bundesliga/i, 'KXBUNDESLIGA2GAME'],
-  [/bundesliga/i, 'KXBUNDESLIGAGAME'],
-  [/ligue 2/i, 'KXLIGUE2GAME'],
-  [/ligue 1/i, 'KXLIGUE1GAME'],
-  [/eredivisie/i, 'KXEREDIVISIEGAME'],
-  [/championship/i, 'KXEFLCHAMPIONSHIPGAME'],
-  [/mls|major league soccer/i, 'KXMLSGAME'],
-  [/allsvenskan/i, 'KXALLSVENSKANGAME'],
-]
-
-export function kalshiSeriesFor(competition: string | null): string | null {
-  if (!competition) return null
-  for (const [re, ticker] of KALSHI_SERIES) if (re.test(competition)) return ticker
-  return null
-}
-
-export async function fetchKalshi(
-  home: string,
-  away: string,
-  competition: string | null
-): Promise<KalshiComparison | null> {
-  const series = kalshiSeriesFor(competition)
-  if (!series) return null
-
-  try {
-    const data = (await getJson(
-      `${KALSHI_API}/events?series_ticker=${series}&status=open&limit=200&with_nested_markets=true`,
-      12000
-    )) as { events?: Array<Record<string, unknown>> }
-
-    for (const ev of data.events ?? []) {
-      const title = String(ev.title ?? '')
-      // Kalshi event titles are "Home vs Away", verified against ESPN on 3/3
-      // fixtures. Split and score each side rather than looking for either
-      // team's words anywhere in the string.
-      const parts = title.split(/\s+vs\.?\s+/i)
-      if (parts.length !== 2) continue
-      if (!fixtureMatches(home, away, parts[0], parts[1])) continue
-
-      const sides: KalshiSide[] = []
-      for (const m of (ev.markets as Array<Record<string, unknown>>) ?? []) {
-        // The dollar fields are the live ones; the legacy integer-cent
-        // yes_bid / yes_ask now come back null on every market.
-        const bid = num(m.yes_bid_dollars)
-        const ask = num(m.yes_ask_dollars)
-        // The placeholder book — about a quarter of Kalshi's soccer markets sit
-        // at a fixed 0.02/0.81 on every outcome. A 0.79-wide quote is not a
-        // price, and its mid is meaningless.
-        if (bid != null && ask != null && ask - bid > 0.10) continue
-        sides.push({ name: String(m.yes_sub_title ?? m.ticker ?? ''), bid, ask })
-      }
-      if (!sides.length) continue
-
-      return {
-        eventTicker: String(ev.event_ticker ?? ''),
-        title,
-        url: `https://kalshi.com/markets/${series.toLowerCase()}`,
-        sides,
-        bestNetPp: null,
-      }
-    }
-  } catch {
-    return null
-  }
-  return null
-}
+// Kalshi's side of a fixture now comes from the swept index (lib/kalshiSoccer)
+// and is matched market by market in lib/kalshiGame. What used to be here was
+// a hand-kept table of eleven competition regexes and a comparison that did
+// `question.includes(kalshiName.split(' ')[0])` — so it covered a tenth of
+// Kalshi's football and matched sides by substring, which is the bug class
+// this file warns about four lines above.
 
 // ── reading the match off the board ──────────────────────────────────────────
 //

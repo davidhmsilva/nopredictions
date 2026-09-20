@@ -38,6 +38,7 @@ import { volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
 import {
   GRADE_LABEL,
   VENUE_NAME,
+  gradeOf,
   netCost,
   type BestPick,
   type Venue,
@@ -147,10 +148,18 @@ function pickTitle(pick: BestPick, venues: VenueBook[], key: BoardColumn['key'],
     const q = b.quotes[key]
     if (!q || q.ask == null) return `${VENUE_NAME[b.venue]}: not quoted`
     const net = netCost(q.ask, b.venue)
+    // ⚠️ Graded on THIS leg, the same gate `bestFor` uses. Reading the
+    //    fixture's 1X2 grade here instead made the tooltip contradict the
+    //    highlight above it — "no real book" beside "cheaper by 5.4pp".
+    const grade = gradeOf([q])
     return (
       `${VENUE_NAME[b.venue]} ${priceText(q.ask, f)} — ask ${cents(q.ask)}, ` +
       `${cents(net)} with its taker fee` +
-      (b.grade === 'none' ? ' (no real book, so it cannot win this price)' : '')
+      (grade === 'none'
+        ? ' (one-sided or over 10¢ wide, so it cannot win this price)'
+        : grade === 'wide'
+          ? ` (${Math.round((q.spread ?? 0) * 100)}¢ wide)`
+          : '')
     )
   })
   if (pick.venue && pick.savingPp != null) {
@@ -215,7 +224,7 @@ function VenueTags({ r }: { r: BoardRow }) {
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             title={
-              `${VENUE_NAME[v]}: ${GRADE_LABEL[b.grade]}` +
+              `${VENUE_NAME[v]}: ${GRADE_LABEL[b.grade]} on the match-result ladder` +
               (vol[v] != null
                 ? `, ${money_} traded (${v === 'kalshi' ? '$1 contracts' : 'dollars'})`
                 : '') +

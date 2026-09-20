@@ -8,20 +8,19 @@ import {
   fetchBook,
   fetchEvent,
   fetchHistory,
-  fetchKalshi,
   fetchLive,
   fetchSiblings,
   inferBoardState,
   looksLive,
   matchTotalLine,
   pmOver25,
-  takerFeePp,
-  KALSHI_FEE_RATE,
   type GameData,
   type MarketGroup,
   type PricePoint,
 } from '../../lib/gamecenter'
 import { buildLooks, buildPulse } from '../../lib/looks'
+import { findKalshiFixture } from '../../lib/kalshiSoccer'
+import { matchKalshiMarkets } from '../../lib/kalshiGame'
 import { buildPricedLike } from '../../lib/pricedLike'
 
 // Top-of-book is fetched for the most-traded markets only. Every extra token is
@@ -92,14 +91,18 @@ export async function GET(request: Request) {
         ? String((main.sport as Record<string, unknown>).name ?? '')
         : null
 
+    const kickoff = main.startTime ? String(main.startTime) : null
+
     const siblings = await fetchSiblings(slug, title)
     const events = siblings.length ? siblings : [main]
     const groups = buildGroups(events)
 
     // Books and the live state in parallel — they hit unrelated hosts.
-    const [live, kalshi] = await Promise.all([
+    const [live, kalshiFixture] = await Promise.all([
       fetchLive(teams.home, teams.away),
-      fetchKalshi(teams.home, teams.away, competition),
+      // Time-budgeted: a cold Kalshi index is a 34-second sweep and this page
+      // must not wait for it. In practice the board keeps it warm.
+      findKalshiFixture({ home: teams.home, away: teams.away, kickoff }).catch(() => null),
     ])
 
     // Executable prices for the headline markets. A Gamma mid is not a price you
@@ -122,40 +125,21 @@ export async function GET(request: Request) {
 
     const notes: string[] = []
 
-    // Kalshi comparison, net of BOTH venues' taker fees. Presented as a price
-    // comparison and never as an arb: across 57 fixtures quoted on both venues
-    // the net arb count was zero, the gross ceiling being one tick against a
-    // ~3pp fee bar.
-    if (kalshi) {
-      // Polymarket splits 1X2 into three binary markets whose OUTCOMES are just
-      // "Yes"/"No" — the team lives in the question ("Will Arsenal FC win on
-      // ...?"). Matching Kalshi's side names against the outcome names finds
-      // nothing; the question is what has to be read.
-      let best: number | null = null
-      for (const g of groups.filter((x) => x.group === 'Match result')) {
-        const yes = g.outcomes.find((o) => /^yes$/i.test(o.name))
-        const pmAsk = yes?.book?.ask ?? yes?.price
-        if (pmAsk == null) continue
-
-        const isDraw = /draw|tie/i.test(g.question)
-        const k = kalshi.sides.find((s) => {
-          if (isDraw) return /tie|draw/i.test(s.name)
-          const key = s.name.toLowerCase().split(' ')[0]
-          return key.length > 2 && g.question.toLowerCase().includes(key)
-        })
-        if (!k?.ask) continue
-
-        const gross = 100 * Math.abs(pmAsk - k.ask)
-        const net = gross - takerFeePp(pmAsk) - takerFeePp(k.ask, KALSHI_FEE_RATE)
-        if (best == null || net > best) best = net
-      }
-      kalshi.bestNetPp = best
-      if (best != null && best < 0) {
-        notes.push(
-          `Best cross-venue difference is ${best.toFixed(2)}pp AFTER both taker fees — ` +
-            `i.e. negative. Consistent with the 57-fixture study that found zero net arbs.`
-        )
-      }
+    // Kalshi's prices for the SAME markets, matched one at a time. Presented
+    // as a price comparison and never as an arb: across 57 fixtures quoted on
+    // both venues the net arb count was zero, the gross ceiling being one tick
+    // against a ~3pp fee bar.
+    //
+    // ⚠️ The books are fetched BEFORE this runs, because the comparison is on
+    //    what you can actually pay. A Gamma mid is not a price.
+    const kalshi = kalshiFixture
+      ? matchKalshiMarkets(groups, teams.home, teams.away, kalshiFixture)
+      : null
+    if (kalshi && kalshi.matched === 0) {
+      notes.push(
+        `Kalshi lists this fixture (${kalshi.eventTicker}) but none of its markets ` +
+          `line up with one of Polymarket's, so no price is shown against it.`
+      )
     }
 
     if (!live) {
@@ -167,8 +151,6 @@ export async function GET(request: Request) {
     } else if (!live.stats) {
       notes.push('api-football has no in-game statistics coverage for this competition.')
     }
-
-    const kickoff = main.startTime ? String(main.startTime) : null
 
     // 24h of price history for the busiest markets, plus the 2.5 total whatever
     // its volume — that one is not decoration, it is what buckets the fixture.

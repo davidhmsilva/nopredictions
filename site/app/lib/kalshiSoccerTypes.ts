@@ -24,9 +24,13 @@ export interface KalshiFixture {
    *  shape ever changes; this is the bug class that bit the NBA scanner. */
   home: string
   away: string
-  /** `occurrence_datetime` off the markets: an exact kick-off, which is what
-   *  makes the join to Polymarket safe without a name-only guess. */
-  kickoff: string | null
+  /** ⚠️ NOT a kick-off. `occurrence_datetime` is when Kalshi expects to
+   *  settle: measured at kick-off + 3h on 55 of 67 fixtures and +2h to +4.5h
+   *  on the rest. Kept because it bounds the day, never used as a start. */
+  settlesAt: string | null
+  /** The Eastern date off the event ticker — `KXBRASILEIROGAME-26SEP20VITCRU`
+   *  → `20260920`. This is what the cross-venue join runs on. */
+  etDate: string | null
   url: string
   legs: Record<KalshiSide, KalshiLeg | null>
   /** The match-goals ladder, keyed by line ("2.5"), each the OVER leg — the

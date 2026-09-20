@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppShell } from '../../components/AppShell'
 import type { GameData, Headline, MarketGroup, PricePoint } from '../../lib/gamecenter'
+import { outcomeKey, pickFor, type KalshiGame, type KalshiQuoteRef } from '../../lib/kalshiGame'
+import { netCost, type BestPick, type Quote } from '../../lib/venues'
 import type { MatchContext } from '../../lib/matchcontext'
 import { tradeable, type Look, type Pulse } from '../../lib/looks'
 import { useSession } from '../../lib/useSession'
@@ -482,16 +484,33 @@ function NO_READ_REASON(data: GameData): string {
 interface BoardRow {
   question: string
   outcome: string
-  ask: number
-  spreadPp: number
+  /** Polymarket's executable quote for this outcome. */
+  pm: Quote
   depthUsd: number | null
+  /** Kalshi's price for the SAME bet, where it lists one. */
+  k: KalshiQuoteRef | null
+  /** Which venue is cheaper, net of each one's taker fee. Null when only one
+   *  of them quotes it — there is nothing to be better than. */
+  pick: BestPick | null
 }
 
-function Board({ groups }: { groups: MarketGroup[] }) {
+/** The board, both exchanges.
+ *
+ *  🔑 Polymarket on the left, Kalshi on the right, and the cheaper of the two
+ *     marked — AFTER each venue's taker fee, because Kalshi's is 40% higher
+ *     and comparing the printed asks hands it wins it does not have.
+ *
+ *  ⚠️ An Under is bought as the NO leg of Kalshi's Over ticker. That is a real
+ *     price, not a derived one — on a binary book, buying NO at 1 − yes_bid IS
+ *     selling YES at the bid — but its DEPTH is the size resting on the yes
+ *     bid, which the feed does not carry, so it is left unknown.
+ */
+function Board({ groups, kalshi }: { groups: MarketGroup[]; kalshi: KalshiGame | null }) {
   const [open, setOpen] = useState(false)
+  const [bothOnly, setBothOnly] = useState(false)
   const oddsFmt = useOddsFormat()
 
-  const { rows, quoted } = useMemo(() => {
+  const { rows, quoted, matched, cheaper } = useMemo(() => {
     const rows: BoardRow[] = []
     let quoted = 0
     for (const g of groups) {
@@ -500,26 +519,63 @@ function Board({ groups }: { groups: MarketGroup[] }) {
         const b = o.book
         if (b?.ask == null || b?.bid == null) continue
         if (b.ask <= SETTLED_BAND || b.ask >= 1 - SETTLED_BAND) continue
+        const pm: Quote = {
+          bid: b.bid,
+          ask: b.ask,
+          spread: b.ask - b.bid,
+          askDepthUsd: b.askDepthUsd,
+        }
+        const k = kalshi?.byOutcome[outcomeKey(g.question, o.name)] ?? null
         rows.push({
           question: g.question,
           outcome: o.name,
-          ask: b.ask,
-          spreadPp: (b.ask - b.bid) * 100,
+          pm,
           depthUsd: b.askDepthUsd,
+          k,
+          pick: pickFor(pm, k ?? undefined),
         })
       }
     }
-    rows.sort((a, b) => a.spreadPp - b.spreadPp || (b.depthUsd ?? 0) - (a.depthUsd ?? 0))
-    return { rows, quoted }
-  }, [groups])
+    // Tightest book first: the spread is the tell, not the depth.
+    rows.sort(
+      (a, b) => (a.pm.spread ?? 9) - (b.pm.spread ?? 9) || (b.depthUsd ?? 0) - (a.depthUsd ?? 0)
+    )
+    const matched = rows.filter((r) => r.k != null).length
+    const cheaper = rows.filter((r) => r.pick?.venue === 'kalshi').length
+    return { rows, quoted, matched, cheaper }
+  }, [groups, kalshi])
+
+  const shown = bothOnly ? rows.filter((r) => r.k != null) : rows
 
   return (
     <section className="gc-section">
-      <h2 className="gc-h2">The board</h2>
+      <h2 className="gc-h2">The board, on both exchanges</h2>
       <p className="gc-quiet">
-        {rows.length} of {quoted} quoted outcomes have a real order book. The rest are Gamma
-        mids — a number, not a price you can pay.
+        {rows.length} of {quoted} quoted Polymarket outcomes have a real order book — the rest are
+        Gamma mids, a number rather than a price you can pay.{' '}
+        {kalshi ? (
+          <>
+            Kalshi lists this fixture and quotes{' '}
+            <b className="gc-mono">{matched}</b> of the same bets;{' '}
+            {cheaper > 0 ? (
+              <>
+                it is the cheaper venue on <b className="gc-mono">{cheaper}</b> of them, after both
+                taker fees.
+              </>
+            ) : (
+              <>Polymarket is at least as cheap on every one of them, after both taker fees.</>
+            )}
+          </>
+        ) : (
+          <>Kalshi does not list this fixture, so there is nothing to compare against.</>
+        )}
       </p>
+
+      {matched > 0 && (
+        <button className="gc-more" onClick={() => setBothOnly((v) => !v)}>
+          {bothOnly ? 'show every market' : `show only the ${matched} both exchanges quote`}
+        </button>
+      )}
 
       <div className="gcx-scroll">
         <table className="gc-board">
@@ -527,18 +583,32 @@ function Board({ groups }: { groups: MarketGroup[] }) {
             <tr>
               <th>Market</th>
               <th>Side</th>
-              <th className="gc-r">Ask</th>
+              <th className="gc-r">Polymarket</th>
+              <th className="gc-r">Kalshi</th>
               <th className="gc-r">Spread</th>
               <th className="gc-r">Depth</th>
             </tr>
           </thead>
           <tbody>
-            {(open ? rows : rows.slice(0, 8)).map((r, i) => (
+            {(open ? shown : shown.slice(0, 8)).map((r, i) => (
               <tr key={i}>
                 <td className="gc-board-q">{r.question.split(':').pop()?.trim()}</td>
                 <td>{r.outcome}</td>
-                <td className="gc-r gc-mono">{odds(r.ask, oddsFmt)}</td>
-                <td className="gc-r gc-mono">{r.spreadPp.toFixed(1)}pp</td>
+                <td
+                  className={`gc-r gc-mono${r.pick?.venue === 'polymarket' ? ' is-best' : ''}`}
+                  title={venueTitle('polymarket', r)}
+                >
+                  {odds(r.pm.ask, oddsFmt)}
+                </td>
+                <td
+                  className={`gc-r gc-mono${r.pick?.venue === 'kalshi' ? ' is-best' : ''}${
+                    r.k ? '' : ' is-empty'
+                  }`}
+                  title={venueTitle('kalshi', r)}
+                >
+                  {r.k ? odds(r.k.quote.ask, oddsFmt) : '—'}
+                </td>
+                <td className="gc-r gc-mono">{((r.pm.spread ?? 0) * 100).toFixed(1)}pp</td>
                 <td className="gc-r gc-mono">{money(r.depthUsd)}</td>
               </tr>
             ))}
@@ -546,14 +616,48 @@ function Board({ groups }: { groups: MarketGroup[] }) {
         </table>
       </div>
 
-      {rows.length > 8 && (
+      {shown.length > 8 && (
         <button className="gc-more" onClick={() => setOpen((v) => !v)}>
-          {open ? 'show fewer' : `show all ${rows.length}`}
+          {open ? 'show fewer' : `show all ${shown.length}`}
         </button>
       )}
+
+      <p className="gc-quiet gc-board-note">
+        Prices are each exchange&apos;s ask — what buying that side costs now — and the highlight
+        marks the cheaper of the two <b>after each venue&apos;s taker fee</b>: Polymarket
+        0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract. Spread and depth are
+        Polymarket&apos;s, from its own book. This is a price comparison and never an arb: across
+        57 fixtures quoted on both venues the net arb count was zero, the gross ceiling being one
+        tick against a ~3pp fee bar.
+      </p>
     </section>
   )
 }
+
+function venueTitle(venue: 'polymarket' | 'kalshi', r: BoardRow): string {
+  if (venue === 'kalshi') {
+    if (!r.k) return 'Kalshi does not quote this bet.'
+    const lines = [
+      `Kalshi: ${r.k.label}${r.k.side === 'no' ? ' — the NO leg of that ticker' : ''}`,
+      `ask ${cents(r.k.quote.ask)}, bid ${cents(r.k.quote.bid)}`,
+      `${cents(netCost(r.k.quote.ask ?? 0, 'kalshi'))} with its taker fee`,
+    ]
+    if (r.pick?.venue === 'kalshi' && r.pick.savingPp != null) {
+      lines.push(`Cheaper here by ${r.pick.savingPp.toFixed(1)}pp after both fees.`)
+    }
+    return lines.join('\n')
+  }
+  const lines = [
+    `Polymarket: ask ${cents(r.pm.ask)}, bid ${cents(r.pm.bid)}`,
+    `${cents(netCost(r.pm.ask ?? 0, 'polymarket'))} with its taker fee`,
+  ]
+  if (r.pick?.venue === 'polymarket' && r.pick.savingPp != null) {
+    lines.push(`Cheaper here by ${r.pick.savingPp.toFixed(1)}pp after both fees.`)
+  }
+  return lines.join('\n')
+}
+
+const cents = (x: number | null | undefined) => (x == null ? '—' : `${Math.round(x * 100)}¢`)
 
 // ── the small print, behind a click ──────────────────────────────────────────
 
@@ -780,7 +884,7 @@ export default function GamePage({ params }: { params: { slug: string } }) {
               <>
                 <PulseList pulse={data.pulse ?? []} />
                 <Looks data={data} />
-                <Board groups={data.groups} />
+                <Board groups={data.groups} kalshi={data.kalshi} />
               </>
             )}
 

@@ -27,6 +27,7 @@ import {
   fetchSoccerEvents,
   rankFixtures,
   refreshBook,
+  refreshVenueQuotes,
   type ScoutFixture,
 } from './scout'
 import { fetchEspnLive } from './espn'
@@ -48,6 +49,9 @@ export interface Board {
   fixtures: ScoutFixture[]
   generatedAt: string
   refreshed: number
+  /** How many fixtures carry a LIVE book for every price the board compares,
+   *  rather than Gamma's listing quote. */
+  priced: number
 }
 
 let cached: Board | null = null
@@ -78,7 +82,17 @@ async function sweep(): Promise<Board> {
     fetchSoccerEvents(),
     fetchEspnLive().catch(() => []),
   ])
-  const { fixtures, marketsBySlug } = buildFixtures(events, espn)
+  const { fixtures, marketsBySlug, legsBySlug } = buildFixtures(events, espn)
+
+  // 🔑 Every price the board COMPARES is read from the book, not from Gamma's
+  //    listing quote. Half a cent decides which exchange is called cheaper,
+  //    and Gamma's ask differs from the CLOB by over 1pp on 15.3% of football
+  //    markets (lib/clob carries the measurement). It costs about two requests
+  //    for the whole matchday, because `POST /books` takes 400 tokens at once.
+  const priced = await refreshVenueQuotes(fixtures, legsBySlug).catch(() => 0)
+
+  // Ranked after pricing: a live book can move a fixture's grade, not its
+  // volume, but the two run in the same pass and the order must be final.
   const ranked = rankFixtures(fixtures)
 
   // Live boards first — a stale quote costs most where the price is moving.
@@ -95,7 +109,12 @@ async function sweep(): Promise<Board> {
     if (r.status === 'fulfilled' && r.value) head[i].book = r.value
   })
 
-  return { fixtures: ranked, generatedAt: new Date().toISOString(), refreshed: head.length }
+  return {
+    fixtures: ranked,
+    generatedAt: new Date().toISOString(),
+    refreshed: head.length,
+    priced,
+  }
 }
 
 export async function getBoard(): Promise<Board> {

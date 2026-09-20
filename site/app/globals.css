@@ -2674,6 +2674,11 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-big-odd.is-best b { color: var(--green); }
 .sc-big-odd .sc-best-v { font-size: 8.5px; }
 
+/* ── the Game Center board, on both exchanges ─────────────────────────────── */
+.gc-board td.is-best { color: var(--green); font-weight: 650; background: rgba(34,197,94,.07); }
+.gc-board td.is-empty { color: var(--grey2); }
+.gc-board-note { margin-top: 12px; max-width: 80ch; }
+
 
 .sc-go {
   display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;

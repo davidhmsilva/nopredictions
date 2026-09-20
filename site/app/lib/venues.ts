@@ -225,16 +225,34 @@ export interface VenueBook {
   /** The ask/bid this venue is showing for each outcome. Missing means the
    *  venue does not quote that outcome, never that it is worthless. */
   quotes: Partial<Record<OutcomeKey, Quote>>
+  /** Where those prices came from.
+   *
+   *  ⚠️ `gamma` is Polymarket's LISTING quote, which is not the book: measured
+   *     across 810 football markets, it differs from the CLOB by over 1pp on
+   *     15.3% of them. Half a cent decides which venue this site calls
+   *     cheaper, so a `gamma` quote is a fallback and the page says so. */
+  source: 'clob' | 'gamma' | 'kalshi'
 }
 
-/** Where to buy each outcome, across every venue that lists the fixture. */
+/** Where to buy each outcome, across every venue that lists the fixture.
+ *
+ *  🔑 Each price is gated on ITS OWN book, not on the fixture's. `VenueBook.
+ *     grade` reads the 1X2 ladder, which is what the row shows as "clean" or
+ *     "wide" — but a fixture with a 2¢ 1X2 can carry a 34¢ Over 2.5, and
+ *     letting the ladder vouch for it is how Santa Cruz v Floresta produced a
+ *     27pp "saving" on 2026-09-20: Kalshi bid 0.35 / ask 0.69 against
+ *     Polymarket's 0.40, on a market with no second side to it.
+ *
+ *     That is the 100-game review's own finding applied where it belongs —
+ *     the spread is the tell, and the spread that matters is the one on the
+ *     leg you are buying. */
 export function bestFor(books: VenueBook[]): Record<OutcomeKey, BestPick> {
   const out = { home: NO_PICK, draw: NO_PICK, away: NO_PICK, over25: NO_PICK }
   for (const key of OUTCOMES) {
     const quotes: VenueQuote[] = []
     for (const b of books) {
       const q = b.quotes[key]
-      if (q) quotes.push({ venue: b.venue, quote: q, grade: b.grade })
+      if (q) quotes.push({ venue: b.venue, quote: q, grade: gradeOf([q]) })
     }
     out[key] = bestOf(quotes)
   }

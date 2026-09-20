@@ -340,6 +340,7 @@ function kalshiLine(src: Source, ev: KEvent, home: KMarket, away: KMarket): Venu
     volume: volume > 0 ? volume : null,
     grade: gradeOf([quotes.home, quotes.away]),
     quotes,
+    source: 'kalshi',
   }
 }
 
@@ -595,6 +596,8 @@ async function build(sport: SportKey): Promise<SportBoardData> {
         volume: s.pm.volume,
         grade: gradeOf([quotes.home, quotes.away]),
         quotes,
+        // The book itself where it answered, Gamma's listing quote otherwise.
+        source: books.has(s.pm.tokens.home) || books.has(s.pm.tokens.away) ? 'clob' : 'gamma',
       }
     }
     // Polymarket first, the way every board on the site orders them.
