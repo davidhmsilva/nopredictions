@@ -67,9 +67,9 @@ export function SportBoard({ sport }: { sport: SportKey }) {
       <h1 className="sc-h1">{meta.label}: the better price, on two exchanges</h1>
       <p className="sc-h1-sub">
         Every {meta.label} game either exchange lists in the next {meta.days} days, placed on
-        ESPN&apos;s schedule. Both moneylines at the ask, the book behind each, and the cheaper
-        venue marked — after each one&apos;s taker fee, not before it. No tips: the numbers, and
-        you decide.
+        ESPN&apos;s schedule, ranked by the money through both. Both moneylines at the ask, the
+        book behind each, and the cheaper venue marked — after each one&apos;s taker fee. No tips:
+        the numbers, and you decide.
       </p>
     </div>
   )
@@ -78,9 +78,10 @@ export function SportBoard({ sport }: { sport: SportKey }) {
     <p className="sp-foot">
       Prices are each exchange&apos;s <b>ask</b> — what buying that side costs right now — and the
       board marks the cheaper of the two <b>after each venue&apos;s taker fee</b>: Polymarket
-      0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract, 40% more. A venue can
-      only be marked cheaper where its book is real; Kalshi&apos;s placeholder books land outside
-      that by construction. Placed on ESPN&apos;s schedule: Kalshi{' '}
+      0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract, 40% more. That does
+      not change who wins a price by a cent or more, but it roughly halves what the win is worth.
+      A venue can only be marked cheaper where its book is real; Kalshi&apos;s placeholder books
+      land outside that by construction. Placed on ESPN&apos;s schedule: Kalshi{' '}
       <b className="np-num">{c.kalshiPlaced}</b> of <b className="np-num">{c.kalshi}</b> games,
       Polymarket <b className="np-num">{c.polymarketPlaced}</b> of{' '}
       <b className="np-num">{c.polymarket}</b>. A market we cannot put on a game with both teams

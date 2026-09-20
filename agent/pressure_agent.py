@@ -59,7 +59,8 @@ import math
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 import psycopg2
 import psycopg2.extras
@@ -83,6 +84,7 @@ from late_goals_observer import (                                   # noqa: E402
 )
 import af_budget
 import db_txn
+import venues                                                     # noqa: E402
 from live_tracker import (                                          # noqa: E402
     DAILY_EXHAUSTED,
     PRESSURE_WINDOW_MIN,
@@ -105,7 +107,7 @@ STRATEGY_NAME = "Live Pressure Overs"
 # an ESTIMATED xG from its shots (live_tracker.estimate_xg) instead of the xG
 # term being dropped and the rest renormalised. api-football has sent no xG
 # since 09-02, so that is every row. Never pool with v4.
-OBS_VERSION = 5
+OBS_VERSION = 6
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300         # PM universe re-pull
@@ -605,6 +607,24 @@ def observe(signals: dict[int, PressureSignals], table: dict,
                    bid_depth_usd=book["bid_depth_usd"],
                    ask_depth_usd=book["ask_depth_usd"])
 
+        # obs_version 6: the same bet, at whichever exchange is cheaper.
+        #
+        # Kalshi lists this exact ladder (KX*TOTAL, match goals, regulation
+        # time -- the same settlement rule, verified 2026-07-22) on most of the
+        # competitions this arm trades. Reading it costs nothing here: the
+        # index is swept on a background thread and this is a dictionary
+        # lookup.
+        #
+        # ⚠️ It changes the PRICE, not the rule. Every gate above and below is
+        #    untouched, so the same fixtures enter -- they just enter cheaper
+        #    where Kalshi is cheaper. That is why this is an execution change
+        #    with no new fair value to fit.
+        exec_ = _best_venue(sig, row, book)
+        row.update(venue=exec_.venue, alt_venue_ask=exec_.alt_ask,
+                   venue_saving_pp=exec_.saving_pp)
+        entry_ask = exec_.ask
+        entry_bid, entry_depth = exec_.bid, exec_.depth_usd
+
         if row["fair_base"] is None:
             row["skip_reason"] = f"state off the fair-value grid ({sig.minute}', {goals} goals)"
             rows.append(row)
@@ -612,11 +632,13 @@ def observe(signals: dict[int, PressureSignals], table: dict,
 
         # The edges need a price, so they are the only part that waits for the
         # book. fair_base / fair_pressure were set above.
-        fee = taker_fee_pp(book["best_ask"])
+        # The fee is the CHOSEN venue's: Kalshi's is 40% higher, so pricing a
+        # Kalshi fill at Polymarket's rate would overstate every edge on it.
+        fee = 100.0 * venues.taker_fee(entry_ask, exec_.venue)
         row.update(
             fee_pp=fee,
-            edge_base_pp=100.0 * (row["fair_base"] - book["best_ask"]) - fee,
-            edge_pressure_pp=100.0 * (row["fair_pressure"] - book["best_ask"]) - fee,
+            edge_base_pp=100.0 * (row["fair_base"] - entry_ask) - fee,
+            edge_pressure_pp=100.0 * (row["fair_pressure"] - entry_ask) - fee,
         )
 
         row["would_enter"] = bool(
@@ -632,22 +654,73 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             and row["has_window"]
             # PM asks above 0.85 resolve at 0.66 (n=382). Nothing up there is
             # priced to be bought.
-            and book["best_ask"] <= MAX_ASK
+            and entry_ask <= MAX_ASK
             # v4: the book has to be a book. A missing bid or a wide spread
             # means the ask is one parked order, not a price — those quote 0.90
             # and resolve at 0.53.
-            and book["best_bid"] is not None
-            and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
-            and (book["ask_depth_usd"] or 0) >= MIN_DEPTH_USD
+            #
+            # v6: read off the venue we would actually buy at, not always
+            # Polymarket's. A Kalshi fill gated on Polymarket's spread would
+            # be a fill nobody checked.
+            and entry_bid is not None
+            and (entry_ask - entry_bid) <= MAX_SPREAD
+            and (entry_depth or 0) >= MIN_DEPTH_USD
             # A score we cannot pin makes the fair value meaningless: it is a
             # lookup keyed on the score.
             and row["score_agrees"] is not False
         )
         if not row["would_enter"] and not row["skip_reason"]:
-            row["skip_reason"] = _why_not(row, book, sig)
+            row["skip_reason"] = _why_not(
+                row, {"best_ask": entry_ask, "best_bid": entry_bid,
+                      "ask_depth_usd": entry_depth}, sig)
         rows.append(row)
 
     return rows
+
+
+def _best_venue(sig: PressureSignals, row: dict, book: dict):
+    """Where to buy this over line, and what the alternative was.
+
+    Kalshi's side is a lookup into an index refreshed on a BACKGROUND thread,
+    so a cold process — or a Kalshi outage — costs nothing but the comparison.
+    The trade books on Polymarket exactly as it did before, which is the right
+    failure: a missing second quote is not a wrong one.
+    """
+    pm = venues.Quote(bid=book["best_bid"], ask=book["best_ask"],
+                      ask_depth_usd=book["ask_depth_usd"])
+    kal = None
+    try:
+        idx = venues.shared_index(background=True)
+        # ⚠️ The signal carries no kick-off, so it is reconstructed from the
+        #    clock: a match at minute m started about m minutes ago. The join
+        #    only needs the EASTERN DATE, and m is at worst a couple of hours
+        #    out (half time, stoppage), so the date is right except for a
+        #    fixture straddling ET midnight — where the lookup simply misses
+        #    and the trade books on Polymarket.
+        kickoff = datetime.now(timezone.utc) - timedelta(minutes=sig.minute or 0)
+        fx = idx.fixture(sig.home, sig.away, kickoff)
+        if fx is not None and row.get("target_line") is not None:
+            kal = fx.over(float(row["target_line"]))
+    except Exception as e:          # noqa: BLE001 - never take the poll down
+        log.debug("kalshi lookup failed for %s v %s: %s", sig.home, sig.away, e)
+
+    chosen = venues.choose(pm, kal)
+    if chosen is None or chosen.venue == venues.POLYMARKET:
+        return _Exec(venues.POLYMARKET, book["best_ask"], book["best_bid"],
+                     book["ask_depth_usd"],
+                     chosen.alt_ask if chosen else None,
+                     chosen.saving_pp if chosen else None)
+    return _Exec(venues.KALSHI, kal.ask, kal.bid, kal.ask_depth_usd,
+                 chosen.alt_ask, chosen.saving_pp)
+
+
+class _Exec(NamedTuple):
+    venue: str
+    ask: float
+    bid: float | None
+    depth_usd: float | None
+    alt_ask: float | None
+    saving_pp: float | None
 
 
 def _why_not(row: dict, book: dict, sig: PressureSignals) -> str:
@@ -725,6 +798,10 @@ def _base_row(sig: PressureSignals, window_min: int) -> dict:
         "edge_base_pp": None, "edge_pressure_pp": None,
         "would_enter": False, "entered": False,
         "paper_trade_id": None, "skip_reason": None,
+        # Where the entry was priced, and what the other exchange wanted for
+        # the same bet. Recorded on every row so the Polymarket-only
+        # counterfactual stays recoverable per entry (db/054, H-BEST-VENUE).
+        "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
     }
 
 
@@ -747,6 +824,7 @@ _COLS = [
     "ask_depth_usd", "fair_base", "fair_pressure", "fair_n", "fee_pp",
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
     "paper_trade_id", "skip_reason",
+    "venue", "alt_venue_ask", "venue_saving_pp",
 ]
 
 
@@ -888,13 +966,17 @@ def _final_goals_api(fixture_ids: list[int]) -> dict[int, int]:
     polls at 83-85' and back to 0-1 after — and a flap can only ever push the
     max UP, so every tape error lands as a fabricated WIN on an over. That
     booked pt#5827 (Over 1.5, 4.35) as won on a match that finished 0-1.
+
+    Negative ids are ESPN's namespace (see espn_stats) and are never sent, and
+    the first refusal ends the run: every later batch would be refused too.
     """
     key = os.getenv("FOOTBALL_API_KEY", "")
-    if not key or not fixture_ids:
+    ids = [f for f in fixture_ids if f > 0]
+    if not key or not ids:
         return {}
     out: dict[int, int] = {}
-    for i in range(0, len(fixture_ids), 20):
-        batch = fixture_ids[i:i + 20]
+    for i in range(0, len(ids), 20):
+        batch = ids[i:i + 20]
         try:
             af_budget.process_counter().record("ids")
             resp = requests.get(
@@ -907,7 +989,11 @@ def _final_goals_api(fixture_ids: list[int]) -> dict[int, int]:
                 continue
             body = resp.json()
             if body.get("errors"):
-                continue                     # quota/rate — fall back to the tape
+                # Quota or rate. Asking again is how a refused key keeps being
+                # spent: on 2026-09-14, once the day's allowance was gone, it
+                # answered every `ids=` batch with "Free plans do not have
+                # access to the Ids parameter".
+                break
             for f in body.get("response", []):
                 if (f.get("fixture", {}).get("status", {}).get("short")
                         not in ("FT", "AET", "PEN")):
@@ -941,6 +1027,8 @@ def settle(conn) -> int:
         pending = cur.fetchall()
 
     if not pending:
+        # Quiet runs are when the early rows of finished matches are waiting.
+        _log_completion(complete_finals(conn))
         return 0
 
     # Later observations of the same fixture, and the last one we ever saw.
@@ -1052,7 +1140,14 @@ def settle(conn) -> int:
                 # read at entry. If the tape was wrong at entry the line is
                 # wrong too, and comparing the final total against the line is
                 # the only reading that matches what the token actually pays.
-                if final_goals is not None and r["paper_trade_id"]:
+                #
+                # And only on the API's final. A tape final is what a refused
+                # key leaves behind (every settle on the evening of 2026-09-14),
+                # and a tape flap can only ever fabricate a WIN on an over
+                # (pt#5827). Such a trade waits for complete_finals(), which
+                # pays it from the API, or from the tape once the API has had
+                # FINAL_API_MAX_AGE_H to answer.
+                if final_src == "api" and r["paper_trade_id"]:
                     won = (final_goals > float(r["target_line"])
                            if r["target_line"] is not None else goal_before_ft)
                     cur.execute(
@@ -1066,7 +1161,293 @@ def settle(conn) -> int:
                         ("won" if won else "lost", won, r["paper_trade_id"]),
                     )
             settled += 1
+    # Rows settled on earlier runs, before the whistle, get their final now.
+    # The fixtures this run already put to the API are not asked twice.
+    _log_completion(complete_finals(conn, asked={r["fixture_id"] for r in pending}))
     return settled
+
+
+# How long after a fixture was last seen the API is still asked for its final.
+# api-football has the full-time score minutes after the whistle, so a fixture
+# it has not finished inside a day was postponed, abandoned or never covered.
+# Asking about it on every run is how a question nobody can answer becomes a
+# quota problem (see fav_pressure_agent._halftime_scores for the 143k-call
+# day). It is also how long a trade waits for the API before a tape final may
+# pay it.
+FINAL_API_MAX_AGE_H = 24
+
+# Fixtures per UPDATE when one statement completes many at once.
+_FINAL_CHUNK = 500
+
+
+def _fixture_final(api_total, stored_api, last_minute, tape_max):
+    """(final_goals, source) for one fixture, or (None, None) if not known yet.
+
+    The API's answer from this run comes first. Then an API final already
+    stored on another row of the same fixture: the final is a fact about the
+    match, not about the minute a row happened to be observed. Only then our
+    own tape, and only once it ran past MAX_MINUTE, the rule settle() applies.
+    Two stored API finals that disagree resolve nothing; the API is asked
+    again instead of one of them being picked.
+    """
+    if api_total is not None:
+        return api_total, "api"
+    known = set(stored_api or [])
+    if len(known) == 1:
+        return known.pop(), "api"
+    if known:
+        return None, None
+    if last_minute is not None and last_minute >= MAX_MINUTE and tape_max is not None:
+        return tape_max, "poll"
+    return None, None
+
+
+def complete_finals(conn, *, asked=frozenset(), max_age_h=FINAL_API_MAX_AGE_H,
+                    use_api=True, allow_tape=True, api_tag="api") -> dict:
+    """Give the full-time horizon to rows that were settled before it existed.
+
+    settle() writes a row as soon as EITHER horizon is known, and goal_next_10
+    is known ten minutes after the row, long before the whistle for anything
+    observed before ~70'. Those rows went out with final_goals NULL, and
+    because `pending` filters on settled_at nothing ever came back for them:
+    546k rows by 2026-09-14, 76% of everything observed before 70'. Those are
+    the next-goal rows the factory could neither label nor settle, and 17 of
+    its trades were stuck on them. A tape final (`poll`) is provisional in the
+    same way. The tape stops when the Mac sleeps and flaps upward on a goal
+    that does not stand, so an API final replaces it whenever one exists.
+
+    `asked` holds the fixtures this run's settle() already put to the API, so
+    none is asked twice. `max_age_h=None` makes every row a candidate (the
+    one-off backfill); `use_api=False` and `allow_tape=False` restrict a run to
+    API finals the database already holds.
+    """
+    age = ("AND observed_at > now() - make_interval(hours => %(h)s)"
+           if max_age_h is not None else "")
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""SELECT DISTINCT fixture_id
+                  FROM pressure_observations
+                 WHERE settled_at IS NOT NULL
+                   AND (final_goals IS NULL OR final_goals_source = 'poll')
+                   {age}""",
+            {"h": max_age_h} if max_age_h is not None else None,
+        )
+        fids = {r[0] for r in cur.fetchall()}
+        # A fixture whose trade is still waiting is asked about however old.
+        cur.execute(
+            """SELECT DISTINCT o.fixture_id
+                 FROM pressure_observations o
+                 JOIN paper_trades pt ON pt.id = o.paper_trade_id
+                WHERE o.entered AND o.settled_at IS NOT NULL AND pt.result IS NULL"""
+        )
+        fids |= {r[0] for r in cur.fetchall()}
+    done = {"fixtures": 0, "rows": 0, "api_rows": 0, "poll_rows": 0,
+            "trades": 0, "asked": 0}
+    if not fids:
+        return done
+
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """SELECT fixture_id,
+                      array_agg(DISTINCT final_goals) FILTER (
+                          WHERE final_goals_source IN ('api', 'api_repair')) AS stored_api,
+                      max(minute) AS last_minute,
+                      max(goals_total) AS tape_max,
+                      max(observed_at) < now() - make_interval(hours => %s) AS aged_out
+                 FROM pressure_observations
+                WHERE fixture_id = ANY(%s)
+                GROUP BY fixture_id""",
+            (FINAL_API_MAX_AGE_H, sorted(fids)),
+        )
+        facts = {r["fixture_id"]: r for r in cur.fetchall()}
+        cur.execute(
+            """SELECT o.id, o.fixture_id, o.minute, o.goals_total, o.target_line,
+                      o.paper_trade_id
+                 FROM pressure_observations o
+                 JOIN paper_trades pt ON pt.id = o.paper_trade_id
+                WHERE o.entered AND o.settled_at IS NOT NULL AND pt.result IS NULL
+                  AND o.fixture_id = ANY(%s)""",
+            (sorted(fids),),
+        )
+        waiting = cur.fetchall()
+
+    # Every network call happens here, before a single write (see db_txn).
+    need = sorted(f for f, x in facts.items()
+                  if f not in asked and len(set(x["stored_api"] or [])) != 1)
+    api = _final_goals_api(need) if (use_api and need) else {}
+    done["asked"] = sum(1 for f in need if f > 0) if use_api else 0
+    finals = {}
+    for f, x in facts.items():
+        final, src = _fixture_final(api.get(f), x["stored_api"],
+                                    x["last_minute"] if allow_tape else None,
+                                    x["tape_max"])
+        if final is not None:
+            finals[f] = (final, src)
+    goal_minutes = {}
+    for t in waiting:
+        final, src = finals.get(t["fixture_id"], (None, None))
+        if src == "api" and final > t["goals_total"]:
+            goal_minutes[t["id"]] = _goal_minute_api(t["fixture_id"], t["minute"])
+
+    api_vals = [(f, v, api_tag) for f, (v, s) in finals.items() if s == "api"]
+    tape_vals = [(f, v) for f, (v, s) in finals.items() if s == "poll"]
+    with conn.cursor() as cur:
+        # One statement per chunk of fixtures. A single UPDATE is atomic on its
+        # own, and a backfill completes ten thousand fixtures.
+        for i in range(0, len(api_vals), _FINAL_CHUNK):
+            chunk = api_vals[i:i + _FINAL_CHUNK]
+            psycopg2.extras.execute_values(
+                cur,
+                """UPDATE pressure_observations o
+                      SET final_goals = v.f,
+                          goal_before_ft = (v.f > o.goals_total),
+                          final_goals_source = v.tag,
+                          goals_at_plus_10 = CASE WHEN o.goals_at_plus_10 > v.f
+                                                  THEN NULL ELSE o.goals_at_plus_10 END,
+                          goal_next_10 = CASE WHEN o.goals_at_plus_10 > v.f
+                                              THEN NULL ELSE o.goal_next_10 END
+                     FROM (VALUES %s) AS v(fid, f, tag)
+                    WHERE o.fixture_id = v.fid
+                      AND o.settled_at IS NOT NULL
+                      AND (o.final_goals IS NULL OR o.final_goals_source = 'poll')""",
+                chunk, page_size=len(chunk),
+            )
+            done["api_rows"] += cur.rowcount
+        # A tape final only fills a hole; it never replaces anything.
+        for i in range(0, len(tape_vals), _FINAL_CHUNK):
+            chunk = tape_vals[i:i + _FINAL_CHUNK]
+            psycopg2.extras.execute_values(
+                cur,
+                """UPDATE pressure_observations o
+                      SET final_goals = v.f,
+                          goal_before_ft = (v.f > o.goals_total),
+                          final_goals_source = 'poll'
+                     FROM (VALUES %s) AS v(fid, f)
+                    WHERE o.fixture_id = v.fid
+                      AND o.settled_at IS NOT NULL
+                      AND o.final_goals IS NULL""",
+                chunk, page_size=len(chunk),
+            )
+            done["poll_rows"] += cur.rowcount
+
+        # Trades, on the same rule settle() uses: the line the token was bought
+        # on against the final, and a tape final only once the API had its day.
+        for t in waiting:
+            final, src = finals.get(t["fixture_id"], (None, None))
+            if final is None:
+                continue
+            if src != "api" and not facts[t["fixture_id"]]["aged_out"]:
+                continue
+            won = (final > float(t["target_line"]) if t["target_line"] is not None
+                   else final > t["goals_total"])
+            gm = goal_minutes.get(t["id"])
+            with db_txn.atomic(conn):
+                cur.execute(
+                    """UPDATE paper_trades
+                          SET result = %s,
+                              payout_units = CASE WHEN %s
+                                                  THEN stake_units * entry_odds
+                                                  ELSE 0 END,
+                              resolved_at = now()
+                        WHERE id = %s AND result IS NULL""",
+                    ("won" if won else "lost", won, t["paper_trade_id"]),
+                )
+                done["trades"] += cur.rowcount
+                if gm is not None:
+                    cur.execute(
+                        """UPDATE pressure_observations
+                              SET goal_minute = %s, goal_minute_source = 'api'
+                            WHERE id = %s AND goal_minute IS NULL""",
+                        (gm, t["id"]),
+                    )
+    done["fixtures"] = len(finals)
+    done["rows"] = done["api_rows"] + done["poll_rows"]
+    return done
+
+
+def _log_completion(done: dict) -> None:
+    if done["rows"] or done["trades"]:
+        log.info(f"full-time horizon completed on {done['rows']} earlier rows "
+                 f"({done['api_rows']} api, {done['poll_rows']} tape) over "
+                 f"{done['fixtures']} fixtures; {done['trades']} trades paid; "
+                 f"{done['asked']} fixtures put to the API")
+
+
+def backfill_finals(conn, *, dry_run: bool) -> dict:
+    """One-off repair of every row settled before its final.
+
+    It completes those rows from the API finals the table already holds and
+    replaces the tape finals those contradict. It makes no API call: on
+    2026-09-14, 10,162 of the 10,707 fixtures that needed a final already had
+    one on a later row. Before anything is written, the before-state of every
+    row whose existing values change goes to reports/. Those are tape finals,
+    and +10 horizons that claimed more goals than the match had. The rows it
+    completes are tagged `api_repair`, so the run can be told apart and undone.
+    """
+    import json
+
+    with conn.cursor() as cur:
+        # A whole-table pass. The role's default timeout cancels it.
+        cur.execute("SET statement_timeout = '30min'")
+        cur.execute(
+            """WITH truth AS (
+                   SELECT fixture_id, min(final_goals) AS f
+                     FROM pressure_observations
+                    WHERE final_goals_source IN ('api', 'api_repair')
+                    GROUP BY fixture_id
+                   HAVING min(final_goals) = max(final_goals))
+               SELECT o.id, o.final_goals, o.goal_before_ft, o.final_goals_source,
+                      o.goals_at_plus_10, o.goal_next_10, o.goals_total, t.f
+                 FROM pressure_observations o
+                 JOIN truth t USING (fixture_id)
+                WHERE o.settled_at IS NOT NULL
+                  AND (o.final_goals_source = 'poll'
+                       OR (o.final_goals IS NULL AND o.goals_at_plus_10 > t.f))"""
+        )
+        changed = cur.fetchall()
+        cur.execute(
+            """SELECT count(*) FILTER (WHERE final_goals IS NULL),
+                      count(*) FILTER (WHERE final_goals_source = 'poll'),
+                      count(DISTINCT fixture_id)
+                 FROM pressure_observations
+                WHERE settled_at IS NOT NULL
+                  AND (final_goals IS NULL OR final_goals_source = 'poll')"""
+        )
+        null_rows, poll_rows, fixtures = cur.fetchone()
+    poll = [r for r in changed if r[3] == "poll"]
+    summary = {
+        "fixtures": fixtures,
+        "null_rows": null_rows,
+        "poll_rows": poll_rows,
+        "poll_rows_with_api": len(poll),
+        "poll_value_changes": sum(1 for r in poll if r[1] != r[7]),
+        "poll_outcome_flips": sum(1 for r in poll if r[6] is not None
+                                  and (r[7] > r[6]) != bool(r[2])),
+        "horizon_nulled": sum(1 for r in changed if r[4] is not None and r[4] > r[7]),
+    }
+    log.info(f"backfill: {summary}")
+    if dry_run:
+        return summary
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "reports",
+                        f"pressure_final_backfill_{time.strftime('%Y-%m-%d', time.gmtime())}.json")
+    with open(path, "w") as fh:
+        json.dump({
+            "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "note": ("Before-state of rows whose existing values backfill_finals() "
+                     "overwrote. Rows it filled from NULL are the rows tagged "
+                     "final_goals_source='api_repair' that are not listed here."),
+            "summary": summary,
+            "columns": ["id", "final_goals", "goal_before_ft", "final_goals_source",
+                        "goals_at_plus_10", "goal_next_10"],
+            "rows": [list(r[:6]) for r in changed],
+        }, fh)
+    log.info(f"backfill: before-state of {len(changed)} rows -> {path}")
+    done = complete_finals(conn, max_age_h=None, use_api=False, allow_tape=False,
+                           api_tag="api_repair")
+    _log_completion(done)
+    return {**summary, **done}
 
 
 def report(conn) -> None:
@@ -1354,7 +1735,18 @@ def main() -> None:
     ap.add_argument("--interval", type=int, default=CYCLE_S, help="seconds between cycles")
     ap.add_argument("--settle", action="store_true", help="backfill outcomes and exit")
     ap.add_argument("--report", action="store_true", help="what has been collected")
+    ap.add_argument("--backfill-finals", action="store_true",
+                    help="one-off: complete rows settled before their final, from API "
+                         "finals already stored (no API call); with --dry-run, count only")
     args = ap.parse_args()
+
+    if args.backfill_finals:
+        conn = _conn()
+        try:
+            backfill_finals(conn, dry_run=args.dry_run)
+        finally:
+            conn.close()
+        return
 
     if args.settle or args.report:
         # Local imports: both arms import this module at their top level.

@@ -105,8 +105,8 @@ export default function ScoutPage() {
         <p className="sc-eyebrow">NOPREDICTIONS · Prediction-market research</p>
         <h1 className="sc-h1">See if the price is wrong — before you trade it</h1>
         <p className="sc-h1-sub">
-          Today&apos;s football on Polymarket and Kalshi, biggest markets first, with the cheaper
-          exchange marked on every price — after each one&apos;s taker fee, not before it. Open a
+          Today&apos;s football on Polymarket and Kalshi, ranked by the money through both, with
+          the cheaper exchange marked on every price — after each one&apos;s taker fee. Open a
           game to check its price against how matches priced the same way actually ended, both
           teams&apos; form against the closing line, and the book you would be trading into. No
           tips: the numbers, and you decide.
@@ -213,10 +213,12 @@ export default function ScoutPage() {
     <p className="sp-foot">
       Prices are each exchange&apos;s <b>ask</b> — what buying that side costs right now — and the
       board shows the cheaper of the two <b>after each venue&apos;s taker fee</b>: Polymarket
-      0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract, 40% more. Comparing
-      the printed asks would hand Kalshi wins it does not have. A venue can only be marked
-      cheaper where its book is real — a lone sell order behind an empty bid side is the cheapest
-      quote on the card by arithmetic and is not a market.{' '}
+      0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract, 40% more. That does
+      not change who wins a price by a cent or more, but it roughly halves what the win is worth,
+      and where the two print the same price near even money it makes Polymarket the cheaper
+      venue. A venue can only be marked cheaper where its book is real — a lone sell order behind
+      an empty bid side is the cheapest quote on the card by arithmetic and is not a market, and
+      each price is judged on its own book rather than on the fixture&apos;s.{' '}
       {kalshi === null ? (
         <>Kalshi&apos;s board is still loading.</>
       ) : (

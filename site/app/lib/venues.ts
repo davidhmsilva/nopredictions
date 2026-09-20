@@ -6,16 +6,28 @@
  *     reads its answer from here, so "best odds" cannot come to mean two
  *     different things in two places.
  *
- *  ⚠️ The comparison is NET OF EACH VENUE'S TAKER FEE, and that is not a
- *     detail. Polymarket charges 0.05·p·(1−p) per share and Kalshi
- *     0.07·p·(1−p) per contract — 40% more. At an even-money price that is
- *     1.25pp against 1.75pp, so a half-cent gross edge on Kalshi is a LOSS
- *     once the fee lands. Comparing the two asks as they are printed would
- *     hand the win to Kalshi in exactly the cases where it is wrong.
+ *  ⚠️ The comparison is NET OF EACH VENUE'S TAKER FEE — Polymarket
+ *     0.05·p·(1−p) per share, Kalshi 0.07·p·(1−p) per contract, 40% more.
+ *
+ *     It does NOT flip which venue is cheaper, and an earlier version of this
+ *     file said it did. Searched exhaustively over every price and every gross
+ *     gap at or above `MIN_GAP`, the largest net disadvantage a gross-cheaper
+ *     Kalshi quote can carry is +0.000004 — zero. It falls out of the
+ *     arithmetic: the fee difference is 0.02·p·(1−p), which maxes at 0.005 =
+ *     `MIN_GAP`, so a gap big enough to call cannot be eaten by it.
+ *     (agent/tests/test_venues.py keeps the search as the test that refuted
+ *     the claim.)
+ *
+ *     What it does change is worth having anyway. It halves the SAVING — a
+ *     one-cent gross advantage on Kalshi is worth about half a cent once the
+ *     fee lands — and it decides the TIE: where the two print the same price
+ *     near even money the fee difference reaches 0.5pp on its own, and
+ *     Polymarket is genuinely the cheaper venue where a gross comparison would
+ *     call it a draw.
  *
  *     Both numbers are kept: `ask` is what the venue prints and what the board
  *     shows, `net` is what it actually costs you, and the pick is made on
- *     `net`. The page says so rather than leaving the highlight to imply it.
+ *     `net`.
  *
  *  ⚠️ A book is only allowed to win if it is a real book. A lone sell order
  *     parked at 0.99 behind an empty bid side is the cheapest quote on the
@@ -123,8 +135,10 @@ export function gradeOf(quotes: (Quote | null | undefined)[]): BookGrade {
  *  anyone would place, so neither venue "wins" it. */
 export const TRADEABLE: [number, number] = [0.02, 0.98]
 
-/** Half a cent gross. Below that the two asks are the same price on a 1¢ tick
- *  and calling one of them better is noise dressed as a finding. */
+/** Half a cent. Below it the two are one price — Kalshi ticks in whole cents
+ *  and calling a sub-tick difference a better price is noise dressed as a
+ *  finding. Applied to the NET cost as well as the printed one, so the fee
+ *  difference has to be worth half a cent by itself before it decides a tie. */
 export const MIN_GAP = 0.005
 
 export interface VenueQuote {

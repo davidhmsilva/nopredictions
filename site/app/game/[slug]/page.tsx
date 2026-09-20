@@ -497,8 +497,10 @@ interface BoardRow {
 /** The board, both exchanges.
  *
  *  🔑 Polymarket on the left, Kalshi on the right, and the cheaper of the two
- *     marked — AFTER each venue's taker fee, because Kalshi's is 40% higher
- *     and comparing the printed asks hands it wins it does not have.
+ *     marked — AFTER each venue's taker fee. That does not change who wins a
+ *     price by a cent or more (see lib/venues), but it roughly halves what the
+ *     win is worth and it decides a tie near even money, where Kalshi's
+ *     40%-higher fee costs 0.5pp on its own.
  *
  *  ⚠️ An Under is bought as the NO leg of Kalshi's Over ticker. That is a real
  *     price, not a derived one — on a binary book, buying NO at 1 − yes_bid IS

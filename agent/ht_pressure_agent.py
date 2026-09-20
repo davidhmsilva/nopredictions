@@ -101,6 +101,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 import psycopg2
 import psycopg2.extras
@@ -123,6 +124,7 @@ from late_goals_observer import (                                  # noqa: E402
 )
 import af_budget
 import db_txn
+import venues                                                     # noqa: E402
 from live_tracker import LiveMatchTracker, PressureSignals, danger_index  # noqa: E402
 from pressure_agent import (                                       # noqa: E402
     _no_stats_reason,
@@ -144,7 +146,7 @@ STRATEGY_NAME = "Live Pressure HT Over 0.5"
 # v6 (2026-09-11): missing xG estimated from shots, not renormalised (see
 # live_tracker.estimate_xg), and has_inside finally passed on ESPN rows. The
 # axis moved; never pool with v5.
-OBS_VERSION = 6
+OBS_VERSION = 7
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -290,6 +292,11 @@ STAKE_UNITS = 1.0
 # is documented in sim_scanner._totals_scope; this is the same rule, narrowed to
 # the single line this agent trades.
 _HT_OVER05_RE = re.compile(r"^1st\s+half\s+o/u\s+0\.5$", re.I)
+
+#: The line this arm trades, on both exchanges. Kalshi writes it as
+#: "Over 0.5 1H goals scored" on its KX*1HTOTAL series; the ladder is
+#: keyed on `floor_strike`, so the two line up on the number itself.
+TARGET_LINE = 0.5
 
 
 def ht_over05_market(fixture: dict) -> dict | None:
@@ -599,6 +606,22 @@ def observe(signals: dict[int, PressureSignals], table: dict,
                    bid_depth_usd=book["bid_depth_usd"],
                    ask_depth_usd=book["ask_depth_usd"])
 
+        # obs_version 7: the same bet, at whichever exchange is cheaper.
+        #
+        # Kalshi lists this exact market — KX*1HTOTAL, "Over 0.5 1H goals
+        # scored" — on the competitions this arm trades. It matters more here
+        # than on the sibling: the liquidity on PM's first-half line is micro
+        # ($938 seen against $32,718 on the same fixture's full-match O/U 2.5),
+        # and a second book is a second chance at a price at all.
+        #
+        # ⚠️ It changes the PRICE, not the rule. Every gate below is untouched
+        #    — including MIN_ODDS, which is now read off the venue we would
+        #    actually buy at.
+        exec_ = _best_venue(sig, book)
+        row.update(venue=exec_.venue, alt_venue_ask=exec_.alt_ask,
+                   venue_saving_pp=exec_.saving_pp)
+        entry_ask, entry_bid, entry_depth = exec_.ask, exec_.bid, exec_.depth_usd
+
         # Fair value is only defined from 0-0: the table is conditional on it,
         # and once a goal is in the market is settled anyway.
         if goals == 0:
@@ -610,12 +633,14 @@ def observe(signals: dict[int, PressureSignals], table: dict,
                 k = pressure_factor(row["pressure_now"] or row["opening_pressure"]
                                     or row["pressure_index"] or 0.0)
                 fair_pressure = apply_pressure(fair_base, k)
-                fee = taker_fee_pp(book["best_ask"])
+                # The CHOSEN venue's fee: Kalshi's is 40% higher, so pricing a
+                # Kalshi fill at Polymarket's rate would overstate its edge.
+                fee = 100.0 * venues.taker_fee(entry_ask, exec_.venue)
                 row.update(
                     fair_base=fair_base, fair_pressure=fair_pressure, fair_n=fair_n,
                     pressure_factor=k, fee_pp=fee,
-                    edge_base_pp=100.0 * (fair_base - book["best_ask"]) - fee,
-                    edge_pressure_pp=100.0 * (fair_pressure - book["best_ask"]) - fee,
+                    edge_base_pp=100.0 * (fair_base - entry_ask) - fee,
+                    edge_pressure_pp=100.0 * (fair_pressure - entry_ask) - fee,
                 )
 
         # ── arming ──────────────────────────────────────────────────────────
@@ -654,7 +679,8 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         #           is what makes the two rules comparable on the same tape.
         row["entry_trigger"] = ("live" if pressing else "armed") if armed else None
 
-        odds_ok = book["best_ask"] <= MAX_ENTRY_PRICE + _PRICE_EPS
+        # v7: every price gate below reads the venue we would actually buy at.
+        odds_ok = entry_ask <= MAX_ENTRY_PRICE + _PRICE_EPS
         row["would_enter"] = bool(
             goals == 0
             and ENTRY_MIN_MINUTE <= sig.minute <= ENTRY_MAX_MINUTE
@@ -666,19 +692,62 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             # obs_version 4: never shorter than MIN_ODDS. Below it the fixture
             # keeps being observed and stays armed; it is not an entry.
             and odds_ok
-            and book["best_ask"] <= MAX_ASK
-            and book["best_bid"] is not None
-            and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
-            and (book["ask_depth_usd"] or 0) >= MIN_DEPTH_USD
+            and entry_ask <= MAX_ASK
+            and entry_bid is not None
+            and (entry_ask - entry_bid) <= MAX_SPREAD
+            and (entry_depth or 0) >= MIN_DEPTH_USD
             # A score we cannot pin makes the whole setup meaningless — the bet
             # is defined by the match being 0-0.
             and row["score_agrees"] is not False
         )
         if not row["would_enter"] and not row["skip_reason"]:
-            row["skip_reason"] = _why_not(row, book, sig, armed)
+            row["skip_reason"] = _why_not(
+                row, {"best_ask": entry_ask, "best_bid": entry_bid,
+                      "ask_depth_usd": entry_depth}, sig, armed)
         rows.append(row)
 
     return rows
+
+
+class _Exec(NamedTuple):
+    venue: str
+    ask: float
+    bid: float | None
+    depth_usd: float | None
+    alt_ask: float | None
+    saving_pp: float | None
+
+
+def _best_venue(sig: PressureSignals, book: dict) -> _Exec:
+    """Where to buy the first-half over 0.5, and what the alternative was.
+
+    Kalshi's side is a lookup into an index refreshed on a BACKGROUND thread,
+    so a cold process or a Kalshi outage costs the comparison and nothing
+    else: the trade books on Polymarket exactly as it did before.
+    """
+    pm = venues.Quote(bid=book["best_bid"], ask=book["best_ask"],
+                      ask_depth_usd=book["ask_depth_usd"])
+    kal = None
+    try:
+        idx = venues.shared_index(background=True)
+        # ⚠️ The signal carries no kick-off, so it is reconstructed from the
+        #    clock. The join only needs the EASTERN DATE, and this arm runs
+        #    inside the first 40 minutes, so the reconstruction is tight.
+        kickoff = datetime.now(timezone.utc) - timedelta(minutes=sig.minute or 0)
+        fx = idx.fixture(sig.home, sig.away, kickoff)
+        if fx is not None:
+            kal = fx.over(TARGET_LINE, first_half=True)
+    except Exception as e:          # noqa: BLE001 - never take the poll down
+        log.debug("kalshi lookup failed for %s v %s: %s", sig.home, sig.away, e)
+
+    chosen = venues.choose(pm, kal)
+    if chosen is None or chosen.venue == venues.POLYMARKET:
+        return _Exec(venues.POLYMARKET, book["best_ask"], book["best_bid"],
+                     book["ask_depth_usd"],
+                     chosen.alt_ask if chosen else None,
+                     chosen.saving_pp if chosen else None)
+    return _Exec(venues.KALSHI, kal.ask, kal.bid, kal.ask_depth_usd,
+                 chosen.alt_ask, chosen.saving_pp)
 
 
 def _why_not(row: dict, book: dict, sig: PressureSignals,
@@ -774,6 +843,10 @@ def _base_row(sig: PressureSignals) -> dict:
         "edge_base_pp": None, "edge_pressure_pp": None,
         "would_enter": False, "entered": False,
         "paper_trade_id": None, "skip_reason": None,
+        # Where the entry was priced, and what the other exchange wanted for
+        # the same bet. On every row so the Polymarket-only counterfactual
+        # stays recoverable per entry (db/054, H-BEST-VENUE).
+        "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
     }
 
 
@@ -795,6 +868,7 @@ _COLS = [
     "fair_base", "fair_pressure", "fair_n", "fee_pp",
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
     "paper_trade_id", "skip_reason",
+    "venue", "alt_venue_ask", "venue_saving_pp",
 ]
 
 

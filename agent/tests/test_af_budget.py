@@ -177,3 +177,30 @@ def test_an_interactive_run_cannot_scribble_on_the_real_counters(monkeypatch):
 def test_an_explicit_name_still_wins(monkeypatch):
     monkeypatch.setenv("AF_COUNTER_NAME", "smoke test/../x")
     assert "/" not in ab.default_name()
+
+
+def test_a_short_process_still_writes_what_it_spent(isolated_state, monkeypatch):
+    """The settle cron makes fewer calls than a flush waits for, then exits.
+    Without a flush at exit none of its spend was ever written: on 2026-09-14,
+    the day the key ran out, its file still held Sunday's total."""
+    hooks = []
+    monkeypatch.setattr(ab.atexit, "register", lambda fn, *a: hooks.append((fn, a)))
+    monkeypatch.setattr(ab, "_process_counter", None)
+    monkeypatch.setenv("AF_COUNTER_NAME", "settle_probe")
+    ab.process_counter().record("ids")
+    path = isolated_state / ".af_calls_settle_probe.json"
+    assert not path.exists(), "one call is below flush_every; nothing written yet"
+    for fn, args in hooks:
+        fn(*args)
+    assert json.loads(path.read_text())["total"] == 1
+
+
+def test_an_exit_with_nothing_to_write_touches_no_file(isolated_state, monkeypatch):
+    hooks = []
+    monkeypatch.setattr(ab.atexit, "register", lambda fn, *a: hooks.append((fn, a)))
+    monkeypatch.setattr(ab, "_process_counter", None)
+    monkeypatch.setenv("AF_COUNTER_NAME", "idle_probe")
+    ab.process_counter()
+    for fn, args in hooks:
+        fn(*args)
+    assert not (isolated_state / ".af_calls_idle_probe.json").exists()

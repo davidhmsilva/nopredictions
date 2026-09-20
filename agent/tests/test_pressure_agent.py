@@ -666,5 +666,7 @@ def test_obs_version_was_bumped_with_the_axis():
     """Each version measures the same quantity differently — the split has to
     exist in the data or the populations pool into one meaningless yield.
     v3 moved the axis (xG renormalised); v4 added the book gates; v5 moved the
-    axis again (missing xG estimated from shots)."""
-    assert pa.OBS_VERSION == 5
+    axis again (missing xG estimated from shots); v6 moved the PRICE — the
+    entry is now booked at whichever of Polymarket and Kalshi is cheaper net
+    of fees, and the book gates read that venue's book (db/054)."""
+    assert pa.OBS_VERSION == 6

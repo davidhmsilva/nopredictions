@@ -5,8 +5,10 @@
  *  🔑 Both exchanges on every row, and the CHEAPER ONE MARKED. That is the
  *     reason the page exists: a price is only a price if you know what the
  *     alternative was. The mark is made net of each venue's taker fee —
- *     Polymarket 0.05·p·(1−p), Kalshi 0.07·p·(1−p) — because comparing the
- *     printed asks hands Kalshi wins it does not have.
+ *     Polymarket 0.05·p·(1−p), Kalshi 0.07·p·(1−p), 40% more — which does not
+ *     change who wins a price by a cent or more, but roughly halves what the
+ *     win is worth and decides a tie near even money. lib/venues carries the
+ *     search that settled that.
  *
  *  🔑 It ranks on COMBINED volume. A fixture with millions through it has a
  *     real two-sided book by construction, which is the honest proxy for

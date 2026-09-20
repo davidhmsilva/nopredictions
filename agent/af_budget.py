@@ -29,6 +29,7 @@ replaced it).
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import sys
@@ -151,7 +152,7 @@ class CallCounter:
 # — and they used to be told apart by remembering to set an environment
 # variable. Deriving the name from argv instead means the invariant holds
 # whether or not anyone remembered.
-_MODE_FLAGS = ("--settle", "--report", "--once", "--dry-run")
+_MODE_FLAGS = ("--settle", "--backfill-finals", "--report", "--once", "--dry-run")
 _process_counter: "CallCounter | None" = None
 
 
@@ -180,7 +181,17 @@ def process_counter() -> "CallCounter":
     global _process_counter
     if _process_counter is None:
         _process_counter = CallCounter(default_name())
+        # A short-lived process (the settle cron, a --once) seldom reaches the
+        # `flush_every` calls a write waits for, so its spend was never written
+        # at all. On 2026-09-14, the day the key ran out, the settle counter
+        # still held Sunday's total.
+        atexit.register(_flush_if_pending, _process_counter)
     return _process_counter
+
+
+def _flush_if_pending(counter: "CallCounter") -> None:
+    if counter._unflushed:
+        counter.flush()
 
 
 def siblings_today(exclude: str = "") -> int:
