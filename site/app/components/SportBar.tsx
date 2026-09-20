@@ -12,7 +12,7 @@ import { usePathname } from 'next/navigation'
 import { SPORT_KEYS, SPORT_META } from '../lib/sportsMeta'
 
 const ITEMS = [
-  ...SPORT_KEYS.map((k) => ({ href: SPORT_META[k].path, label: SPORT_META[k].label })),
+  ...SPORT_KEYS.map((k) => ({ href: SPORT_META[k].path, label: SPORT_META[k].tab ?? SPORT_META[k].label })),
   { href: '/soccer', label: 'Soccer' },
 ]
 

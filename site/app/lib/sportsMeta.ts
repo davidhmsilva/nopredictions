@@ -7,9 +7,12 @@
 export const SPORT_KEYS = ['nfl', 'cfb', 'mlb', 'nba', 'nhl', 'wnba'] as const
 export type SportKey = (typeof SPORT_KEYS)[number]
 
-export const SPORT_META: Record<SportKey, { label: string; path: string; days: number }> = {
+/** `label` is the name in prose and in the page title; `tab` is what the sport
+ *  bar has room for. They differ only where the full name does not fit a
+ *  phone's tab strip. */
+export const SPORT_META: Record<SportKey, { label: string; tab?: string; path: string; days: number }> = {
   nfl: { label: 'NFL', path: '/nfl', days: 9 },
-  cfb: { label: 'College football', path: '/cfb', days: 7 },
+  cfb: { label: 'College football', tab: 'NCAA', path: '/cfb', days: 7 },
   mlb: { label: 'MLB', path: '/mlb', days: 3 },
   nba: { label: 'NBA', path: '/nba', days: 7 },
   nhl: { label: 'NHL', path: '/nhl', days: 7 },

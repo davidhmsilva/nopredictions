@@ -155,10 +155,18 @@ async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame
   // From last night (a late game can still be live) to the end of the window.
   const from = etOf(new Date(now.getTime() - 12 * 3600_000)).ymd
   const to = etOf(new Date(now.getTime() + days * 86400_000)).ymd
-  const base = { dates: `${from}-${to}`, limit: '500' }
-  const queries = src.espnGroups?.length
-    ? src.espnGroups.map((groups) => new URLSearchParams({ ...base, groups }))
-    : [new URLSearchParams(base)]
+
+  // ⚠️ ESPN stopped answering a DATE RANGE (`dates=20260920-20260929` → 400,
+  //    every sport, soccer included; found 2026-09-20 with every US board
+  //    erroring). A single day and a whole MONTH still answer, so the window
+  //    is asked for by month — one or two requests — and cut to size below.
+  const months = [...new Set([from.slice(0, 6), to.slice(0, 6)])]
+  const queries = months.flatMap((month) => {
+    const base = { dates: month, limit: '500' }
+    return src.espnGroups?.length
+      ? src.espnGroups.map((groups) => new URLSearchParams({ ...base, groups }))
+      : [new URLSearchParams(base)]
+  })
   const pages = await Promise.all(
     queries.map((qs) => getJson<any>(`https://site.api.espn.com/apis/site/v2/sports/${src.espn}/scoreboard?${qs}`))
   )
@@ -172,6 +180,9 @@ async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame
     const h = c?.competitors?.find((x: any) => x.homeAway === 'home')
     const a = c?.competitors?.find((x: any) => x.homeAway === 'away')
     if (!h?.team || !a?.team || !e.date) continue
+    // A month is wider than the window this board shows.
+    const ymd = etOf(new Date(e.date)).ymd
+    if (ymd < from || ymd > to) continue
     const st = c.status?.type ?? e.status?.type ?? {}
     const home = espnTeam(h)
     const away = espnTeam(a)
