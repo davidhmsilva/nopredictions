@@ -97,6 +97,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── wallet_analyzer.py            ← Polymarket wallet analyser (FIFO + written reading) ✅ NEW
 │   ├── late_goals_table.py            ← empirical late-goal fair value (no model) ✅
 │   ├── priced_like_table.py           ← Game Center "priced like this" + league base rates ✅ NEW
+│   ├── venues.py                      ← both exchanges, one price: fees, book gates, best-of ✅ NEW
 │   ├── late_goals_observer.py         ← Over Late Goals — paper observation only ✅
 │   ├── resolver.py                    ← resolves trades + calculates CLV ✅
 │   ├── lab_strategy_runner.py         ← paper-trades users' saved Lab agents ✅ NEW
@@ -136,6 +137,10 @@ riding the AI + prediction-markets wave simultaneously.
     │   ├── lib/momentum.ts · lib/matchcontext.ts · lib/teamname.ts
     │   ├── api/scout/route.ts         ← the board  ·  api/pulse → the tape's 7 numbers
     │   ├── api/game · api/backtest · api/wallet
+    │   ├── lib/venues.ts              ← venue vocabulary: fees, book grade, the best-price pick
+    │   ├── lib/kalshiSoccer.ts        ← Kalshi's football, swept · lib/kalshiGame.ts per market
+    │   ├── lib/venueMatch.ts · venueMerge.ts · etDate.ts · teamMatch.ts · clob.ts
+    │   ├── components/BoardView.tsx   ← ONE board for football and the six US sports
     │   ├── lib/scout.ts               ← Gamma sweep → fixtures + book grades
     │   ├── lib/espn.ts                ← live clock fallback where PM has none
     │   ├── lib/scoutCache.ts          ← 45s TTL + in-flight coalescing, shared
@@ -391,6 +396,8 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
 | Resolver | ✅ Settles trades + calculates CLV |
 | Public website | ✅ SaaS app at [nopredictions.com](https://nopredictions.com) — Scout · Lab · Agent · Wallet |
+| Both venues on every board + the Game Center | ✅ NEW — one `BoardView`, cheaper exchange marked net of fees |
+| s16 / s17 buy at the cheaper exchange | ✅ NEW — obs_version 6 / 7, db/054, `H-BEST-VENUE` |
 | Git repo | ✅ Remote: github.com/davidhmsilva/nopredictions |
 | X / Twitter launch | ⏳ Pending first edge results |
 
@@ -2276,6 +2283,152 @@ ask.
 - Sportsbooks (Pinnacle, DraftKings, FanDuel): need a paid Odds API plan.
 - A Game Center per US game: rows link out to both venues instead.
 - Alerts.
+
+## Both venues everywhere, the best odds in front (2026-09-20)
+
+By the user's decision: every board, the Game Center and the in-play agents
+carry **Polymarket AND Kalshi**, and show the **cheaper of the two** — "apostar
+a melhor odd possivel" as a product claim and as a real improvement to a paper
+record. Football and the six US sports are now **one component**, `BoardView`.
+
+| | |
+|---|---|
+| `site/app/lib/venues.ts` | the whole vocabulary — venue, quote, book grade, `bestFor` — for football and the US sports both |
+| `agent/venues.py` | the same rule for the trader, with Kalshi's football client. 30 tests |
+| `site/app/lib/kalshiSoccer.ts` · `/api/venues/soccer` | Kalshi's football board, swept and cached |
+| `site/app/lib/kalshiGame.ts` | one fixture's Kalshi prices against Polymarket's own markets |
+| `site/app/lib/venueMatch.ts` · `etDate.ts` · `teamMatch.ts` | the cross-venue join |
+| `db/054` · `H-BEST-VENUE` (id 37) | s16 **obs_version 6**, s17 **obs_version 7** |
+
+Measured on a live football board, 2026-09-20: **60 of 113 fixtures on both
+exchanges, 89 outcomes with a strictly cheaper venue — 52 Kalshi, 37
+Polymarket — median saving 1.3pp net of fees, largest 5.4pp.**
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python venues.py --probe                          # sweep Kalshi's football
+python venues.py --fixture "AC Milan" "US Lecce"  # one fixture, both ladders
+python -m pytest tests/test_venues.py -q
+```
+
+### Kalshi's football costs 139 requests, and it rate-limits
+
+`/events` takes ONE `series_ticker` at a time — a comma list returns nothing,
+and there is **no category or tag filter** — and football is spread across 139
+game series. Measured on this exact sweep:
+
+| | |
+|---|---|
+| 10 concurrent, no pacing | **112 of 139 refused with 429** |
+| 6 workers, 0.10s apart | 105 retries, 27.9s |
+| 5 workers, 0.15s apart | 57 retries, 31.1s |
+| **4 workers, 0.25s apart** | **0 retries, 34.7s** ← what ships |
+
+Pushing the pace does not make it faster: every 429 costs a backoff and a
+second request.
+
+🔑 **So the index and the prices are separate tiers.** Which fixture exists and
+under which tickers changes when Kalshi lists a game → swept rarely, cached 15
+min. Prices change every tick → re-read on a 45s clock through
+`/markets?tickers=`, which DOES take a batch: ~3 requests for the whole board.
+The goals ladders (`KX*TOTAL`, `KX*1HTOTAL`) are swept only for the
+competitions the 1X2 sweep just found a fixture in — 138 TOTAL series against
+139 GAME ones, and about 25 are playing.
+
+⚠️ **The site merges in the BROWSER.** Polymarket's whole board is one paged
+Gamma sweep; waiting 34s for Kalshi server-side would make everyone pay for a
+column only some fixtures have. `/api/venues/soccer` is its own route with its
+own `maxDuration`, and a Kalshi outage costs the Kalshi column and nothing else.
+
+⚠️ **Nothing may block a poll loop.** The in-play agents run a 60-second cycle
+against a live match, so `venues.shared_index(background=True)` refreshes on a
+**background thread** and the agent reads whatever snapshot is loaded — none at
+all on a cold process. The trade then books on Polymarket exactly as before: a
+missing second quote is not a wrong one.
+
+### What the fee does, and the claim that was wrong
+
+Kalshi's taker fee is `0.07·p·(1−p)` against Polymarket's `0.05·p·(1−p)` — 40%
+more. The comparison is net of both.
+
+⛔ **"Netting the fee stops Kalshi winning prices it should not" is FALSE**, and
+it shipped in four files for about four hours before the tests refuted it. The
+fee difference is `0.02·p·(1−p)`, which maxes at **0.005 — exactly `MIN_GAP`**,
+the half-cent below which two quotes are one price. So a gap big enough to call
+cannot be eaten by it. Searched exhaustively over every price and every gross
+gap: the largest net disadvantage a gross-cheaper Kalshi quote can carry is
+**+0.000004**. The search is kept as the test that refuted it
+(`test_the_fee_never_flips_a_clear_winner`).
+
+What netting it DOES do:
+- **halves the saving** — a one-cent gross advantage on Kalshi is worth about
+  half a cent once the fee lands;
+- **decides the tie** — where both print the same price near even money the fee
+  difference reaches 0.5pp on its own and Polymarket is genuinely cheaper.
+
+### Three joins that were wrong, each of which produced a plausible board
+
+🐛 **Kalshi publishes no kick-off for football.** `occurrence_datetime` is the
+expected **settlement** — measured at kick-off **+3h on 55 of 67 pairs** and
++2h to +4.5h on the rest. Reading it as a start time and allowing a ±3h window
+"worked" only because the true offset sat exactly on the boundary, and it
+silently dropped every competition whose games run longer. WHEN now comes from
+the **ET calendar date** off Kalshi's own event ticker
+(`KXBRASILEIROCGAME-26SEP20VITCRU` → `20260920`). Matched fixtures 57 → 60.
+
+🐛 **Gamma's listing quote is not the book.** Measured across 810 football
+markets: Gamma's ask differs from the live CLOB by **>1pp on 15.3%** and
+**>3pp on 8.4%**, worst on in-play totals — a Dinamo Zagreb O/U 8.5 quoted
+1.000 against 0.020 on the book. Half a cent decides which venue is called
+cheaper, so every compared outcome is now read from `POST /books` (~2 requests
+for a matchday, `site/app/lib/clob.ts`) and each `VenueBook` says whether its
+prices are `clob`, `gamma` or `kalshi`.
+
+🐛 **A price was gated on the fixture's 1X2 spread, not its own.** Santa Cruz v
+Floresta: a 2¢ match-result ladder vouching for an Over 2.5 quoted **bid 0.35 /
+ask 0.69**, which produced a **27.3pp "saving"**. `bestFor` now grades each leg
+on its own book — the 100-game review's finding applied where it belongs. Top
+saving on the same board fell to 5.4pp.
+
+🐛 **ESPN's date-RANGE query 400s.** `dates=20260919-20260929` answered on 09-13
+and returns `400 Failed to get events endpoint` on 09-20, for every US sport,
+while the same window asked one day at a time answers fine. All six US boards
+were down until their cache expired. The range is now an optimisation and the
+per-day fan-out is the guarantee.
+
+⚠️ **Every board cache key was bumped** (`scout-board-v2`, `sport-board-v2`,
+`kalshi-soccer-index-v2`, `kalshi-soccer-priced-v2`). The Data Cache outlives a
+deploy, and a fixture written under an older shape is served straight into the
+new renderer.
+
+### What the agents do now
+
+s16 and s17 read both books for the line they want and book the paper trade at
+whichever is cheaper net of fees. **It changes the price, not the rule** — the
+pressure gate, the minute window, the score requirement and the fair-value
+tables are untouched, so the same fixtures enter, cheaper where Kalshi is
+cheaper. The book gates (max ask, max spread, min depth, s17's `MIN_ODDS`) read
+the venue actually being bought rather than always Polymarket's, and the fee is
+that venue's.
+
+Every row carries `venue` / `alt_venue_ask` / `venue_saving_pp`, so the
+Polymarket-only counterfactual is **recoverable per entry** rather than
+estimated — as paired as a comparison gets.
+
+⚠️ **s18 is unchanged.** Kalshi lists no "favourite leading at half time"
+market, so there is nothing to compare it against; its rows carry
+`venue = 'polymarket'`, which is the truth rather than a default.
+⚠️ **The pressure daemon must be restarted** for any of it to apply, as always.
+
+### Still on Polymarket alone
+
+The NFL agent, the strategy factory, the settled-market sweep, the Lab runner
+and both recorders. `agent/venues.py` is the layer they would each plug into;
+the NFL agent is the obvious next one, because it already enumerates every
+token and picks the best net EV — extending the candidate set to Kalshi is the
+same decision with more candidates.
+
+---
 
 ## CLV framework (how we measure edge)
 
