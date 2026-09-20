@@ -118,6 +118,18 @@ export function IconClock({ className }: P) {
   )
 }
 
+/** Two exchanges, side by side. Marks the filter for the games both list —
+ *  the only ones where a cheaper venue exists to find. */
+export function IconVenues({ className }: P) {
+  return (
+    <svg {...box} className={className}>
+      <rect x="3" y="7" width="7.5" height="10" rx="1.5" />
+      <rect x="13.5" y="7" width="7.5" height="10" rx="1.5" />
+      <path d="M10.5 12h3" />
+    </svg>
+  )
+}
+
 export function IconBook({ className }: P) {
   return (
     <svg {...box} className={className}>

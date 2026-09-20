@@ -5,15 +5,52 @@
  *  (finding_spread_floor; finding_pm_mid_is_pinnacle: +0.10pp CI[-0.01,+0.20]).
  *  Shipping it as "edge now" would sell a reading our own tests rejected.
  *
- *  What it ranks on instead is the one thing the 100-game review DID find
- *  separating: book quality. `real - ask` by spread, on 6,449 rows / 494
- *  fixtures, ran +3.64pp at 0-3pp of spread and -38.38pp at 20pp+. The tell is
- *  the spread, not the depth — a 1st-half book once quoted bid 0.55 / ask 0.99
- *  behind $30,117 of depth and traded at 0.56 two minutes later.
+ *  What it ranks on instead is MONEY TRADED, now summed across both venues.
+ *  That settles the quality question by itself — a fixture with millions
+ *  through it has a real two-sided book by construction — and it is what
+ *  someone opening a matchday board is actually looking for.
+ *
+ *  Prices here are Polymarket's. Kalshi's are laid over them in `venueMerge`,
+ *  which runs in the browser because Kalshi's board costs 139 rate-limited
+ *  requests and this one costs a single paged sweep.
  */
 
 import { fetchBook, teamScore } from './gamecenter'
 import { matchEspn, type EspnLive } from './espn'
+import {
+  bestFor,
+  combinedVolume,
+  gradeOf,
+  OUTCOMES,
+  quoteOf,
+  type OutcomeKey,
+  type Quote,
+  type VenueBook,
+} from './venues'
+import type {
+  BookGrade,
+  BookQuality,
+  LiveSource,
+  MatchPhase,
+  OddsMove,
+  ScoutFixture,
+  Side,
+} from './scoutTypes'
+
+// The board's shapes, and the pure functions over them, live in ./scoutTypes
+// so the browser can hold them without this module's Gamma / CLOB /
+// api-football surface. Re-exported here, so every existing caller still
+// imports from './scout' and there is still one definition of each.
+export type {
+  BookGrade,
+  BookQuality,
+  LiveSource,
+  MatchPhase,
+  OddsMove,
+  ScoutFixture,
+  Side,
+} from './scoutTypes'
+export { bestFor, OUTCOMES, type OutcomeKey, type VenueBook } from './venues'
 
 const GAMMA_API = 'https://gamma-api.polymarket.com'
 
@@ -35,65 +72,9 @@ const MIN_SIDE_SCORE = 0.6
 
 // ── shapes ───────────────────────────────────────────────────────────────────
 
-export type BookGrade = 'clean' | 'wide' | 'blown' | 'one-sided' | 'settled' | 'unknown'
-
 /** Outside this band the market is decided and the decimal odds stop describing
  *  a bet anyone would place. Same convention the Game Center uses. */
 const TRADEABLE_BAND: [number, number] = [0.03, 0.97]
-
-export interface BookQuality {
-  /** Which market was graded — named so the reading is checkable. */
-  market: string
-  bid: number | null
-  ask: number | null
-  spreadPp: number | null
-  askDepthUsd: number | null
-  /** `clob` is a live top-of-book round trip; `gamma` is the listing's own
-   *  cached quote. Gamma's prices are known to lag the CLOB, so which one a
-   *  grade came from is part of the reading, not an implementation detail. */
-  source: 'clob' | 'gamma'
-  grade: BookGrade
-}
-
-export interface ScoutFixture {
-  /** Canonical event slug — what /game/<slug> takes. */
-  slug: string
-  home: string
-  away: string
-  competition: string | null
-  /** Real kick-off: `startTime`, never `startDate`. The latter is when the
-   *  board was listed, which on this feed is usually the same morning — using
-   *  it as kick-off returns an empty board. */
-  kickoff: string | null
-  live: boolean
-  /** What `live` is standing on. Never null when `live` is true. */
-  liveSource: LiveSource | null
-  /** From the feed only. Null when nothing authoritative knows the clock. */
-  minute: number | null
-  /** Polymarket's period, when it gave one. Half time has no minute, so this
-   *  is the only thing that separates "at the break" from "clock unknown". */
-  phase: MatchPhase | null
-  score: { home: number; away: number } | null
-  finished: boolean
-  markets: number
-  volumeUsd: number
-  liquidityUsd: number
-  /** Probabilities. Sides are resolved with the alias-aware scorer against the
-   *  fixture title, never by market order. */
-  oneX2: { home: number | null; draw: number | null; away: number | null }
-  over25: number | null
-  // ⓘ Nothing reads these since the "Measured" board filter was retired for the
-  //   Insights link (2026-09-08). They are kept because they are true, cheap,
-  //   and the honest answer to "which markets does this fixture even have" —
-  //   but treat them as available rather than load-bearing.
-  hasTotals: boolean
-  hasFirstHalf: boolean
-  book: BookQuality | null
-  /** The outcome that shortened most in the last 24 hours, if Gamma knows.
-   *  Null means the change was not published or nothing shortened — see the
-   *  coverage note on `Mkt.chg24h`. */
-  move: OddsMove | null
-}
 
 // ── raw Gamma access ─────────────────────────────────────────────────────────
 
@@ -386,15 +367,14 @@ function moneylineTeam(q: string): string | null {
 // resolved with the alias-aware scorer against the fixture title, ambiguity
 // fails closed, and market ORDER is never trusted.
 
-function oneX2Of(markets: Mkt[], home: string, away: string) {
-  const out: { home: number | null; draw: number | null; away: number | null } =
-    { home: null, draw: null, away: null }
+function legsOf(markets: Mkt[], home: string, away: string): Partial<Record<OutcomeKey, Mkt>> {
+  const out: Partial<Record<OutcomeKey, Mkt>> = {}
 
   for (const m of markets) {
     if (!isMoneyline(m)) continue
 
     if (DRAW_RE.test(m.question)) {
-      out.draw ??= m.yes
+      out.draw ??= m
       continue
     }
 
@@ -405,28 +385,37 @@ function oneX2Of(markets: Mkt[], home: string, away: string) {
     if (Math.max(sh, sa) < MIN_SIDE_SCORE) continue
     // A name that reads equally well as either side is not a side.
     if (Math.abs(sh - sa) < 0.05) continue
-    if (sh > sa) out.home ??= m.yes
-    else out.away ??= m.yes
+    if (sh > sa) out.home ??= m
+    else out.away ??= m
   }
+
+  const over25 = markets.find((m) => isMatchTotal(m) && lineOfTotal(m.question) === 2.5)
+  if (over25) out.over25 = over25
   return out
 }
 
-export type Side = 'home' | 'draw' | 'away'
-
-export interface OddsMove {
-  side: Side
-  /** What to print: the team name, or "Draw". */
-  label: string
-  /** Probability now, and 24 hours ago. */
-  now: number
-  before: number
-  /** Change in probability POINTS. Positive = shortened = odds dropped. */
-  pp: number
-  /** The last hour, when Gamma carries it. Null is "not known". */
-  pp1h: number | null
-  /** The CLOB token for the side that shortened, so its price path can be
-   *  drawn. Null when Gamma published no token for that market. */
-  tokenId: string | null
+/** Polymarket's own side of the fixture: what it is quoting for each outcome,
+ *  and how much of a book is behind it.
+ *
+ *  ⚠️ The QUOTE is the bid/ask, not the mid the table prints. A mid is not a
+ *     price you can pay, and "the best odds" is a claim about what you pay —
+ *     so the cross-venue comparison runs on the ask at both ends. Gamma
+ *     carries `bestBid`/`bestAsk` on every market in the listing response the
+ *     sweep already downloads, so this costs nothing. */
+function pmVenueBook(legs: Partial<Record<OutcomeKey, Mkt>>, slug: string, volumeUsd: number): VenueBook {
+  const quotes: Partial<Record<OutcomeKey, Quote>> = {}
+  for (const key of OUTCOMES) {
+    const m = legs[key]
+    if (m) quotes[key] = quoteOf(m.bestBid, m.bestAsk, null)
+  }
+  // Graded off the 1X2 ladder, which is the one both venues quote.
+  return {
+    venue: 'polymarket',
+    url: `https://polymarket.com/event/${slug}`,
+    volume: volumeUsd > 0 ? volumeUsd : null,
+    grade: gradeOf([quotes.home, quotes.draw, quotes.away]),
+    quotes,
+  }
 }
 
 /** The outcome that shortened most over 24 hours.
@@ -477,11 +466,6 @@ function moveOf(markets: Mkt[], home: string, away: string): OddsMove | null {
   return best
 }
 
-function over25Of(markets: Mkt[]): number | null {
-  const g = markets.find((m) => isMatchTotal(m) && lineOfTotal(m.question) === 2.5)
-  return g?.yes ?? null
-}
-
 // ── board state ──────────────────────────────────────────────────────────────
 
 const SETTLED = 0.99
@@ -489,26 +473,6 @@ const SETTLED = 0.99
 /** A football match occupies about two and a half hours of wall clock. */
 const MATCH_WINDOW_MS = 2.5 * 3600_000
 
-/** How a live reading was arrived at.
- *
- *  `pm`    — Polymarket's own event says so, and carries the score, the half
- *  and the minute. Strongest by a distance: it is the same event the board comes
- *  from, so it needs no name matching and no second request, and it is exactly
- *  what Polymarket's own page shows the trader.
- *  `feed`  — ESPN, for the fixtures Polymarket has not tagged.
- *  `board` — a market on this fixture has resolved, so the match has certainly
- *  started. This is the only moment a Polymarket board timestamps for free.
- *  `clock` — the listed kick-off has passed and nothing else knows anything.
- *  Probable, not certain: Polymarket's listed start ran ~30 minutes early on the
- *  smaller leagues that invalidated 73k of our own observations, and eight hours
- *  late on Sevilla v Rayo. The card says which, because those are different
- *  claims — and since the feed landed, `clock` is what is left over rather than
- *  the usual answer. */
-export type LiveSource = 'pm' | 'feed' | 'board' | 'clock'
-
-/** The phases Polymarket names on a football event. `ET` and `PEN` are theirs
- *  too; they are listed so a knockout does not read as an ordinary second half. */
-export type MatchPhase = '1H' | 'HT' | '2H' | 'ET' | 'PEN'
 const PHASES: MatchPhase[] = ['1H', 'HT', '2H', 'ET', 'PEN']
 
 function pastKickoff(kickoff: string | null): number | null {
@@ -690,6 +654,8 @@ export function buildFixtures(
     if (markets.length === 0) continue
 
     const kickoff = kickoffOf(canonical)
+    const legs = legsOf(markets, teams.home, teams.away)
+    const pmBook = pmVenueBook(legs, slug, volumeUsd)
 
     // Polymarket first: same event, no name matching, no extra request, and it
     // is what the trader sees on Polymarket's own page. Any sibling can carry
@@ -724,11 +690,16 @@ export function buildFixtures(
       markets: markets.length,
       volumeUsd,
       liquidityUsd,
-      oneX2: oneX2Of(markets, teams.home, teams.away),
-      over25: over25Of(markets),
+      oneX2: { home: legs.home?.yes ?? null, draw: legs.draw?.yes ?? null, away: legs.away?.yes ?? null },
+      over25: legs.over25?.yes ?? null,
       hasTotals: markets.some(isMatchTotal),
       hasFirstHalf: markets.some(isFirstHalfTotal),
       book: gammaBook(markets),
+      venues: [pmBook],
+      // Polymarket alone until the Kalshi index is merged in (scoutCache).
+      // Doing it here would put a 34-second sweep inside the Gamma parse.
+      best: bestFor([pmBook]),
+      volumeCombinedUsd: volumeUsd,
       move: moveOf(markets, teams.home, teams.away),
     })
     marketsBySlug.set(slug, markets)
@@ -753,7 +724,10 @@ export function buildFixtures(
 const LIVE_BOOST = 1.1
 
 export function heatOf(f: ScoutFixture): number {
-  return f.volumeUsd * (f.live ? LIVE_BOOST : 1)
+  // Both venues. ⚠️ Polymarket counts dollars traded and Kalshi $1 contracts,
+  // which is close enough to RANK on and not close enough to print as one
+  // total — the board shows the two apart and says which unit each is.
+  return f.volumeCombinedUsd * (f.live ? LIVE_BOOST : 1)
 }
 
 export function rankFixtures(fixtures: ScoutFixture[]): ScoutFixture[] {

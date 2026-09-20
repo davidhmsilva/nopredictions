@@ -1,0 +1,104 @@
+/** Putting one exchange's fixture on another's.
+ *
+ *  🔑 This is the join everything else on the site now leans on, and it is the
+ *     one this project has been bitten by most often. A wrong join does not
+ *     blunt a price, it shows you Kalshi's Lecce quote in Milan's row. So:
+ *
+ *     - Both venues publish an exact kick-off, and it has to agree. That is a
+ *       far stronger discriminator than any name scorer, and it is free.
+ *     - Names are scored WHOLE with the alias-aware scorer, never matched as
+ *       substrings. "Real Salt Lake" and "Real Monarchs" share a token.
+ *     - The crossed orientation is tested too. If Kalshi's home also reads as
+ *       Polymarket's away, the pairing is not a pairing.
+ *     - The result must be ONE-TO-ONE. Two Kalshi events landing on one
+ *       Polymarket fixture, or the reverse, drops BOTH rather than picking.
+ *
+ *  Measured on a live board, 2026-09-20: 39 of Kalshi's soccer fixtures placed
+ *  on Polymarket's 185, zero ambiguous.
+ */
+
+import { teamScore } from './teamMatch'
+
+/** The alias-aware scorer's bar for "these are the same club". Below it the
+ *  pairing is unknown, never a guess. */
+export const MIN_SIDE_SCORE = 0.6
+
+/** Both feeds carry a real kick-off, so this is a tight gate rather than a
+ *  generous one. Three hours absorbs a listed-time error without letting a
+ *  different matchday in. */
+export const MAX_KICKOFF_GAP_MS = 3 * 3600_000
+
+export interface Sided {
+  home: string
+  away: string
+  kickoff: string | null
+}
+
+function timeOf(x: Sided): number | null {
+  if (!x.kickoff) return null
+  const t = Date.parse(x.kickoff)
+  return Number.isFinite(t) ? t : null
+}
+
+/** Do these two rows describe the same fixture? */
+export function sameFixture(a: Sided, b: Sided): boolean {
+  const ta = timeOf(a)
+  const tb = timeOf(b)
+  // A row with no kick-off cannot be placed. Names alone have put Inter Miami
+  // on Inter before; nothing here runs on names alone.
+  if (ta == null || tb == null) return false
+  if (Math.abs(ta - tb) > MAX_KICKOFF_GAP_MS) return false
+
+  const hh = teamScore(a.home, b.home)
+  const aa = teamScore(a.away, b.away)
+  if (hh < MIN_SIDE_SCORE || aa < MIN_SIDE_SCORE) return false
+
+  // The crossed reading. A pairing that works both ways is not a pairing —
+  // and on a derby, where both sides share a city token, it is exactly the
+  // case that would invert the board.
+  const ha = teamScore(a.home, b.away)
+  const ah = teamScore(a.away, b.home)
+  return Math.min(hh, aa) > Math.max(ha, ah)
+}
+
+/** One-to-one placement of `others` onto `base`.
+ *
+ *  Returns a map from the base row's key to the other row. Anything ambiguous
+ *  in either direction is left out and counted. */
+export function placeVenue<B extends Sided, O extends Sided>(
+  base: B[],
+  keyOf: (b: B) => string,
+  others: O[]
+): { placed: Map<string, O>; dropped: number } {
+  const hits = new Map<string, O[]>()
+  const claims = new Map<O, string[]>()
+
+  for (const o of others) {
+    const matched = base.filter((b) => sameFixture(b, o))
+    claims.set(o, matched.map(keyOf))
+    for (const b of matched) {
+      const k = keyOf(b)
+      const list = hits.get(k)
+      if (list) list.push(o)
+      else hits.set(k, [o])
+    }
+  }
+
+  const placed = new Map<string, O>()
+  let dropped = 0
+  for (const [k, list] of Array.from(hits.entries())) {
+    // Two of theirs on one of ours: which is which cannot be known, so neither
+    // is shown.
+    if (list.length !== 1) {
+      dropped += list.length
+      continue
+    }
+    // One of theirs on two of ours: same problem from the other side.
+    if ((claims.get(list[0]) ?? []).length !== 1) {
+      dropped++
+      continue
+    }
+    placed.set(k, list[0])
+  }
+  return { placed, dropped }
+}

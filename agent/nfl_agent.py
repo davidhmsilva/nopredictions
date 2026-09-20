@@ -17,9 +17,9 @@ line, because that is where the model can be wrong).
 
 Two kinds of bet, kept apart in every report:
   * EDGE   — net EV at the CLOB ask clears the threshold (1.5% exact, 3% model),
-             sized quarter-Kelly, from 24h before kick-off.
+             1 unit flat, from 24h before kick-off.
   * FORCED — the game is inside 40 minutes of kick-off with no bet yet: the best
-             EV on the board, whatever its sign, at a small flat stake. This is
+             EV on the board, whatever its sign, at the same 1 unit. This is
              the price of "every game". It is expected to lose roughly the
              half-spread plus the fee; the report shows what it actually cost.
 
@@ -127,10 +127,11 @@ MAX_SPREAD_DIST = 10.0
 MAX_ML_RESID_PP = 1.0         # the model must reproduce the book's own moneyline
 IMPLAUSIBLE_EV_PCT = 12.0     # above this it is our bug until proven otherwise
 
-BANKROLL_U = 100.0
-KELLY_FRAC = 0.25
-EDGE_STAKE_MIN, EDGE_STAKE_MAX = 0.5, 3.0
-FORCED_STAKE = 0.5
+# Every bet is 1 unit, EDGE and FORCED alike, like every other agent on the
+# site (the user's call, 2026-09-19). It was quarter-Kelly on 100u for EDGE
+# (0.5-3u) and 0.5u for FORCED, which made this agent's P&L half the scale of
+# its neighbours'; the 15 trades placed before the change were restated to 1u.
+STAKE_U = 1.0
 
 
 # ── small helpers ────────────────────────────────────────────────────────────
@@ -543,12 +544,6 @@ def verify(cands: list[Cand], n: int = VERIFY_N) -> list[Cand]:
     return [c for c in top if c.verified]
 
 
-def kelly_stake(c: Cand) -> float:
-    cost = cost_per_share(c.ask)
-    f = (c.fair - cost) / (1.0 - cost)
-    return round(min(max(KELLY_FRAC * f * BANKROLL_U, EDGE_STAKE_MIN), EDGE_STAKE_MAX), 2)
-
-
 # ── the database ─────────────────────────────────────────────────────────────
 
 def _conn():
@@ -584,8 +579,7 @@ def ensure_strategy(conn) -> int:
                     "self_settling": True, "obs_version": OBS_VERSION,
                     "fair_value": "pinnacle de-vigged; nfl_model (key numbers) for alternates",
                     "edge_min_exact_pct": EDGE_MIN_EXACT, "edge_min_model_pct": EDGE_MIN_MODEL,
-                    "force_min": FORCE_MIN, "forced_stake_u": FORCED_STAKE,
-                    "edge_stake": f"{KELLY_FRAC} Kelly on {BANKROLL_U}u, [{EDGE_STAKE_MIN}, {EDGE_STAKE_MAX}]u",
+                    "force_min": FORCE_MIN, "stake_u": STAKE_U,
                 }), "Bet every NFL game on Polymarket, choosing the market with the best "
                     "price against the sharp line."))
             sid = cur.fetchone()[0]
@@ -768,9 +762,9 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
         kind, stake = None, 0.0
         th = EDGE_MIN_EXACT if best.source == "sharp_exact" else EDGE_MIN_MODEL
         if fresh and best.source != "pm_mid" and best.ev >= th:
-            kind, stake = "edge", kelly_stake(best)
+            kind, stake = "edge", STAKE_U
         elif mins <= FORCE_MIN:
-            kind, stake = "forced", FORCED_STAKE
+            kind, stake = "forced", STAKE_U
         if kind and (best.depth_usd or 0) < stake * UNIT_USD:
             log.info(f"  {g.title}: {best.label} ask depth ${best.depth_usd or 0:.0f} < stake — skip this cycle")
             kind = None

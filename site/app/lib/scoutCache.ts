@@ -61,7 +61,11 @@ let inFlight: Promise<Board> | null = null
  *  old a board may be. The key is fixed because there is exactly one board —
  *  it takes no arguments, and giving it one would fragment the cache that is
  *  the entire point of this layer. */
-const sweepShared = unstable_cache(sweep, ['scout-board-v1'], {
+// ⚠️ The key carries a version because the Data Cache outlives a deploy. When
+//    a fixture's shape changes — as it did when both venues landed on every
+//    row — a stale entry is served straight into the new renderer, and the
+//    page crashes on a field that did not exist yesterday. Bump it.
+const sweepShared = unstable_cache(sweep, ['scout-board-v2'], {
   revalidate: TTL_MS / 1000,
   tags: ['scout-board'],
 })

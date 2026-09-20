@@ -4,6 +4,13 @@
  *  all of that into its bundle.
  */
 
+/** Venues, quotes, book grades and the best-price pick are one vocabulary
+ *  across the whole site — football and the US sports read the same file, so
+ *  "cheapest venue" cannot come to mean two different things on two pages. */
+import type { BestPick, BookGrade, Quote, Venue, VenueBook } from './venues'
+
+export type { BestPick, BookGrade, Quote, Venue, VenueBook }
+
 export const SPORT_KEYS = ['nfl', 'cfb', 'mlb', 'nba', 'nhl', 'wnba'] as const
 export type SportKey = (typeof SPORT_KEYS)[number]
 
@@ -18,39 +25,6 @@ export const SPORT_META: Record<SportKey, { label: string; path: string; days: n
 
 export function isSportKey(s: string): s is SportKey {
   return (SPORT_KEYS as readonly string[]).includes(s)
-}
-
-export type Venue = 'kalshi' | 'polymarket'
-
-/** How much of a market there is behind a venue's price, on the worse of its
- *  two sides. Same philosophy as the soccer grade and the pressure review's
- *  book gates: a wide or empty book is not a market, whatever it quotes.
- *
- *    clean  spread ≤ 3¢ and at least $250 offered at the best ask, both sides
- *    thin   spread ≤ 3¢ but under $250 at the best ask on a side
- *    wide   spread over 3¢, up to 10¢
- *    none   no two-sided quote, or a spread over 10¢ — Kalshi's placeholder
- *           books (0.02 / 0.81 on every outcome) land here by construction
- */
-export type BookGrade = 'clean' | 'thin' | 'wide' | 'none'
-
-export interface VenueQuote {
-  bid: number | null
-  /** What buying this side costs now, per $1 of payout, BEFORE fees. */
-  ask: number | null
-  spread: number | null
-  /** Dollars offered at the best ask. */
-  askDepthUsd: number | null
-}
-
-export interface VenueLine {
-  venue: Venue
-  url: string
-  home: VenueQuote
-  away: VenueQuote
-  /** Kalshi counts volume in $1 contracts; Polymarket in dollars traded. */
-  volume: number | null
-  grade: BookGrade
 }
 
 export interface TeamRef {
@@ -70,11 +44,14 @@ export interface SportGame {
   detail: string
   home: TeamRef
   away: TeamRef
-  kalshi: VenueLine | null
-  polymarket: VenueLine | null
-  /** The venue whose ask is lower on that side, among books graded above
-   *  `none` — null when only one venue quotes it or the two are level. */
-  best: { home: Venue | null; away: Venue | null }
+  /** Every exchange that lists the game, Polymarket first — the same shape the
+   *  football board carries, so one component renders both. A game only one
+   *  venue lists still appears; the row says the other is not listed. */
+  venues: VenueBook[]
+  /** Where to buy each side, net of each venue's taker fee. */
+  best: Record<'home' | 'away', BestPick>
+  /** Polymarket dollars + Kalshi contracts. What the board ranks on. */
+  volumeCombined: number
 }
 
 export interface SportBoardData {

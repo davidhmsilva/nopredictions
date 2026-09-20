@@ -2620,6 +2620,60 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 .sc-in { color: var(--grey); font-size: 12px; }
 
+/* ── both exchanges on one row ───────────────────────────────────────────────
+   The whole point of the board: each price is the cheaper of the two venues
+   AFTER their taker fees, and the letter says which one won it. A price with
+   no letter is either quoted by one exchange only or level between them —
+   both of which are "nothing to be better than", not a win. */
+
+.sc-c-odd.is-best {
+  color: var(--green); font-weight: 650; background: rgba(34,197,94,.07);
+}
+/* ⚠️ A bare letter after a decimal reads as a magnitude: "2.27K" is 2,270 to
+   anyone who has seen a volume column, and this site has one two columns to
+   the right. So the venue marker is drawn as a TAG — boxed, small caps,
+   lifted off the baseline — and never as a suffix. */
+.sc-best-v {
+  display: inline-block; margin-left: 5px; padding: 0 3px;
+  font-size: 8.5px; font-style: normal; font-weight: 700; letter-spacing: .06em;
+  line-height: 1.5; vertical-align: 2px;
+  border: 1px solid currentColor; border-radius: 3px; opacity: .8;
+}
+
+.sc-venues { display: inline-flex; align-items: center; gap: 7px; }
+.sc-venue {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  font-size: 10.5px; color: var(--grey2); text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.sc-venue em { font-style: normal; color: var(--grey2); opacity: .75; }
+.sc-venue:hover { color: var(--white); border-bottom-color: var(--border2); }
+/* The grade is the book behind the price, on its worst leg. A wide or empty
+   book is not a market whatever it quotes, so it is dimmed rather than shown
+   as an equal. */
+.sc-venue.is-clean { color: var(--green); }
+.sc-venue.is-thin  { color: var(--grey); }
+.sc-venue.is-wide  { color: var(--amber); }
+.sc-venue.is-none  { color: var(--grey2); opacity: .7; }
+.sc-venue.is-missing { color: var(--grey2); opacity: .55; }
+
+.sc-row-score { margin-left: 7px; color: var(--white); font-weight: 700; }
+.sc-pending {
+  font-size: 11px; color: var(--grey2);
+  padding: 2px 7px; border: 1px dashed var(--border2); border-radius: var(--r-sm);
+}
+
+.sc-big-venues { margin-left: auto; display: inline-flex; gap: 3px; }
+.sc-big-top .sc-big-venues + .np-badge, .sc-big-top .sc-big-venues + .sc-in { margin-left: 0; }
+.sc-big-venues em {
+  font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--grey2); border: 1px solid var(--border2); border-radius: 3px;
+  padding: 1px 4px; line-height: 1.25;
+}
+.sc-big-odd.is-best { border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.08); }
+.sc-big-odd.is-best b { color: var(--green); }
+.sc-big-odd .sc-best-v { font-size: 8.5px; }
+
 
 .sc-go {
   display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
@@ -2889,7 +2943,10 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   font-style: normal; font-size: 9.5px; letter-spacing: .06em;
   color: var(--grey2); font-weight: 600;
 }
-.sc-big-odd b { font-size: 14.5px; font-weight: 600; color: var(--white); }
+.sc-big-odd b {
+  display: flex; align-items: baseline; justify-content: center; gap: 0;
+  font-size: 14.5px; font-weight: 600; color: var(--white); white-space: nowrap;
+}
 .sc-big-odd-alt em { color: var(--grey); }
 
 .sc-big-foot {

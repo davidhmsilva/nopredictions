@@ -19,17 +19,16 @@
  */
 
 import { unstable_cache } from 'next/cache'
+import { SPORT_META, type SportBoardData, type SportGame, type SportKey, type TeamRef } from './sportsMeta'
 import {
-  SPORT_META,
-  type BookGrade,
-  type SportBoardData,
-  type SportGame,
-  type SportKey,
-  type TeamRef,
-  type Venue,
-  type VenueLine,
-  type VenueQuote,
-} from './sportsMeta'
+  bestFor,
+  combinedVolume,
+  gradeOf,
+  quoteOf,
+  type OutcomeKey,
+  type Quote,
+  type VenueBook,
+} from './venues'
 
 interface Source {
   espn: string
@@ -151,21 +150,72 @@ function espnTeam(c: any): EspnTeam {
   }
 }
 
+/** Every ET date in the window, inclusive. ESPN files a game under its ET
+ *  date, so this is the same calendar both exchanges use. */
+function etDays(from: Date, to: Date): string[] {
+  const out: string[] = []
+  for (let t = from.getTime(); t <= to.getTime() + 86400_000; t += 86400_000) {
+    const ymd = etOf(new Date(t)).ymd
+    if (out[out.length - 1] !== ymd) out.push(ymd)
+    if (out.length > 40) break
+  }
+  const last = etOf(to).ymd
+  if (out[out.length - 1] !== last) out.push(last)
+  return out
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function espnScoreboard(src: Source, dates: string, groups?: string): Promise<any[]> {
+  const qs = new URLSearchParams({ dates, limit: '500' })
+  if (groups) qs.set('groups', groups)
+  const d = await getJson<any>(
+    `https://site.api.espn.com/apis/site/v2/sports/${src.espn}/scoreboard?${qs}`
+  )
+  return d.events ?? []
+}
+
+/** The schedule.
+ *
+ *  ⚠️ ESPN's date-RANGE query is not reliable. `dates=20260919-20260929`
+ *     answered on 2026-09-13 and returns `400 Failed to get events endpoint`
+ *     on 2026-09-20, for every sport, while the same window asked one day at a
+ *     time answers fine. It is their bug, not ours, and it took all six US
+ *     boards down until the cache expired.
+ *
+ *     So the range is an OPTIMISATION — one request when it works — and the
+ *     per-day fan-out is the guarantee. At three to nine days that is at most
+ *     nine requests (eighteen for college football, which asks two groups),
+ *     and the board is cached for a minute either way.
+ */
 async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame[]> {
   // From last night (a late game can still be live) to the end of the window.
-  const from = etOf(new Date(now.getTime() - 12 * 3600_000)).ymd
-  const to = etOf(new Date(now.getTime() + days * 86400_000)).ymd
-  const base = { dates: `${from}-${to}`, limit: '500' }
-  const queries = src.espnGroups?.length
-    ? src.espnGroups.map((groups) => new URLSearchParams({ ...base, groups }))
-    : [new URLSearchParams(base)]
-  const pages = await Promise.all(
-    queries.map((qs) => getJson<any>(`https://site.api.espn.com/apis/site/v2/sports/${src.espn}/scoreboard?${qs}`))
-  )
+  const start = new Date(now.getTime() - 12 * 3600_000)
+  const end = new Date(now.getTime() + days * 86400_000)
+  const range = `${etOf(start).ymd}-${etOf(end).ymd}`
+  // Without a group the college scoreboard is a top-25 sample, and both
+  // exchanges list FCS games too.
+  const groups = src.espnGroups?.length ? src.espnGroups : [undefined]
+
+  let raw: any[]
+  try {
+    raw = (await Promise.all(groups.map((g) => espnScoreboard(src, range, g)))).flat()
+    if (raw.length === 0) throw new Error('empty range')
+  } catch {
+    const days_ = etDays(start, end)
+    const pages = await Promise.all(
+      groups.flatMap((g) =>
+        days_.map((d) => espnScoreboard(src, d, g).catch(() => [] as any[]))
+      )
+    )
+    raw = pages.flat()
+    if (raw.length === 0) throw new Error('site.api.espn.com returned no schedule')
+  }
+
   const out: EspnGame[] = []
   const seen = new Set<string>()
-  // An FBS-v-FCS game is in both groups; it is one game.
-  for (const e of pages.flatMap((d) => d.events ?? [])) {
+  // An FBS-v-FCS game is in both groups, and a day appears in both the range
+  // and the fallback. It is one game.
+  for (const e of raw) {
     if (seen.has(String(e.id))) continue
     seen.add(String(e.id))
     const c = e.competitions?.[0]
@@ -188,43 +238,12 @@ async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame
   }
   return out
 }
+
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// ── book grade ───────────────────────────────────────────────────────────────
-// Definitions live beside the type in sportsMeta.ts; these are its numbers.
-
-const CLEAN_SPREAD = 0.03
-const WIDE_SPREAD = 0.1
-const CLEAN_DEPTH_USD = 250
-/** Half a cent: below it the two asks are the same price on a 1¢ tick. */
-const BEST_MIN_GAP = 0.005
-
-function quote(bid: number | null, ask: number | null, askDepthUsd: number | null): VenueQuote {
-  const b = bid != null && bid > 0 ? bid : null
-  const a = ask != null && ask > 0 && ask < 1 ? ask : null
-  return { bid: b, ask: a, spread: b != null && a != null ? round3(a - b) : null, askDepthUsd: a != null ? askDepthUsd : null }
-}
-
-function gradeOf(x: VenueQuote, y: VenueQuote): BookGrade {
-  const sides = [x, y]
-  if (sides.some((q) => q.spread == null)) return 'none'
-  const worst = Math.max(x.spread as number, y.spread as number)
-  if (worst > WIDE_SPREAD + 1e-9) return 'none'
-  if (worst > CLEAN_SPREAD + 1e-9) return 'wide'
-  // Depth counts only where the venue told us; Gamma's fallback quote has none.
-  return sides.some((q) => q.askDepthUsd != null && q.askDepthUsd < CLEAN_DEPTH_USD) ? 'thin' : 'clean'
-}
-
-function bestOf(k: VenueLine | null, p: VenueLine | null, side: 'home' | 'away'): Venue | null {
-  const real = (l: VenueLine | null): number | null => {
-    const a = l && l.grade !== 'none' ? l[side].ask : null
-    return a != null && a > 0.01 && a < 0.99 ? a : null
-  }
-  const ka = real(k)
-  const pa = real(p)
-  if (ka == null || pa == null || Math.abs(ka - pa) < BEST_MIN_GAP) return null
-  return ka < pa ? 'kalshi' : 'polymarket'
-}
+// The grade thresholds, the tradeable band and the best-price pick all live in
+// ./venues now — one definition for football and the US sports both, because
+// "cheapest venue" answering differently on two pages is a bug waiting.
 
 // ── Kalshi ───────────────────────────────────────────────────────────────────
 
@@ -303,23 +322,24 @@ function placeKalshi(ev: KEvent, games: EspnGame[]): { game: EspnGame; home: KMa
   return hits.length === 1 ? hits[0] : null
 }
 
-function kalshiQuote(m: KMarket): VenueQuote {
+function kalshiQuote(m: KMarket): Quote {
   const ask = num(m.yes_ask_dollars)
   const size = num(m.yes_ask_size_fp)
-  return quote(num(m.yes_bid_dollars), ask, ask != null && size != null ? ask * size : null)
+  return quoteOf(num(m.yes_bid_dollars), ask, ask != null && size != null ? ask * size : null)
 }
 
-function kalshiLine(src: Source, ev: KEvent, home: KMarket, away: KMarket): VenueLine {
-  const h = kalshiQuote(home)
-  const a = kalshiQuote(away)
+function kalshiLine(src: Source, ev: KEvent, home: KMarket, away: KMarket): VenueBook {
+  const quotes: Partial<Record<OutcomeKey, Quote>> = {
+    home: kalshiQuote(home),
+    away: kalshiQuote(away),
+  }
   const volume = (num(home.volume_fp) ?? 0) + (num(away.volume_fp) ?? 0)
   return {
     venue: 'kalshi',
     url: `https://kalshi.com/markets/${src.kalshiSeries.toLowerCase()}/${src.kalshiSlug}/${ev.event_ticker.toLowerCase()}`,
-    home: h,
-    away: a,
     volume: volume > 0 ? volume : null,
-    grade: gradeOf(h, a),
+    grade: gradeOf([quotes.home, quotes.away]),
+    quotes,
   }
 }
 
@@ -355,7 +375,7 @@ interface PmGame {
   home: PmTeam
   away: PmTeam
   tokens: { home: string; away: string }
-  gamma: { home: VenueQuote; away: VenueQuote }
+  gamma: { home: Quote; away: Quote }
   volume: number | null
 }
 
@@ -410,8 +430,8 @@ function parsePm(ev: PmEvent): PmGame | null {
   // 1 − ask / 1 − bid. Only a fallback: the book itself is read below.
   const bb = num(ml.bestBid)
   const ba = num(ml.bestAsk)
-  const q0 = quote(bb, ba, null)
-  const q1 = quote(ba != null ? 1 - ba : null, bb != null ? 1 - bb : null, null)
+  const q0 = quoteOf(bb, ba, null)
+  const q1 = quoteOf(ba != null ? 1 - ba : null, bb != null ? 1 - bb : null, null)
   const first = s0 === 'home'
   return {
     slug: ev.slug,
@@ -451,8 +471,8 @@ interface ClobBook {
 
 /** The live book for every placed token, in as few requests as possible —
  *  Gamma's quote lags the CLOB and carries no depth. */
-async function pmBooks(tokens: string[]): Promise<Map<string, VenueQuote>> {
-  const out = new Map<string, VenueQuote>()
+async function pmBooks(tokens: string[]): Promise<Map<string, Quote>> {
+  const out = new Map<string, Quote>()
   for (let i = 0; i < tokens.length; i += 400) {
     const books = await getJson<ClobBook[]>('https://clob.polymarket.com/books', {
       method: 'POST',
@@ -475,7 +495,7 @@ async function pmBooks(tokens: string[]): Promise<Map<string, VenueQuote>> {
           askSize = s
         }
       }
-      out.set(b.asset_id, quote(bid, ask, ask != null ? ask * askSize : null))
+      out.set(b.asset_id, quoteOf(bid, ask, ask != null ? ask * askSize : null))
     }
   }
   return out
@@ -503,7 +523,7 @@ async function build(sport: SportKey): Promise<SportBoardData> {
 
   const from = etOf(new Date(now.getTime() - 12 * 3600_000)).ymd
   const to = etOf(new Date(horizon)).ymd
-  const slots = new Map<string, { kalshi: VenueLine | null; pm: PmGame | null }>()
+  const slots = new Map<string, { kalshi: VenueBook | null; pm: PmGame | null }>()
   const slot = (id: string) => {
     let s = slots.get(id)
     if (!s) slots.set(id, (s = { kalshi: null, pm: null }))
@@ -557,25 +577,28 @@ async function build(sport: SportKey): Promise<SportBoardData> {
     if (s.pm) tokens.push(s.pm.tokens.home, s.pm.tokens.away)
   })
   // A failed book read leaves Gamma's quote in place, without depth.
-  const books = tokens.length ? await pmBooks(tokens).catch(() => new Map<string, VenueQuote>()) : new Map()
+  const books = tokens.length ? await pmBooks(tokens).catch(() => new Map<string, Quote>()) : new Map()
 
   const rows: SportGame[] = []
   for (const g of games) {
     const s = slots.get(g.id)
     if (!s || (!s.kalshi && !s.pm) || g.state === 'post' || Date.parse(g.start) > horizon) continue
-    let polymarket: VenueLine | null = null
+    let polymarket: VenueBook | null = null
     if (s.pm) {
-      const home = books.get(s.pm.tokens.home) ?? s.pm.gamma.home
-      const away = books.get(s.pm.tokens.away) ?? s.pm.gamma.away
+      const quotes: Partial<Record<OutcomeKey, Quote>> = {
+        home: books.get(s.pm.tokens.home) ?? s.pm.gamma.home,
+        away: books.get(s.pm.tokens.away) ?? s.pm.gamma.away,
+      }
       polymarket = {
         venue: 'polymarket',
         url: `https://polymarket.com/event/${s.pm.slug}`,
-        home,
-        away,
         volume: s.pm.volume,
-        grade: gradeOf(home, away),
+        grade: gradeOf([quotes.home, quotes.away]),
+        quotes,
       }
     }
+    // Polymarket first, the way every board on the site orders them.
+    const venues = [polymarket, s.kalshi].filter((v): v is VenueBook => v != null)
     rows.push({
       id: g.id,
       start: g.start,
@@ -583,9 +606,12 @@ async function build(sport: SportKey): Promise<SportBoardData> {
       detail: g.detail,
       home: teamRef(g.home),
       away: teamRef(g.away),
-      kalshi: s.kalshi,
-      polymarket,
-      best: { home: bestOf(s.kalshi, polymarket, 'home'), away: bestOf(s.kalshi, polymarket, 'away') },
+      venues,
+      best: bestFor(venues),
+      volumeCombined: combinedVolume({
+        polymarket: polymarket?.volume ?? null,
+        kalshi: s.kalshi?.volume ?? null,
+      }),
     })
   }
   rows.sort((a, b) => {
@@ -607,7 +633,7 @@ async function build(sport: SportKey): Promise<SportBoardData> {
  *  landing on an instance that never swept reads someone else's sweep. */
 const TTL_MS = 60_000
 
-const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v1'], {
+const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v2'], {
   revalidate: TTL_MS / 1000,
   tags: ['sport-board'],
 })

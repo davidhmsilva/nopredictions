@@ -15,8 +15,8 @@ export function generateStaticParams() {
 export function generateMetadata({ params }: { params: { sport: string } }): Metadata {
   if (!isSportKey(params.sport)) return {}
   const { label } = SPORT_META[params.sport]
-  const title = `${label} on Kalshi and Polymarket, side by side — NOPREDICTIONS`
-  const description = `Every ${label} game on Kalshi and Polymarket: both moneylines at the ask, the book behind each, and which venue is cheaper. American, decimal or implied odds. No tips.`
+  const title = `${label}: the better price, on Kalshi and Polymarket — NOPREDICTIONS`
+  const description = `Every ${label} game on Kalshi and Polymarket, ranked by combined volume: both moneylines at the ask, the book behind each, and the cheaper venue marked after each one's taker fee. American, decimal or implied odds. No tips.`
   const url = `https://nopredictions.com/${params.sport}`
   return {
     title,
