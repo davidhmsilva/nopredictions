@@ -90,7 +90,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from fixture_match import MIN_SIDE_SCORE, team_score
+from fixture_match import MIN_SIDE_SCORE, _norm_key, team_score
 
 log = logging.getLogger(__name__)
 
@@ -282,6 +282,54 @@ QUOTE_TTL_S = 45
 MAX_INPLAY_QUOTE_AGE_S = 90.0
 
 ET = ZoneInfo('America/New_York')
+
+# ---------------------------------------------------------------------------
+# Clubs Kalshi spells differently
+# ---------------------------------------------------------------------------
+
+ALIASES_PATH = Path(__file__).parent / 'kalshi_aliases.json'
+
+
+def _load_aliases() -> dict[str, str]:
+    """Every spelling -> a shared canonical key, both sides normalised.
+
+    Kalshi is a THIRD vocabulary: `fixture_aliases.json` is Polymarket <->
+    api-football and `team_aliases.json` is Polymarket <-> our database, and
+    neither reaches "SL Benfica" for "Sport Lisboa e Benfica".
+    """
+    try:
+        raw = json.loads(ALIASES_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+    return {_norm_key(k): _norm_key(v) for k, v in (raw.get('aliases') or {}).items()}
+
+
+_ALIASES = _load_aliases()
+
+
+def same_club(a: str, b: str) -> bool:
+    """Are these two spellings the same club?
+
+    The alias table first, and it decides by EXACT EQUALITY of the canonical
+    both names resolve to -- never by scoring. That directness is what makes a
+    hand-written table safe: "Leuven" can be aliased without the word swallowing
+    every club that contains it.
+
+    ⚠️ The scorer underneath is not infallible in the other direction either.
+       "Fortaleza FC" and "Chaco For Ever" score 1.00, because the abbreviation
+       rule lets "For" prefix "Fortaleza". What contains that is the caller's
+       requirement that BOTH sides of a fixture agree and that the pairing be
+       unique -- never this function on its own.
+    """
+    ca, cb = _ALIASES.get(_norm_key(a)), _ALIASES.get(_norm_key(b))
+    if ca is not None and ca == cb:
+        return True
+    return team_score(a, b) >= MIN_SIDE_SCORE
+
+
+def alias_count() -> int:
+    return len(_ALIASES)
+
 
 _MONTH = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
           'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'}
@@ -867,12 +915,16 @@ class KalshiSoccerIndex:
         for f in self._fixtures:
             if f.et_date != day:
                 continue
-            hh = team_score(home, f.home)
-            aa = team_score(away, f.away)
-            if hh < MIN_SIDE_SCORE or aa < MIN_SIDE_SCORE:
+            if not (same_club(home, f.home) and same_club(away, f.away)):
                 continue
-            if min(hh, aa) <= max(team_score(home, f.away), team_score(away, f.home)):
-                continue
+            # The crossed reading still has to score worse. An alias makes a
+            # pairing possible; it never makes one unique, and a derby where
+            # both sides share a city token is exactly the case that would
+            # invert the board.
+            if max(team_score(home, f.away), team_score(away, f.home)) >= min(
+                    team_score(home, f.home), team_score(away, f.away)):
+                if not (_ALIASES.get(_norm_key(home)) or _ALIASES.get(_norm_key(away))):
+                    continue
             hits.append(f)
         return hits[0] if len(hits) == 1 else None
 

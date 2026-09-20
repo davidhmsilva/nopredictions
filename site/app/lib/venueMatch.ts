@@ -23,7 +23,7 @@
  *  on Polymarket's 185, zero ambiguous.
  */
 
-import { teamScore } from './teamMatch'
+import { sameClub, teamScore } from './teamMatch'
 
 /** The alias-aware scorer's bar for "these are the same club". Below it the
  *  pairing is unknown, never a guess. */
@@ -76,16 +76,21 @@ export function sameFixture(a: Sided, b: Sided): boolean {
     if (Math.abs(ta - tb) > MAX_KICKOFF_GAP_MS) return false
   }
 
+  // `sameClub` is the scorer PLUS the hand table of clubs Kalshi spells its
+  // own way — "SL Benfica" for "Sport Lisboa e Benfica", which scores 0.25 and
+  // cost this join the Porto v Benfica fixture on 2026-09-20.
+  if (!sameClub(a.home, b.home) || !sameClub(a.away, b.away)) return false
+
+  // The crossed reading still has to score worse. An alias makes a pairing
+  // possible; it never makes one unique, and on a derby where both sides share
+  // a city token that is exactly the case that would invert the board. An
+  // aliased pair is exempt, because its scores are 0.25-ish by construction.
   const hh = teamScore(a.home, b.home)
   const aa = teamScore(a.away, b.away)
-  if (hh < MIN_SIDE_SCORE || aa < MIN_SIDE_SCORE) return false
-
-  // The crossed reading. A pairing that works both ways is not a pairing —
-  // and on a derby, where both sides share a city token, it is exactly the
-  // case that would invert the board.
   const ha = teamScore(a.home, b.away)
   const ah = teamScore(a.away, b.home)
-  return Math.min(hh, aa) > Math.max(ha, ah)
+  if (Math.min(hh, aa) > Math.max(ha, ah)) return true
+  return hh < MIN_SIDE_SCORE || aa < MIN_SIDE_SCORE
 }
 
 /** One-to-one placement of `others` onto `base`.

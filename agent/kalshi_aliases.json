@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Clubs that Kalshi spells differently from Polymarket, by hand.",
+    "",
+    "WHY A THIRD TABLE. agent/fixture_aliases.json is Polymarket <-> api-football",
+    "and agent/team_aliases.json is Polymarket <-> our own database. Kalshi is a",
+    "third vocabulary again: it shortens and truncates where Polymarket writes the",
+    "official name, so neither existing table reaches it. Found 2026-09-20 from a",
+    "user noticing that FC Porto vs Sport Lisboa e Benfica was on Kalshi while the",
+    "board said it was not: the away side scored 0.25 against 'SL Benfica', under",
+    "the 0.60 bar, so the fixture failed closed.",
+    "",
+    "HOW IT IS APPLIED. Every spelling maps to a shared canonical key, and two",
+    "names match only when BOTH resolve to the SAME canonical. That is exact",
+    "equality, not scoring, which is what makes a hand table safe: 'Leuven' can be",
+    "aliased without the word Leuven swallowing every other club that contains it.",
+    "",
+    "⚠️ NOTHING INFERS THESE. A scan can suggest a pair but cannot confirm it —",
+    "   the same scan that found Benfica also proposed 'Fortaleza FC' = 'Chaco For",
+    "   Ever' at 1.00, because the abbreviation rule lets 'For' prefix 'Fortaleza'.",
+    "   Every entry below was checked against the fixture's other side, which was",
+    "   certain independently, and against the Kalshi event ticker's own team",
+    "   codes. Add entries the same way or not at all."
+  ],
+  "aliases": {
+    "sport lisboa e benfica": "benfica",
+    "sl benfica": "benfica",
+    "benfica lisbon": "benfica",
+
+    "ad tarma": "tarma",
+    "asociacion deportiva tarma": "tarma",
+
+    "fc internazionale milano": "internazionale",
+    "internazionale": "internazionale",
+    "inter milano": "internazionale",
+
+    "liverpool montevideo": "liverpool montevideo",
+    "liverpool m": "liverpool montevideo",
+
+    "hb koge": "koge",
+    "koege": "koge",
+
+    "paris saint germain": "paris saint germain",
+    "psg": "paris saint germain",
+
+    "hacken": "hacken",
+    "hacken gothenburg": "hacken",
+
+    "oud heverlee leuven women": "oud heverlee leuven",
+    "leuven": "oud heverlee leuven"
+  },
+  "provenance": {
+    "added": "2026-09-20",
+    "method": "Scanned the live board for fixtures whose ET date agreed and whose OTHER side scored >= 0.95, then confirmed each pair by hand against the Kalshi event ticker. 16 candidates surfaced; 8 clubs were confirmed and the rest were different fixtures sharing a day.",
+    "measured": "58 fixtures placed on the board at the time, 4 of which were lost to a name the scorer could not reach."
+  }
+}

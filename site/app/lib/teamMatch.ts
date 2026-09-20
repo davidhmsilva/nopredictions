@@ -14,6 +14,17 @@
  *     against the longer name, with reserve and youth sides disqualified.
  */
 
+import KALSHI_ALIASES from './kalshi_aliases.json'
+
+/** Letters NFKD does not decompose. Ported from `fixture_match._LETTER_FOLD`
+ *  and it has to stay identical: without it "HB Køge" normalises to "hb k ge"
+ *  here and "hb koge" there, and the alias table only matches one of them. */
+const LETTER_FOLD: Record<string, string> = {
+  'ø': 'o', 'Ø': 'o', 'æ': 'ae', 'Æ': 'ae', 'œ': 'oe', 'Œ': 'oe',
+  'å': 'a', 'Å': 'a', 'ß': 'ss', 'đ': 'd', 'Đ': 'd', 'ð': 'd', 'Ð': 'd',
+  'ł': 'l', 'Ł': 'l', 'ı': 'i', 'İ': 'i', 'þ': 'th', 'Þ': 'th',
+}
+
 const NAME_NOISE = new Set([
   'fc', 'cf', 'ca', 'aa', 'sc', 'ac', 'as', 'sv', 'sk', 'fk', 'afc', 'bk', 'if',
   'cd', 'ud', 'sd', 'rc', 'cs', 'club', 'de', 'do', 'da', 'the',
@@ -36,8 +47,12 @@ export const MIN_SIDE_SCORE = 0.6
  *  "platense" no. */
 const MAX_ABBREV_LEN = 4
 
+function fold(s: string): string {
+  return s.replace(/[øØæÆœŒåÅßđĐðÐłŁıİþÞ]/g, (c) => LETTER_FOLD[c] ?? c)
+}
+
 function normTeam(s: string): string {
-  return s
+  return fold(s)
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
@@ -87,4 +102,47 @@ export function fixtureMatches(
     teamScore(pmHome, otherHome) >= MIN_SIDE_SCORE &&
     teamScore(pmAway, otherAway) >= MIN_SIDE_SCORE
   )
+}
+
+
+// ── clubs one feed spells differently from another ───────────────────────────
+
+/** The alias table's lookup key. Club suffixes are dropped, squad markers are
+ *  NOT — "Benfica" and "Benfica B" have to stay different keys. Mirrors
+ *  `fixture_match._norm_key`, and the two must agree character for character
+ *  or the shared JSON matches on one side only. */
+export function aliasKey(name: string): string {
+  return normTeam(name)
+    .split(/\s+/)
+    .filter((t) => t && !NAME_NOISE.has(t))
+    .join(' ')
+}
+
+const ALIASES: Map<string, string> = new Map(
+  Object.entries((KALSHI_ALIASES as { aliases?: Record<string, string> }).aliases ?? {}).map(
+    ([k, v]) => [aliasKey(k), aliasKey(v)]
+  )
+)
+
+/** Are these two spellings the same club?
+ *
+ *  The alias table first, and it decides by EXACT EQUALITY of the canonical
+ *  both names resolve to — never by scoring. That directness is what makes a
+ *  hand-written table safe: "Leuven" can be aliased without the word
+ *  swallowing every club that contains it.
+ *
+ *  ⚠️ The scorer underneath is not infallible in the other direction either.
+ *     "Fortaleza FC" and "Chaco For Ever" score 1.00, because the abbreviation
+ *     rule lets "For" prefix "Fortaleza". What contains that is the caller's
+ *     requirement that BOTH sides of a fixture agree and that the pairing be
+ *     unique — never this function on its own.
+ */
+export function sameClub(a: string, b: string): boolean {
+  const ca = ALIASES.get(aliasKey(a))
+  if (ca !== undefined && ca === ALIASES.get(aliasKey(b))) return true
+  return teamScore(a, b) >= MIN_SIDE_SCORE
+}
+
+export function aliasCount(): number {
+  return ALIASES.size
 }

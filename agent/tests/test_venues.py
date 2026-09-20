@@ -363,3 +363,68 @@ def test_the_inplay_budget_is_tighter_than_the_price_clock():
     # still or every lookup would be refused.
     assert V.MAX_INPLAY_QUOTE_AGE_S <= 120
     assert V.QUOTE_TTL_S < V.MAX_INPLAY_QUOTE_AGE_S
+
+
+# ── clubs Kalshi spells its own way ──────────────────────────────────────────
+
+def test_the_fixture_a_user_found_that_the_join_refused():
+    """FC Porto vs Sport Lisboa e Benfica, 2026-09-20.
+
+    Kalshi listed it as "Porto vs SL Benfica" and the board said Kalshi did not
+    have the game. The data was there the whole time; the join refused it
+    because the away side scored 0.25 against a 0.60 bar -- one shared token
+    out of four. Failing closed is right, this was just a false negative.
+    """
+    assert V.same_club('FC Porto', 'Porto')
+    assert V.same_club('Sport Lisboa e Benfica', 'SL Benfica')
+    assert V.same_club('Sport Lisboa e Benfica', 'Benfica Lisbon')
+
+
+def test_an_alias_decides_by_exact_equality_not_by_scoring():
+    # "Leuven" is aliased, and the word must not swallow every club that
+    # contains it. That is the whole reason the table maps to a canonical and
+    # compares canonicals, rather than loosening the scorer.
+    assert V.same_club('Oud-Heverlee Leuven Women', 'Leuven')
+    assert not V.same_club('Leuven', 'Leuven B')
+
+
+def test_an_alias_never_crosses_a_squad_marker():
+    # A reserve side is a different team playing a different match.
+    assert not V.same_club('Sport Lisboa e Benfica', 'Benfica B')
+    assert not V.same_club('Sport Lisboa e Benfica', 'Benfica U23')
+
+
+def test_the_alias_table_does_not_rescue_a_pair_that_is_simply_wrong():
+    assert not V.same_club('Real Salt Lake', 'Real Monarchs')
+    assert not V.same_club('CA River Plate', 'Platense')
+    assert not V.same_club('Minnesota United', 'Minnesota United II')
+
+
+def test_the_scorer_underneath_is_not_infallible_either():
+    """The finding that stopped this table being generated rather than written.
+
+    A scan for "one side certain, the other not" proposed `Fortaleza FC` =
+    `Chaco For Ever`, because the abbreviation rule lets "For" prefix
+    "Fortaleza". Nothing here fixes that -- what contains it is the caller's
+    requirement that BOTH sides agree and that the pairing be unique -- but it
+    is why every entry in the table was checked by hand.
+    """
+    from fixture_match import team_score
+    assert team_score('Fortaleza FC', 'Chaco For Ever') == 1.0
+    # And the containment: the fixture is still refused, because its other side
+    # does not agree.
+    idx = _index(V.KalshiFixture('KXT-26SEP20AB', 's', 'c',
+                                 'Chaco For Ever', 'Almirante Brown', '20260920', 'u'))
+    assert idx.fixture('Fortaleza FC', 'CDP Junior FC', '2026-09-20T19:00:00Z') is None
+
+
+def test_the_alias_keys_match_the_python_normaliser():
+    # The site ships the same JSON and normalises it with its own port. A key
+    # that differs by one character matches on one side only, so these are
+    # pinned on both: see /tmp parity check and site/app/lib/teamMatch.ts.
+    from fixture_match import _norm_key
+    assert _norm_key('HB Køge') == 'hb koge'          # ø is folded, not dropped
+    assert _norm_key('Paris Saint-Germain FC') == 'paris saint germain'
+    assert _norm_key('BK Häcken FF') == 'hacken'
+    assert _norm_key('Oud-Heverlee Leuven Women') == 'oud heverlee leuven women'
+    assert V.alias_count() > 0
