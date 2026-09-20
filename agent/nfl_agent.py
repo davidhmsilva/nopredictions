@@ -803,14 +803,148 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
 
 # ── settlement ───────────────────────────────────────────────────────────────
 
+ESPN_NFL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+
+
+def _espn_finals() -> dict[tuple[str, str], tuple[int, int]]:
+    """{(home, away) normalised: (home_score, away_score)} for FINISHED games only.
+
+    ⚠️ The game STATE gates this, never a clock. On 2026-09-20 our 3h settle gate
+    had already passed on a 17-17 game heading to overtime and on a suspended
+    one — both would have graded as a result that had not happened. Only
+    STATUS_FINAL counts; everything else is simply absent from the map.
+
+    ⚠️ DO NOT SET A USER-AGENT — ESPN's edge serves library defaults and 403s
+    browser-shaped and custom agents (see agent/espn_stats.py)."""
+    try:
+        d = requests.get(ESPN_NFL, timeout=15).json()
+    except Exception as exc:                                        # noqa: BLE001
+        log.warning(f"espn scoreboard unavailable ({exc}) — no provisional grading this run")
+        return {}
+    out: dict[tuple[str, str], tuple[int, int]] = {}
+    for ev in d.get("events") or []:
+        for c in ev.get("competitions") or []:
+            if ((c.get("status") or {}).get("type") or {}).get("name") != "STATUS_FINAL":
+                continue
+            side = {}
+            for t in c.get("competitors") or []:
+                nm_ = ((t.get("team") or {}).get("displayName"))
+                sc = t.get("score")
+                if not nm_ or sc is None:
+                    continue
+                try:
+                    side[t.get("homeAway")] = (_norm(nm_), int(sc))
+                except (TypeError, ValueError):
+                    continue
+            if "home" in side and "away" in side:
+                out[(side["home"][0], side["away"][0])] = (side["home"][1], side["away"][1])
+    return out
+
+
+def grade(market_type: str, line, side: str, home: str, away: str,
+          home_score: int, away_score: int) -> tuple[str, str] | None:
+    """(result, human-readable basis) for a finished game, or None if ungradeable.
+
+    `line` is signed from the BOUGHT team's own side — Lions −7.5, Giants +6.5 —
+    which is how nfl_candidates stores it (db/051). Fails closed on a side that
+    does not name one of the two teams: a side error inverts the bet rather than
+    blunting it."""
+    total = home_score + away_score
+    if market_type == "totals":
+        if line is None or side not in ("Over", "Under"):
+            return None
+        won = total > float(line) if side == "Over" else total < float(line)
+        sign = ">" if total > float(line) else "<"
+        return ("won" if won else "lost",
+                f"{away} {away_score} @ {home} {home_score} — total {total} {sign} {float(line):g}")
+    if _norm(side) == _norm(home):
+        mine, theirs, opp = home_score, away_score, away
+    elif _norm(side) == _norm(away):
+        mine, theirs, opp = away_score, home_score, home
+    else:
+        return None                                   # unknown side: fail closed
+    if market_type == "moneyline":
+        res = "won" if mine > theirs else "lost" if mine < theirs else "void"
+        return (res, f"{side} {mine} — {opp} {theirs}")
+    if market_type == "spreads":
+        if line is None:
+            return None
+        margin = mine - theirs + float(line)
+        res = "won" if margin > 0 else "lost" if margin < 0 else "void"
+        return (res, f"{side} {mine} — {opp} {theirs}, {float(line):+g} → {margin:+g}")
+    return None
+
+
+def provisional(conn, pending: list[dict], verdicts: dict) -> int:
+    """Grade from the SCORE the trades the venue has not resolved.
+
+    Display only: `result` and `payout_units` are never touched here, so no
+    yield, CLV or report number moves. Polymarket's own flag arrives 3.25h-6.0h
+    after kick-off (median 4.9h, n=15) while our settle gate opens at 3.0h — so
+    without this the record reads OPEN for hours on a game everyone has seen
+    finish, with the price already at 0.996.
+
+    Where the venue HAS resolved, the two are compared and a disagreement is
+    logged loudly: that is the rule_correct arm of db/039, free on every trade."""
+    unresolved = [p for p in pending
+                  if not verdicts.get(p["external_id"]) and p.get("market_type")
+                  and p.get("provisional_result") is None]
+    resolved = [p for p in pending if verdicts.get(p["external_id"])]
+    if not (unresolved or resolved):
+        return 0
+    finals = _espn_finals()                       # network first, no txn open
+    if not finals:
+        return 0
+
+    def graded(p):
+        sc = finals.get((_norm(p["home_team"]), _norm(p["away_team"])))
+        if not sc:
+            return None
+        return grade(p["market_type"], p["line"], p["side"],
+                     p["home_team"], p["away_team"], sc[0], sc[1])
+
+    # the audit: our grading against the venue's own verdict, where both exist
+    for p in resolved:
+        g = graded(p)
+        if not g:
+            continue
+        v = verdicts[p["external_id"]]
+        if p["pm_token_id"] not in v:
+            continue
+        pay = v[p["pm_token_id"]]
+        theirs = "won" if pay == 1.0 else "lost" if pay == 0.0 else "void"
+        if g[0] != theirs:
+            log.warning(f"  ⚠️ pt#{p['id']} GRADING DISAGREES with the venue: "
+                        f"we say {g[0]}, Polymarket resolved {theirs} — {g[1]}")
+
+    n = 0
+    for p in unresolved:
+        g = graded(p)
+        if not g:
+            continue
+        with conn.cursor() as cur:
+            cur.execute("""UPDATE paper_trades
+                              SET provisional_result = %s, provisional_detail = %s,
+                                  provisional_source = 'espn_final', provisional_at = now()
+                            WHERE id = %s AND result IS NULL""", (g[0], g[1], p["id"]))
+        log.info(f"  provisional pt#{p['id']}: {g[0].upper()} — {g[1]} (venue has not resolved)")
+        n += 1
+    if n:
+        log.info(f"graded {n} finished games the venue has not resolved yet")
+    return n
+
+
 def settle() -> int:
     conn = _conn()
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
-            SELECT pt.id, pt.pm_token_id, pt.stake_units, pt.entry_price, pm.external_id
+            SELECT pt.id, pt.pm_token_id, pt.stake_units, pt.entry_price, pm.external_id,
+                   pt.provisional_result,
+                   c.market_type, c.line, c.side, c.home_team, c.away_team
               FROM paper_trades pt
               JOIN strategies s ON s.id = pt.strategy_id
               JOIN pm_markets pm ON pm.id = pt.market_id
+              LEFT JOIN nfl_candidates c ON c.paper_trade_id = pt.id AND c.chosen
              WHERE s.name = %s AND pt.result IS NULL
                AND pm.resolution_time < now() - interval '3 hours'""", (STRATEGY_NAME,))
         pending = [dict(r) for r in cur.fetchall()]
@@ -841,6 +975,7 @@ def settle() -> int:
                             WHERE id = %s AND result IS NULL""", (result, round(payout, 4), p["id"]))
         n += 1
     log.info(f"settled {n} of {len(pending)} finished NFL trades")
+    provisional(conn, pending, verdicts)
     return n
 
 

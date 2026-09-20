@@ -2152,6 +2152,39 @@ alternates that "best" is largely model error the haircut is meant to absorb.
 Nothing here is evidence the choice is wrong; it is a reason the EDGE arm's
 `sharp_exact` bets are the only ones worth reading a yield off.
 
+### A result before the venue says so (2026-09-20)
+
+The record read OPEN for hours on games everyone had watched finish. Not a bug
+in the settler — **Polymarket had not resolved the markets.** `settle()` waits
+for the CLOB `winner` flag, and measured on the first 15 settled trades that
+flag lands **3.25h-6.0h after kick-off (median 4.9h)** while our settle gate
+opens at **3.0h — earlier than the flag on 15 of 15**. So the window always
+exists: `closed=False`, `winner=False`, and an ask already reading 0.996.
+
+`provisional(...)` grades those trades from the **final score** (ESPN,
+`STATUS_FINAL`) into `provisional_result` / `provisional_detail` /
+`provisional_source` / `provisional_at` (db/056). **`result` and
+`payout_units` are never touched**, so no yield, CLV or `--report` number moves
+— it is a display state, not a settlement.
+
+🔑 **The game STATE gates it, never the clock.** On the first run the 3h gate
+had already passed on **Packers 17-17 Jets heading to overtime** and on
+**Browns 23-19 Buccaneers, suspended**. Both would have graded an outcome that
+had not happened; neither is `STATUS_FINAL`, so neither was graded. The other
+six were: 3 won, 3 lost, agreeing with what the price already said.
+
+Grading is `nfl_agent.grade()`, pure and tested (19 cases). `line` is signed
+from the **bought team's own side** — Lions −7.5, Giants +6.5, as db/051 stores
+it — so a spread is `mine − theirs + line`, a whole-number push is `void`, and
+a `side` naming neither team returns None rather than a guess: a side error
+inverts the bet instead of blunting it.
+
+**It also audits itself for free.** Where the venue HAS resolved, our grading is
+compared with its verdict and a disagreement is logged loudly — the
+`rule_correct` arm of db/039, on every trade, at no extra cost.
+
+⚠️ Nothing renders this yet; the columns are there for the page to read.
+
 ### Who pays — the NFL profit map (2026-09-13)
 
 The user's correction, taken as the frame: the premise is PROFIT, and a taker's

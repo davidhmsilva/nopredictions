@@ -144,3 +144,88 @@ def test_key_numbers_make_3_worth_more_than_4():
     # at a pick'em, moving from +2.5 to +3.5 buys far more than +3.5 to +4.5
     v = lambda give: nm.cover_prob(0.0, give)              # noqa: E731
     assert (v(-3.5) - v(-2.5)) > 2 * (v(-4.5) - v(-3.5))
+
+
+# ── provisional grading from the final score (db/056) ────────────────────────
+#
+# These are the real 2026-09-20 games that sat OPEN for hours while Polymarket
+# had not resolved. A side error here inverts the bet, so every branch is
+# pinned, including the two games the 3h clock wrongly called finished.
+
+CAR_ATL = ("Atlanta Falcons", "Carolina Panthers", 3, 34)      # home, away, home_sc, away_sc
+
+
+@pytest.mark.parametrize("mt,line,side,home,away,hs,as_,want", [
+    # totals — the line is never an integer, so no push
+    ("totals", 40.5, "Under", "Chicago Bears", "Minnesota Vikings", 3, 9, "won"),
+    ("totals", 39.5, "Under", "Baltimore Ravens", "New Orleans Saints", 17, 24, "lost"),
+    ("totals", 46.5, "Under", "Tennessee Titans", "Philadelphia Eagles", 20, 24, "won"),
+    ("totals", 52.5, "Under", "New England Patriots", "Pittsburgh Steelers", 20, 3, "won"),
+    ("totals", 40.5, "Over", "Chicago Bears", "Minnesota Vikings", 3, 9, "lost"),
+    # spreads — `line` is signed from the BOUGHT team's side
+    ("spreads", 6.5, "Atlanta Falcons", *CAR_ATL, "lost"),        # lost by 31, +6.5
+    ("spreads", 6.5, "Houston Texans", "Houston Texans", "Cincinnati Bengals", 6, 20, "lost"),
+    ("spreads", 6.5, "New York Giants", "New York Giants", "Dallas Cowboys", 20, 17, "won"),
+    ("spreads", -7.5, "Detroit Lions", "Detroit Lions", "New Orleans Saints", 20, 10, "won"),
+    ("spreads", -7.5, "Detroit Lions", "Detroit Lions", "New Orleans Saints", 20, 14, "lost"),
+    # the away side of a spread is graded from its own score, not the home one
+    ("spreads", 6.5, "Carolina Panthers", *CAR_ATL, "won"),
+    # moneyline
+    ("moneyline", None, "Tampa Bay Buccaneers", "Tampa Bay Buccaneers", "Cleveland Browns", 19, 23, "lost"),
+    ("moneyline", None, "Cleveland Browns", "Tampa Bay Buccaneers", "Cleveland Browns", 19, 23, "won"),
+])
+def test_grade_scores_the_side_that_was_bought(mt, line, side, home, away, hs, as_, want):
+    got = na.grade(mt, line, side, home, away, hs, as_)
+    assert got is not None and got[0] == want
+
+
+def test_grade_pushes_are_void_never_a_win():
+    # Polymarket quotes half-points, so a push needs a whole-number line — it
+    # still has to come back void rather than fall through to "won".
+    assert na.grade("spreads", -7, "A Team", "A Team", "B Team", 21, 14)[0] == "void"
+    assert na.grade("moneyline", None, "A Team", "A Team", "B Team", 17, 17)[0] == "void"
+
+
+def test_grade_fails_closed_on_a_side_it_cannot_place():
+    # a side naming neither team must never be graded — it would invert the bet
+    assert na.grade("spreads", 6.5, "Seattle Seahawks", "Atlanta Falcons", "Carolina Panthers", 3, 34) is None
+    assert na.grade("moneyline", None, "Nobody FC", "A Team", "B Team", 1, 0) is None
+    assert na.grade("totals", None, "Under", "A Team", "B Team", 10, 10) is None
+    assert na.grade("totals", 40.5, "Nonsense", "A Team", "B Team", 10, 10) is None
+    assert na.grade("first_half_totals", 20.5, "Over", "A Team", "B Team", 10, 10) is None
+
+
+def test_grade_matches_team_names_case_and_punctuation_insensitively():
+    assert na.grade("moneyline", None, "san francisco 49ers",
+                    "San Francisco 49ers", "Miami Dolphins", 24, 17)[0] == "won"
+
+
+def test_espn_finals_keeps_only_finished_games(monkeypatch):
+    payload = {"events": [
+        {"competitions": [{"status": {"type": {"name": "STATUS_FINAL"}}, "competitors": [
+            {"homeAway": "home", "team": {"displayName": "Chicago Bears"}, "score": "3"},
+            {"homeAway": "away", "team": {"displayName": "Minnesota Vikings"}, "score": "9"}]}]},
+        # heading to overtime — the 3h clock had already passed on this one
+        {"competitions": [{"status": {"type": {"name": "STATUS_END_PERIOD"}}, "competitors": [
+            {"homeAway": "home", "team": {"displayName": "New York Jets"}, "score": "17"},
+            {"homeAway": "away", "team": {"displayName": "Green Bay Packers"}, "score": "17"}]}]},
+        # suspended
+        {"competitions": [{"status": {"type": {"name": "STATUS_DELAYED"}}, "competitors": [
+            {"homeAway": "home", "team": {"displayName": "Tampa Bay Buccaneers"}, "score": "19"},
+            {"homeAway": "away", "team": {"displayName": "Cleveland Browns"}, "score": "23"}]}]},
+    ]}
+
+    class R:
+        @staticmethod
+        def json():
+            return payload
+    monkeypatch.setattr(na.requests, "get", lambda *a, **k: R())
+    finals = na._espn_finals()
+    assert finals == {(na._norm("Chicago Bears"), na._norm("Minnesota Vikings")): (3, 9)}
+
+
+def test_espn_finals_is_empty_when_espn_is_down(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("no network")
+    monkeypatch.setattr(na.requests, "get", boom)
+    assert na._espn_finals() == {}
