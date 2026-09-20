@@ -6,6 +6,7 @@ entry. Both are places where a silent sign error would produce plausible-looking
 paper trades for months.
 """
 
+import inspect
 import os
 import sys
 
@@ -670,3 +671,20 @@ def test_obs_version_was_bumped_with_the_axis():
     entry is now booked at whichever of Polymarket and Kalshi is cheaper net
     of fees, and the book gates read that venue's book (db/054)."""
     assert pa.OBS_VERSION == 6
+
+
+def test_the_paper_trade_books_the_price_it_paid_not_polymarkets():
+    """db/055. `best_ask` is Polymarket's book on every row, always — so a
+    Kalshi entry needs its own column or it settles against a venue it never
+    traded at. Caught before any row entered, on the first cycle after the
+    obs_version 6 restart.
+
+    This reads the source rather than a fixture because the property is about
+    which key the INSERT uses, and a fixture that got it wrong would simply
+    book the wrong number silently.
+    """
+    src = inspect.getsource(pa.open_trades)
+    assert 'r["entry_ask"], 1.0 / r["entry_ask"]' in src
+    assert 'r["best_ask"], 1.0 / r["best_ask"]' not in src
+    # And the column has to reach the table, or entry_ask is NULL on every row.
+    assert "entry_ask" in pa._COLS and "entry_ticker" in pa._COLS

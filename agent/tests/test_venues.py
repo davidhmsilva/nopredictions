@@ -322,3 +322,44 @@ def test_the_join_is_not_a_substring_match():
     idx = _index(_fx('Platense', 'Boca Juniors'))
     assert idx.fixture('CA River Plate', 'AA Argentinos Juniors',
                        '2026-09-20T18:45:00Z') is None
+
+
+# ── staleness: the production incident of 2026-09-20 ─────────────────────────
+
+def test_an_unpriced_index_serves_nothing_to_a_trader():
+    """`load()` fills from a disk cache up to fifteen minutes old.
+
+    Minutes after the venue choice shipped, the pressure agent priced Vitória
+    v Cruzeiro's Over 2.5 against a Kalshi quote of ~0.50 while both venues
+    were really at 0.77/0.78, and reported a 26pp "saving". The index had
+    loaded but not repriced, so the quote was fifteen minutes old — across a
+    goal. That is a stale poll fabricating edge, and the direction that
+    flatters the strategy is the one that gets acted on.
+    """
+    idx = _index(_fx('Milan', 'Lecce'))
+    # Loaded, never repriced: `quotes_age_s` is None, not zero.
+    assert idx.quotes_age_s is None
+    assert idx.fixture('AC Milan', 'US Lecce', '2026-09-20T18:45:00Z',
+                       max_quote_age_s=V.MAX_INPLAY_QUOTE_AGE_S) is None
+    # Without a budget it still answers — the CLI and the probe want that.
+    assert idx.fixture('AC Milan', 'US Lecce', '2026-09-20T18:45:00Z') is not None
+
+
+def test_a_stale_price_is_refused_however_good_the_join():
+    import time as _t
+    idx = _index(_fx('Milan', 'Lecce'))
+    idx._priced_at = _t.time() - 600          # noqa: SLF001 - ten minutes old
+    assert idx.quotes_age_s > 500
+    assert idx.fixture('AC Milan', 'US Lecce', '2026-09-20T18:45:00Z',
+                       max_quote_age_s=V.MAX_INPLAY_QUOTE_AGE_S) is None
+    idx._priced_at = _t.time()                # noqa: SLF001 - fresh
+    assert idx.fixture('AC Milan', 'US Lecce', '2026-09-20T18:45:00Z',
+                       max_quote_age_s=V.MAX_INPLAY_QUOTE_AGE_S) is not None
+
+
+def test_the_inplay_budget_is_tighter_than_the_price_clock():
+    # One goal moves an over line 20-30pp. The budget has to be short enough
+    # that a quote cannot span one, and the reprice clock has to be shorter
+    # still or every lookup would be refused.
+    assert V.MAX_INPLAY_QUOTE_AGE_S <= 120
+    assert V.QUOTE_TTL_S < V.MAX_INPLAY_QUOTE_AGE_S

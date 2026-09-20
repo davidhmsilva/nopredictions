@@ -276,6 +276,11 @@ INDEX_TTL_S = 15 * 60
 #: Prices move; the index does not.
 QUOTE_TTL_S = 45
 
+#: How old a Kalshi quote may be before an IN-PLAY decision refuses it. One
+#: goal moves an over line 20-30pp, so this has to be tight — see the
+#: production incident in `KalshiSoccerIndex.fixture`.
+MAX_INPLAY_QUOTE_AGE_S = 90.0
+
 ET = ZoneInfo('America/New_York')
 
 _MONTH = {'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
@@ -784,6 +789,11 @@ class KalshiSoccerIndex:
             self.last_error = None
         except Exception as e:      # noqa: BLE001 - a failed sweep is not an outage
             self.last_error = repr(e)
+            # A process exiting mid-sweep is not a failure worth a line in a
+            # daemon log — the thread is a daemon precisely so it can be cut
+            # off. Anything else is.
+            if 'interpreter shutdown' in str(e):
+                return
             log.warning('kalshi index refresh failed: %s', e)
 
     @property
@@ -798,8 +808,34 @@ class KalshiSoccerIndex:
     def fixtures(self) -> list[KalshiFixture]:
         return self._fixtures
 
-    def fixture(self, home: str, away: str, kickoff=None) -> KalshiFixture | None:
+    @property
+    def quotes_age_s(self) -> float | None:
+        """How old the prices are, or None when they were never re-read.
+
+        ⚠️ `load()` fills the index from a disk cache up to fifteen minutes
+           old, so an index that has loaded but not REPRICED is carrying
+           fifteen-minute-old prices. That is why this is None rather than the
+           index's own age: they are different claims.
+        """
+        return None if not self._priced_at else time.time() - self._priced_at
+
+    def fixture(self, home: str, away: str, kickoff=None,
+                max_quote_age_s: float | None = None) -> KalshiFixture | None:
         """Kalshi's side of one fixture, or None.
+
+        ⚠️ `max_quote_age_s` IS NOT OPTIONAL FOR ANYTHING THAT TRADES. Caught
+           in production on 2026-09-20, minutes after this shipped: the
+           pressure agent priced Vitória v Cruzeiro's Over 2.5 against a
+           Kalshi quote of ~0.50 while both venues were really at 0.77/0.78,
+           and reported a 26pp "saving". The index had loaded from its disk
+           cache and the background reprice had not run yet, so the quote was
+           up to fifteen minutes old — across a goal.
+
+           That is [[finding-observer-live-price-stale]] wearing Kalshi's
+           clothes: a stale poll fabricates edge in BOTH directions, and the
+           direction that flatters the strategy is the one that gets acted on.
+           Pass a budget; an unpriced or stale index then simply does not
+           participate and the trade books on Polymarket.
 
         The join everything else leans on, and the one this project has been
         bitten by most often. It needs:
@@ -819,6 +855,10 @@ class KalshiSoccerIndex:
         elif self._auto:
             self.load()
             self.reprice()
+        if max_quote_age_s is not None:
+            age = self.quotes_age_s
+            if age is None or age > max_quote_age_s:
+                return None
         day = et_date(kickoff)
         if day is None:
             return None

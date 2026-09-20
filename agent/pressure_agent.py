@@ -620,8 +620,14 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         #    where Kalshi is cheaper. That is why this is an execution change
         #    with no new fair value to fit.
         exec_ = _best_venue(sig, row, book)
+        # ⚠️ `best_bid`/`best_ask` stay Polymarket's book, on every row, always
+        #    — the whole history reads them that way. `entry_ask` is the price
+        #    the trade is BOOKED at, and it is what paper_trades gets. A Kalshi
+        #    entry settled against a Polymarket price would be the yield of a
+        #    venue it never traded at (db/055).
         row.update(venue=exec_.venue, alt_venue_ask=exec_.alt_ask,
-                   venue_saving_pp=exec_.saving_pp)
+                   venue_saving_pp=exec_.saving_pp,
+                   entry_ask=exec_.ask, entry_ticker=exec_.ticker)
         entry_ask = exec_.ask
         entry_bid, entry_depth = exec_.bid, exec_.depth_usd
 
@@ -688,7 +694,7 @@ def _best_venue(sig: PressureSignals, row: dict, book: dict):
     """
     pm = venues.Quote(bid=book["best_bid"], ask=book["best_ask"],
                       ask_depth_usd=book["ask_depth_usd"])
-    kal = None
+    kal, fx = None, None
     try:
         idx = venues.shared_index(background=True)
         # ⚠️ The signal carries no kick-off, so it is reconstructed from the
@@ -698,7 +704,11 @@ def _best_venue(sig: PressureSignals, row: dict, book: dict):
         #    fixture straddling ET midnight — where the lookup simply misses
         #    and the trade books on Polymarket.
         kickoff = datetime.now(timezone.utc) - timedelta(minutes=sig.minute or 0)
-        fx = idx.fixture(sig.home, sig.away, kickoff)
+        # ⚠️ A stale Kalshi quote is refused outright: one goal moves an
+        #    over line 20-30pp, and a fifteen-minute-old price across a
+        #    goal reported a 26pp phantom saving in production.
+        fx = idx.fixture(sig.home, sig.away, kickoff,
+                         max_quote_age_s=venues.MAX_INPLAY_QUOTE_AGE_S)
         if fx is not None and row.get("target_line") is not None:
             kal = fx.over(float(row["target_line"]))
     except Exception as e:          # noqa: BLE001 - never take the poll down
@@ -709,9 +719,13 @@ def _best_venue(sig: PressureSignals, row: dict, book: dict):
         return _Exec(venues.POLYMARKET, book["best_ask"], book["best_bid"],
                      book["ask_depth_usd"],
                      chosen.alt_ask if chosen else None,
-                     chosen.saving_pp if chosen else None)
+                     chosen.saving_pp if chosen else None, None)
+    ticker = None
+    if fx is not None and row.get("target_line") is not None:
+        leg = fx.totals.get(f'{float(row["target_line"]):.1f}')
+        ticker = leg[0] if leg else None
     return _Exec(venues.KALSHI, kal.ask, kal.bid, kal.ask_depth_usd,
-                 chosen.alt_ask, chosen.saving_pp)
+                 chosen.alt_ask, chosen.saving_pp, ticker)
 
 
 class _Exec(NamedTuple):
@@ -721,6 +735,8 @@ class _Exec(NamedTuple):
     depth_usd: float | None
     alt_ask: float | None
     saving_pp: float | None
+    #: Kalshi's market ticker, so the fill is checkable against the exchange.
+    ticker: str | None
 
 
 def _why_not(row: dict, book: dict, sig: PressureSignals) -> str:
@@ -802,6 +818,7 @@ def _base_row(sig: PressureSignals, window_min: int) -> dict:
         # the same bet. Recorded on every row so the Polymarket-only
         # counterfactual stays recoverable per entry (db/054, H-BEST-VENUE).
         "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
+        "entry_ask": None, "entry_ticker": None,
     }
 
 
@@ -824,7 +841,7 @@ _COLS = [
     "ask_depth_usd", "fair_base", "fair_pressure", "fair_n", "fee_pp",
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
     "paper_trade_id", "skip_reason",
-    "venue", "alt_venue_ask", "venue_saving_pp",
+    "venue", "alt_venue_ask", "venue_saving_pp", "entry_ask", "entry_ticker",
 ]
 
 
@@ -879,7 +896,13 @@ def open_trades(conn, strategy_id: int, rows: list[dict]) -> int:
             reasoning = (
                 f"{r['home']} {r['home_goals']}-{r['away_goals']} {r['away']} "
                 f"{r['minute']}' — Over {r['target_line']} at "
-                f"{r['best_ask']:.3f} ({1 / r['best_ask']:.2f}). "
+                f"{r['entry_ask']:.3f} ({1 / r['entry_ask']:.2f}) "
+                f"on {venues.VENUE_NAME[r['venue']]}"
+                + (f" ({r['entry_ticker']})" if r['entry_ticker'] else "")
+                + (f", against {r['alt_venue_ask']:.3f} on the other exchange "
+                   f"— {r['venue_saving_pp']:+.1f}pp net of both fees"
+                   if r['venue_saving_pp'] is not None else "")
+                + ". "
                 f"Pressure {r['pressure_index']:.0f}/100 "
                 f"(danger H={r['home_danger']:.0f} A={r['away_danger']:.0f}, "
                 f"window xG H={r['home_xg_window']:.2f} A={r['away_xg_window']:.2f}). "
@@ -901,7 +924,10 @@ def open_trades(conn, strategy_id: int, rows: list[dict]) -> int:
                    RETURNING id""",
                 (strategy_id,
                  f"Over {r['target_line']} — {r['event_title'] or r['home'] + ' vs ' + r['away']}",
-                 r["best_ask"], 1.0 / r["best_ask"], STAKE_UNITS,
+                 # The price PAID, at the venue named on the row. Booking a
+                 # Kalshi fill at Polymarket's ask would settle it against a
+                 # venue it never traded at (db/055).
+                 r["entry_ask"], 1.0 / r["entry_ask"], STAKE_UNITS,
                  r["fair_pressure"], r["edge_pressure_pp"] / 100.0,
                  reasoning, "paper", r["token_id"]),
             )
