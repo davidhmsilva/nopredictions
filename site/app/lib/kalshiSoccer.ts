@@ -485,14 +485,10 @@ const pricedShared = unstable_cache(pricedIndex, ['kalshi-soccer-priced-v2'], {
 })
 
 let l1: { at: number; idx: KalshiSoccerIndex } | null = null
+// eslint-disable-next-line prefer-const
 let inFlight: Promise<KalshiSoccerIndex> | null = null
 
-/** What every caller should use. L1 is this instance; L2 is the Data Cache the
- *  instances share — the same two-layer shape `scoutCache` uses, and for the
- *  same reason: a module cache alone described a warm experience almost nobody
- *  had. */
-export async function getKalshiSoccer(): Promise<KalshiSoccerIndex> {
-  if (l1 && Date.now() - l1.at < TTL_MS) return l1.idx
+function refresh(): Promise<KalshiSoccerIndex> {
   if (inFlight) return inFlight
   inFlight = pricedShared()
     .then((idx) => {
@@ -502,17 +498,43 @@ export async function getKalshiSoccer(): Promise<KalshiSoccerIndex> {
     .finally(() => {
       inFlight = null
     })
+  return inFlight
+}
+
+/** What every caller should use.
+ *
+ *  L1 is this instance; L2 is the Data Cache the instances share — the same
+ *  two-layer shape `scoutCache` uses, and for the same reason: a module cache
+ *  alone described a warm experience almost nobody had.
+ *
+ *  🔑 Stale beats waiting. A cold sweep is ~34 seconds, and an index whose
+ *     prices are a minute old is a far better answer than a spinner for most
+ *     of a minute. So anything already in L1 is returned IMMEDIATELY and the
+ *     refresh runs behind it; only an instance that has never swept waits.
+ *     The board is built to render without this column anyway, so the one
+ *     caller that does wait still gets a board.
+ */
+export async function getKalshiSoccer(): Promise<KalshiSoccerIndex> {
+  if (l1 && Date.now() - l1.at < TTL_MS) return l1.idx
+  if (l1) {
+    // Stale, but real. Kick the refresh off and answer now.
+    void refresh().catch(() => {
+      /* the next caller tries again; the stale index stands until then */
+    })
+    return l1.idx
+  }
   try {
-    return await inFlight
+    return await refresh()
   } catch (e) {
-    if (l1) return l1.idx
+    const stale = l1 as { at: number; idx: KalshiSoccerIndex } | null
+    if (stale) return stale.idx
     throw e
   }
 }
 
 /** Kalshi's side of ONE fixture, for the Game Center.
  *
- *  ⚠️ Time-budgeted on purpose. A cold index is a 34-second sweep, and a
+ *  ⚠️ Time-budgeted on purpose. A cold index is a ~34-second sweep, and a
  *     fixture page must not wait for it — it renders Polymarket's board with
  *     no Kalshi column instead, which is the honest degradation. In practice
  *     the index is warm: the football board asks for it every minute.
@@ -527,9 +549,9 @@ export async function findKalshiFixture(
     new Promise<null>((r) => setTimeout(() => r(null), budgetMs)),
   ])
   if (!idx) return null
-  // The same one-to-one rule the board uses: an exact kick-off agreement AND
-  // the alias-aware scorer, with the crossed orientation tested. Two
-  // candidates is not a match.
+  // The same one-to-one rule the board uses: the ET date both schedules file
+  // the game under, the alias-aware scorer on both names, and the crossed
+  // orientation tested. Two candidates is not a match.
   const hits = idx.fixtures.filter((k) =>
     sameFixture({ ...fixture, etDate: etDateOf(fixture.kickoff) }, k)
   )

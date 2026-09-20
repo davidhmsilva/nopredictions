@@ -199,16 +199,30 @@ async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame
   let raw: any[]
   try {
     raw = (await Promise.all(groups.map((g) => espnScoreboard(src, range, g)))).flat()
+    // An empty range is ambiguous — the 400 above answers 200-with-nothing on
+    // some days — so it falls through to the day-by-day read, which can tell
+    // "no games" from "no answer".
     if (raw.length === 0) throw new Error('empty range')
   } catch {
     const days_ = etDays(start, end)
+    let answered = 0
     const pages = await Promise.all(
       groups.flatMap((g) =>
-        days_.map((d) => espnScoreboard(src, d, g).catch(() => [] as any[]))
+        days_.map((d) =>
+          espnScoreboard(src, d, g)
+            .then((evs) => {
+              answered++
+              return evs
+            })
+            .catch(() => [] as any[])
+        )
       )
     )
     raw = pages.flat()
-    if (raw.length === 0) throw new Error('site.api.espn.com returned no schedule')
+    // ⚠️ An empty schedule is a STATE, not a failure: the NBA has no games in
+    //    September and the board should say so rather than show an error.
+    //    Only a window where ESPN answered nothing at all is an outage.
+    if (answered === 0) throw new Error('site.api.espn.com answered nothing')
   }
 
   const out: EspnGame[] = []
