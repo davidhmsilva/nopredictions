@@ -74,7 +74,7 @@ function Tiles({ a }: { a: AgentSummary }) {
   const settled = settledOf(a)
   const hit = settled ? (a.wins / settled) * 100 : null
   return (
-    <div className="gc-tiles">
+    <div className="gc-tiles ag-tiles">
       <div className="gc-tile">
         <span className="gc-tile-k">Settled bets</span>
         <span className="gc-tile-v np-num">{settled}</span>
@@ -83,7 +83,7 @@ function Tiles({ a }: { a: AgentSummary }) {
       <div className="gc-tile">
         <span className="gc-tile-k">Record</span>
         <span className="gc-tile-v np-num">{settled ? `${a.wins}–${a.losses}` : '—'}</span>
-        <span className="gc-tile-sub">{hit != null ? `${hit.toFixed(1)}% won` : '—'}</span>
+        <span className="gc-tile-sub">won–lost</span>
         {/* The same two numbers as a length: how much of the record is won.
             Both sides are coloured, so it reads as a record and not as
             progress towards something. */}
@@ -92,6 +92,11 @@ function Tiles({ a }: { a: AgentSummary }) {
             <span className="ag-wl-won" style={{ width: `${hit}%` }} />
           </span>
         )}
+      </div>
+      <div className="gc-tile">
+        <span className="gc-tile-k">Win rate</span>
+        <span className="gc-tile-v np-num">{hit != null ? `${hit.toFixed(1)}%` : '—'}</span>
+        <span className="gc-tile-sub">{settled ? `${a.wins} of ${settled}` : '—'}</span>
       </div>
       <div className="gc-tile">
         <span className="gc-tile-k">P&amp;L</span>
