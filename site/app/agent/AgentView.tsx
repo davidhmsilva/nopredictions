@@ -84,6 +84,14 @@ function Tiles({ a }: { a: AgentSummary }) {
         <span className="gc-tile-k">Record</span>
         <span className="gc-tile-v np-num">{settled ? `${a.wins}–${a.losses}` : '—'}</span>
         <span className="gc-tile-sub">{hit != null ? `${hit.toFixed(1)}% won` : '—'}</span>
+        {/* The same two numbers as a length: how much of the record is won.
+            Both sides are coloured, so it reads as a record and not as
+            progress towards something. */}
+        {hit != null && (
+          <span className="ag-wl" role="img" aria-label={`${a.wins} won, ${a.losses} lost`}>
+            <span className="ag-wl-won" style={{ width: `${hit}%` }} />
+          </span>
+        )}
       </div>
       <div className="gc-tile">
         <span className="gc-tile-k">P&amp;L</span>
