@@ -60,6 +60,11 @@ function AgentCard({ a }: { a: AgentSummary }) {
         <span className="ag-tile">
           <em>W–L</em>
           <b className="np-num">{settled ? `${a.wins}–${a.losses}` : '—'}</b>
+          {settled > 0 && (
+            <span className="ag-wl ag-wl-sm" role="img" aria-label={`${a.wins} won, ${a.losses} lost`}>
+              <span className="ag-wl-won" style={{ width: `${(a.wins / settled) * 100}%` }} />
+            </span>
+          )}
         </span>
         <span className="ag-tile">
           <em>P&amp;L</em>

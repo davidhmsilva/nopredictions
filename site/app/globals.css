@@ -4374,6 +4374,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   border-radius: 999px; overflow: hidden; background: rgba(239, 68, 68, .55);
 }
 .ag-wl-won { display: block; height: 100%; background: var(--green); }
+.ag-wl-sm { height: 4px; margin-top: 5px; }
 .ag-chart-axis { fill: var(--grey2); font-size: 11px; font-family: var(--font-mono); }
 .ag-chart-zero { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 4 4; }
 
