@@ -2024,9 +2024,8 @@ the best net EV at the CLOB ask, fee included.
 - **1u flat on both since 2026-09-19**, like every other agent (it was
   quarter-Kelly 0.5-3u / 0.5u). The 15 earlier trades were restated to 1u —
   stake and payout ×(1/stake), so no bet's result changed; before-state in
-  `reports/nfl_stake_restate_2026-09-19.json`. At that point: 12–3, +9.75u net,
-  on an average entry EV of −0.83% — 12 wins against 8.7 the prices implied,
-  i.e. variance, not a finding.
+  `reports/nfl_stake_restate_2026-09-19.json`. At that point: 12–3, +9.75u net —
+  see [the first week's results](#the-first-week--the-board-answered-the-clv-did-not-2026-09-20).
 
 🔑 **Pinnacle quotes whole numbers, PM only half-points** — so even PM's main
 spread is usually not directly comparable (Pinnacle −6 vs PM −6.5). `nfl_model.py`
@@ -2046,7 +2045,8 @@ directions (1-3.5pt favourite covering s+3.5: 0.333 real vs 0.364 model;
 
 **Week 1, first board (13 games):** best token per game −2.4% to +0.8% EV —
 the soccer finding again (PM's mid sits on Pinnacle; the loss is spread + fee).
-No EDGE bet; today's bets are FORCED. Expect FORCED to lose ~1-2%.
+No EDGE bet; today's bets are FORCED. Expect FORCED to lose ~1-2%. ⚠️ The EDGE
+arm has fired since (4 bets by 09-20, all on `sharp_model` alternates bar one).
 
 - Odds API: 3 credits per snapshot (3 markets, ≤10 books), rationed by the
   nearest unbet game (180 / 45 / 20 min freshness at 24h / 150m / 40m), plus one
@@ -2080,6 +2080,77 @@ tokens per snapshot) in days, with no bets. Also measured: **0 violations in
 13,801 ladder pairs** (no internal arbitrage), and **~163 of ~381 markets per
 game settle before the final whistle** (end of Q1, half time, end of Q3) —
 three settlement windows per game against soccer's one.
+
+### The first week — the board answered, the "CLV" did not (2026-09-20)
+
+Weeks 2 and 3, 09-13 → 09-20: **29 games seen, 28 bet** (Colts–Chiefs was still
+4h from kick-off, outside the T−40 window — not a miss). 15 settled.
+
+| arm | n | settled | won | net yield | 95% CI |
+|---|--:|--:|--:|--:|---|
+| EDGE | 4 | 1 | 1 | — | — |
+| FORCED | 24 | 14 | 11 | +47.3% | [−12.9, +107.5] |
+| **ALL** | **28** | **15** | **12** | **+65.0%** | **[−0.9, +130.9]** |
+
+⚠️ **+65% is not a result and the p-value does not rescue it.** 12 wins against
+the 8.66 those prices implied is an exact Poisson-binomial **p = 0.046** — which
+sounds like something until you ask what effect size n=15 can resolve: the
+per-bet net return sd is 1.258, so a ±2pp CI needs **15,192 bets**. The only
+hypothesis 15 bets can distinguish from zero is a +65% edge, which nobody is
+claiming. Two longshot overs at 0.23/0.24 are +6.5u of the +9.75u.
+
+🔑 **The `clv` the report prints is not closing line value.** It is
+`fair_at_close / entry_ask − 1` — **our model against PM's ask**, not price
+against price. With the sharp line barely moving in the hours to kick-off, that
+quantity is just the entry edge re-stated, gross of the fee and the haircut the
+entry EV already paid. Decomposed over all 23 closes:
+
+| | mean | 95% CI | positive |
+|---|--:|---|--:|
+| stored `clv` | **+3.31%** | [+1.56, +5.07] | 20/23 |
+| = entry gross edge (`fair_raw`/ask − 1) | +4.04% | [+2.61, +5.47] | 22/23 |
+| + **actual line movement** (`fair_close`/`fair_raw` − 1) | **−0.71%** | [−1.50, +0.08] | **5/23** |
+| PM's own price move (`pm_close`/ask − 1) | −0.48% | [−1.30, +0.34] | 4/23 |
+
+So the sharp line moved **against** these bets, and PM's own price moved against
+them too. Put on the EV's own basis — the haircut applied to the close, the
+[[nfl-agent]] defect found 09-14 and still unfixed — the stored +3.31% becomes
+**+0.78% CI[−0.52, +2.07]**, i.e. nothing. On the 3 `sharp_exact` closes, which
+carry no haircut and so were never inflated, it is **−0.31%** with line movement
+−1.32% and 0/3 positive.
+
+⚠️ `--report`'s own caption says this number "says whether EDGE bets beat the
+line (tens of bets suffice)". It cannot: it does not measure the line. Fixing it
+means reading PM's own closing ask for the same token (`pm_clv` already does) and
+applying the haircut to `fair_close`; until then **quote `pm_clv`, never `clv`.**
+
+**What the board did answer.** `nfl_candidates` is the well-powered arm this file
+predicted would settle it in days, and a week in it has: **16,635 rows · 2,340
+tokens · 258 snapshots · 29 games.**
+
+| fair source | market | n | EV@ask | fair−ask | fair−bid | spread |
+|---|---|--:|--:|--:|--:|--:|
+| `sharp_exact` | moneyline | 483 | −4.62% | −0.90pp | +0.10pp | 1.00pp |
+| `sharp_exact` | spreads | 199 | −3.46% | −0.54pp | +0.48pp | 1.02pp |
+| `sharp_exact` | totals | 245 | −3.38% | −0.52pp | +0.49pp | 1.01pp |
+| `sharp_model` | spreads | 7,036 | −10.65% | −3.42pp | −1.82pp | 1.60pp |
+| `sharp_model` | totals | 8,672 | −8.72% | −2.10pp | −0.25pp | 1.86pp |
+
+On the 927 `sharp_exact` tokens with a two-sided book, clustered by game:
+**ask −3.98% CI[−4.19,−3.78]** (6/927 positive) · **bid +0.60% CI[+0.45,+0.75]**
+(602/927) · **mid −0.52% CI[−0.71,−0.34]**. The day-one reading on 48 tokens
+(−4.00% / +0.53%) held at 19× the sample with the CI now tight. The mid sitting
+~0.5pp below fair *on both sides of a ladder* is PM's mid overround, not a
+direction to trade — the soccer finding [[finding-pm-mid-is-pinnacle]] again.
+
+🔑 **The agent is mostly buying the expensive half of its own board.** 23 of 28
+bets are `sharp_model` alternates, where the measured ask sits 2.1-3.4pp above
+fair against 0.5-0.9pp on the lines Pinnacle prices exactly — and where the
+claimed edge is the same size as the haircut (mean haircut 2.54pp, mean fee
+1.03pp, mean entry EV −0.62%). FORCED takes the best EV on the board, and on
+alternates that "best" is largely model error the haircut is meant to absorb.
+Nothing here is evidence the choice is wrong; it is a reason the EDGE arm's
+`sharp_exact` bets are the only ones worth reading a yield off.
 
 ### Who pays — the NFL profit map (2026-09-13)
 
