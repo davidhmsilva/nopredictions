@@ -619,7 +619,7 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         #    actually buy at.
         # ⚠️ `best_bid`/`best_ask` stay Polymarket's book, on every row, always
         #    — the whole history reads them that way. `entry_ask` is the price
-        #    the trade is BOOKED at, and it is what paper_trades gets (db/055).
+        #    the trade is BOOKED at, and it is what paper_trades gets (db/057).
         exec_ = _best_venue(sig, book)
         row.update(venue=exec_.venue, alt_venue_ask=exec_.alt_ask,
                    venue_saving_pp=exec_.saving_pp,
@@ -856,7 +856,7 @@ def _base_row(sig: PressureSignals) -> dict:
         "paper_trade_id": None, "skip_reason": None,
         # Where the entry was priced, and what the other exchange wanted for
         # the same bet. On every row so the Polymarket-only counterfactual
-        # stays recoverable per entry (db/054, H-BEST-VENUE).
+        # stays recoverable per entry (db/055, H-BEST-VENUE).
         "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
         "entry_ask": None, "entry_ticker": None,
     }
@@ -990,7 +990,7 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
                    RETURNING id""",
                 (sid,
                  f"1st Half Over 0.5 — {r['event_title'] or r['home'] + ' vs ' + r['away']}",
-                 # The price PAID, at the venue named on the row (db/055).
+                 # The price PAID, at the venue named on the row (db/057).
                  r["entry_ask"], 1.0 / r["entry_ask"], STAKE_UNITS,
                  r["fair_pressure"], (r["edge_pressure_pp"] or 0.0) / 100.0,
                  reasoning, "paper", r["token_id"]),

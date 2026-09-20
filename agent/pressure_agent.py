@@ -624,7 +624,7 @@ def observe(signals: dict[int, PressureSignals], table: dict,
         #    — the whole history reads them that way. `entry_ask` is the price
         #    the trade is BOOKED at, and it is what paper_trades gets. A Kalshi
         #    entry settled against a Polymarket price would be the yield of a
-        #    venue it never traded at (db/055).
+        #    venue it never traded at (db/057).
         row.update(venue=exec_.venue, alt_venue_ask=exec_.alt_ask,
                    venue_saving_pp=exec_.saving_pp,
                    entry_ask=exec_.ask, entry_ticker=exec_.ticker)
@@ -816,7 +816,7 @@ def _base_row(sig: PressureSignals, window_min: int) -> dict:
         "paper_trade_id": None, "skip_reason": None,
         # Where the entry was priced, and what the other exchange wanted for
         # the same bet. Recorded on every row so the Polymarket-only
-        # counterfactual stays recoverable per entry (db/054, H-BEST-VENUE).
+        # counterfactual stays recoverable per entry (db/055, H-BEST-VENUE).
         "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
         "entry_ask": None, "entry_ticker": None,
     }
@@ -926,7 +926,7 @@ def open_trades(conn, strategy_id: int, rows: list[dict]) -> int:
                  f"Over {r['target_line']} — {r['event_title'] or r['home'] + ' vs ' + r['away']}",
                  # The price PAID, at the venue named on the row. Booking a
                  # Kalshi fill at Polymarket's ask would settle it against a
-                 # venue it never traded at (db/055).
+                 # venue it never traded at (db/057).
                  r["entry_ask"], 1.0 / r["entry_ask"], STAKE_UNITS,
                  r["fair_pressure"], r["edge_pressure_pp"] / 100.0,
                  reasoning, "paper", r["token_id"]),

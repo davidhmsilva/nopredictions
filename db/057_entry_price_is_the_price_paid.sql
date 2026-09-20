@@ -1,8 +1,8 @@
--- 055 — record the price the trade was actually booked at
+-- 057 — record the price the trade was actually booked at
 --
 -- WHAT WAS WRONG
 -- --------------
--- db/054 let s16 and s17 choose a venue, but every column that held a PRICE
+-- db/055 let s16 and s17 choose a venue, but every column that held a PRICE
 -- still held Polymarket's. `best_bid` / `best_ask` are Polymarket's book by
 -- definition and should stay that way — the whole history reads them that way
 -- — so a row with venue = 'kalshi' recorded where the trade went and nowhere

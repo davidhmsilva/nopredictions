@@ -397,7 +397,7 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Resolver | ✅ Settles trades + calculates CLV |
 | Public website | ✅ SaaS app at [nopredictions.com](https://nopredictions.com) — Scout · Lab · Agent · Wallet |
 | Both venues on every board + the Game Center | ✅ NEW — one `BoardView`, cheaper exchange marked net of fees |
-| s16 / s17 buy at the cheaper exchange | ✅ NEW — obs_version 6 / 7, db/054, `H-BEST-VENUE` |
+| s16 / s17 buy at the cheaper exchange | ✅ NEW — obs_version 6 / 7, db/055, `H-BEST-VENUE` |
 | Git repo | ✅ Remote: github.com/davidhmsilva/nopredictions |
 | X / Twitter launch | ⏳ Pending first edge results |
 
@@ -2402,7 +2402,7 @@ record. Football and the six US sports are now **one component**, `BoardView`.
 | `site/app/lib/kalshiSoccer.ts` · `/api/venues/soccer` | Kalshi's football board, swept and cached |
 | `site/app/lib/kalshiGame.ts` | one fixture's Kalshi prices against Polymarket's own markets |
 | `site/app/lib/venueMatch.ts` · `etDate.ts` · `teamMatch.ts` | the cross-venue join |
-| `db/054` · `H-BEST-VENUE` (id 37) | s16 **obs_version 6**, s17 **obs_version 7** |
+| `db/055` · `H-BEST-VENUE` (id 37) | s16 **obs_version 6**, s17 **obs_version 7** |
 
 Measured on a live football board, 2026-09-20: **60 of 113 fixtures on both
 exchanges, 89 outcomes with a strictly cheaper venue — 52 Kalshi, 37
