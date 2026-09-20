@@ -467,10 +467,11 @@ function NO_READ_REASON(data: GameData): string {
   }
   if (!data.live) {
     return (
-      'The match is live but no clock matched it: api-football did not have this fixture in ' +
-      'its live feed, and every measured rate here is keyed on the minute. Polymarket\'s own ' +
-      'listed start time is not used as a substitute — it ran half an hour early on some ' +
-      'leagues and eight hours late on others.'
+      'The match is live but no published minute matched it: api-football did not have this ' +
+      'fixture in its live feed and Polymarket is not sending a clock on this event either, ' +
+      'and every measured rate here is keyed on the minute. Polymarket\'s listed START TIME is ' +
+      'never used as a substitute — it ran half an hour early on some leagues and eight hours ' +
+      'late on others.'
     )
   }
   if (data.live.minute != null && data.live.minute < 10) {

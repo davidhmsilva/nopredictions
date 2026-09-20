@@ -26,16 +26,22 @@ export const TABS: {
   hint: string
   Icon: (p: { className?: string }) => JSX.Element
 }[] = [
-  { href: '/',       label: 'Scout',  hint: "Today's boards", Icon: IconBoard },
+  { href: '/',       label: 'Home',   hint: "Today's boards", Icon: IconBoard },
   { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
   { href: '/agent',  label: 'Agents', hint: 'Yours',          Icon: IconAgent },
   { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
 ]
 
 function isActive(pathname: string, href: string): boolean {
-  // Scout owns every board: soccer at "/", each US sport at its own path.
+  // Home owns every board: the top of soccer at "/", all of it at /soccer,
+  // and each US sport at its own path.
   if (href === '/') {
-    return pathname === '/' || pathname.startsWith('/game') || SPORT_KEYS.some((k) => pathname === `/${k}`)
+    return (
+      pathname === '/' ||
+      pathname === '/soccer' ||
+      pathname.startsWith('/game') ||
+      SPORT_KEYS.some((k) => pathname === `/${k}`)
+    )
   }
   return pathname === href || pathname.startsWith(href + '/')
 }
@@ -151,7 +157,7 @@ function NavSearch({
     const slug = v.match(
       /polymarket\.com\/(?:[a-z]{2}\/)?(?:event|sports\/[^/]+)\/([^/?#]+)/
     )?.[1]
-    router.push(slug ? `/game/${slug}` : `/?q=${encodeURIComponent(v)}`)
+    router.push(slug ? `/game/${slug}` : `/soccer?q=${encodeURIComponent(v)}`)
     onDone?.()
   }
 
@@ -200,6 +206,10 @@ function AccountActions() {
       ? '/'
       : pathname
   const loginHref = `/login?next=${encodeURIComponent(next)}`
+  // Every "Sign up" opened the sign-IN form: /login defaults to it unless
+  // told otherwise, so a new visitor pressing the green button met a form
+  // for an account they did not have.
+  const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}`
 
   async function signOut() {
     setSheet(false)
@@ -238,11 +248,13 @@ function AccountActions() {
         <>
           <Link href="/pricing" className="np-btn-ghost np-wide-only">Pricing</Link>
           <Link href={loginHref} className="np-btn-ghost np-wide-only">Log in</Link>
-          <Link href={loginHref} className="np-btn-signup np-wide-only">Sign up</Link>
+          <Link href={signupHref} className="np-btn-signup np-wide-only">Sign up</Link>
         </>
       )}
 
-      {/* Phones: search, account, menu — the three that fit beside a logo. */}
+      {/* Phones: search, then who you are, then the menu. Signed out, "who
+          you are" is a Sign up button, not a person icon: the icon read as
+          an account already open, and nothing on a phone said how to get one. */}
       <button
         className="np-icon-btn np-narrow-only"
         onClick={() => setMobileSearch((v) => !v)}
@@ -251,13 +263,15 @@ function AccountActions() {
       >
         <IconSearch className="np-icn" />
       </button>
-      <Link
-        className="np-icon-btn np-narrow-only"
-        href={showAccount ? '/account' : loginHref}
-        aria-label={showAccount ? 'Your account' : 'Sign in'}
-      >
-        <IconAccount className="np-icn" />
-      </Link>
+      {showAccount ? (
+        <Link className="np-icon-btn np-narrow-only" href="/account" aria-label="Your account">
+          <IconAccount className="np-icn" />
+        </Link>
+      ) : (
+        <Link className="np-signup-pill np-narrow-only" href={signupHref}>
+          Sign up
+        </Link>
+      )}
       <button
         className="np-icon-btn np-narrow-only"
         onClick={() => setSheet((v) => !v)}
@@ -299,14 +313,14 @@ function AccountActions() {
                 <Link className="np-sheet-item" href={loginHref} onClick={() => setSheet(false)}>
                   Log in
                 </Link>
-                <Link className="np-sheet-item is-primary" href={loginHref} onClick={() => setSheet(false)}>
-                  Sign up
+                <Link className="np-sheet-item is-primary" href={signupHref} onClick={() => setSheet(false)}>
+                  Sign up — free
                 </Link>
                 <Link className="np-sheet-item" href="/pricing" onClick={() => setSheet(false)}>
                   Pricing
                 </Link>
                 <div className="np-sheet-note">
-                  Scout, Agent and the Game Center work without an account.
+                  The boards, Agents and the Game Center work without an account.
                 </div>
               </>
             )}

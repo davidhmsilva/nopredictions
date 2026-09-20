@@ -146,17 +146,6 @@ button { font-family: var(--font); }
   font-size: 12px;
 }
 
-/* ── WIN BAR ── */
-.win-bar-bg {
-  background: #1a1a1a;
-  height: 4px;
-  margin-top: 6px;
-}
-.win-bar {
-  height: 4px;
-  background: var(--green);
-}
-
 /* ── BADGES ── */
 .badge {
   display: inline-block;
@@ -466,7 +455,10 @@ button { font-family: var(--font); }
 ═══════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
 
-  body { padding-bottom: 64px; } /* room for bottom nav */
+  /* Room for the fixed bottom tab bar (61px), plus the home-indicator inset
+     where the browser reports one. The only reservation: .np-main used to add
+     68px more, which left an empty band above the footer. */
+  body { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 
   /* Grids → 2 columns */
   .rg-4   { grid-template-columns: 1fr 1fr; gap: 8px !important; }
@@ -2375,6 +2367,15 @@ button { font-family: var(--font); }
   padding: 7px 15px; cursor: pointer; white-space: nowrap; transition: background .12s;
 }
 .np-btn-signup:hover { background: #29d669; border-color: #29d669; }
+/* The phone header's way in when signed out — the same green, compact, in
+   the slot the account icon takes once there is an account. */
+.np-signup-pill {
+  align-items: center; height: 32px; padding: 0 13px; margin: 0 4px;
+  background: var(--green); border-radius: 999px; flex-shrink: 0;
+  color: #05140b; font-family: var(--font); font-size: 13px; font-weight: 650;
+  text-decoration: none; white-space: nowrap;
+}
+.np-signup-pill:active { background: #29d669; }
 
 .np-notice {
   position: absolute; top: calc(100% + 9px); right: 0; z-index: 70;
@@ -2471,7 +2472,6 @@ button { font-family: var(--font); }
   .np-nav-right { margin-left: auto; }
   .np-wrap { padding: 0 14px; }
   .np-h1 { font-size: 21px; }
-  .np-main { padding-bottom: 68px; }
 
   .np-mobile-tabs {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 60;
@@ -2490,40 +2490,6 @@ button { font-family: var(--font); }
   .np-mobile-tab-label { font-size: 11.5px; font-weight: 600; }
 }
 
-/* ===========================================================================
-   AGENT  (.ag-*)  -- the dashboard keeps its structure; this is only chrome.
-   =========================================================================== */
-
-.ag-banner {
-  background: linear-gradient(180deg, rgba(245,158,11,.10), rgba(245,158,11,.03));
-  border-bottom: 1px solid rgba(245,158,11,.22);
-}
-.ag-banner-inner {
-  display: flex; align-items: flex-start; gap: 12px; padding-top: 14px; padding-bottom: 14px;
-}
-.ag-banner-text {
-  font-size: 13px; color: var(--grey); line-height: 1.55; max-width: 84ch; margin: 0;
-}
-.ag-banner-text strong { color: var(--white); font-weight: 650; }
-
-.ag-subtabs-wrap { padding-top: 22px; }
-.ag-subtabs {
-  display: inline-flex; gap: 2px; padding: 3px;
-  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
-}
-.ag-subtab {
-  padding: 7px 15px; border: none; border-radius: var(--r-sm); background: transparent;
-  color: var(--grey); font-family: var(--font); font-size: 13.5px; font-weight: 550;
-  cursor: pointer; transition: background .12s, color .12s;
-}
-.ag-subtab:hover { color: var(--white); }
-.ag-subtab.is-on { background: var(--bg-hover); color: var(--white); }
-
-@media (max-width: 760px) {
-  .ag-banner-inner { flex-direction: column; gap: 8px; }
-  .ag-subtabs { display: flex; width: 100%; }
-  .ag-subtab { flex: 1; text-align: center; }
-}
 
 
 
@@ -2983,6 +2949,47 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-clear:hover { color: var(--white); border-color: var(--grey2); }
 .sc-count { font-size: 11.5px; color: var(--grey2); }
 
+/* ── home: the way to every game, and what else the site does ── */
+/* The home page lists the top of the board; everything else is one click on. */
+.hm-all { display: flex; justify-content: center; margin: -22px 0 40px; }
+.hm-all-btn { gap: 6px; }
+
+.hm-more { margin-bottom: 48px; }
+/* Drawn like every other section heading: the green rule. */
+.hm-more-h {
+  font-size: 16px; font-weight: 650; margin: 0 0 12px;
+  padding-left: 11px; border-left: 3px solid var(--green);
+}
+.hm-more-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hm-more-card {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 16px; text-decoration: none; color: var(--white);
+  transition: border-color .12s, background .12s;
+}
+.hm-more-card:hover { border-color: var(--grey2); background: var(--bg3); }
+.hm-more-icn { width: 20px; height: 20px; color: var(--green); margin-bottom: 4px; }
+.hm-more-card b { font-size: 15px; font-weight: 650; }
+.hm-more-card span { flex: 1; font-size: 13px; color: var(--grey); line-height: 1.55; }
+.hm-more-card em {
+  margin-top: 6px; font-style: normal;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .05em; color: var(--green);
+}
+/* Signed out only: what a free account is for, under what the site does. */
+.hm-join {
+  display: flex; align-items: center; gap: 18px; margin-top: 12px;
+  background: linear-gradient(160deg, rgba(34,197,94,.10), transparent 60%), var(--bg2);
+  border: 1px solid rgba(34,197,94,.30); border-radius: var(--r); padding: 16px 18px;
+}
+.hm-join-text b { display: block; font-size: 15px; font-weight: 650; color: var(--white); }
+.hm-join-text span { display: block; margin-top: 3px; font-size: 13px; color: var(--grey); line-height: 1.55; }
+.hm-join .np-btn { margin-left: auto; flex-shrink: 0; }
+@media (max-width: 760px) {
+  .hm-more-grid { grid-template-columns: 1fr; }
+  .hm-join { flex-direction: column; align-items: stretch; gap: 12px; }
+  .hm-join .np-btn { margin-left: 0; justify-content: center; }
+}
+
 @media (max-width: 1240px) {
   .sc-big { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sc-big-card:nth-child(4) { display: none; }
@@ -3016,21 +3023,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .sc-bar-left { width: 100%; }
 }
 
-/* ── agent stat strip (was a second marquee) ── */
-.ag-stats { border-bottom: 1px solid var(--border); background: var(--bg2); }
-.ag-stats-inner {
-  display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
-  padding-top: 10px; padding-bottom: 10px;
-}
-.ag-stat {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--grey2);
-  display: inline-flex; align-items: baseline; gap: 5px;
-}
-.ag-stat b { color: var(--white); font-size: 12.5px; font-weight: 600; letter-spacing: 0; }
-.ag-stat.is-good b { color: var(--green); }
-.ag-stat.is-bad b { color: var(--red); }
-.ag-stat.is-dim b { color: var(--grey2); }
-.ag-stat-note { margin-left: auto; font-size: 11px; color: var(--grey2); cursor: help; }
 
 /* ===========================================================================
    GAME CENTER  (.gc-*)  — the companion layer
@@ -3402,6 +3394,10 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .lg-prefilled strong { color: var(--white); }
 
 .lg-wide { width: 100%; justify-content: center; }
+/* The card can carry a heading of its own — the reset page has no mode tabs. */
+.lg-card-h1 { font-size: 19px; font-weight: 650; color: var(--white); margin: 0 0 6px; }
+.lg-card .lg-sub { font-size: 13.5px; line-height: 1.6; margin: 0 0 16px; }
+.lg-card .np-btn.lg-wide { display: flex; margin-top: 12px; }
 
 .lg-or {
   display: flex; align-items: center; gap: 12px; margin: 16px 0;
@@ -4292,68 +4288,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .tp-gate p { color: var(--grey); font-size: 13.5px; line-height: 1.65; margin: 0 0 18px; max-width: 58ch; }
 .tp-gate-actions { display: flex; gap: 9px; flex-wrap: wrap; }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Agent — the empty state
-   Nobody has an agent, including whoever is reading. The page says so, explains
-   what one would be, and marks which of the four steps actually exist. Two of
-   them do not, and a walkthrough that hid that would be selling.
-   ───────────────────────────────────────────────────────────────────────── */
-
-.ag-empty { max-width: 840px; margin: 0 auto; padding: 48px 20px 90px; }
-
-.ag-empty-head { margin-bottom: 40px; }
-.ag-empty-eyebrow {
-  display: block; margin-bottom: 14px;
-  font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em;
-  text-transform: uppercase; color: var(--green);
-}
-.ag-empty-head h1 {
-  font-size: 44px; line-height: 1.1; font-weight: 720;
-  letter-spacing: -.026em; margin: 0 0 16px;
-}
-@media (max-width: 760px) { .ag-empty-head h1 { font-size: 32px; } }
-.ag-empty-head p {
-  max-width: 62ch; margin: 0 0 24px;
-  color: var(--grey); font-size: 15px; line-height: 1.72;
-}
-.ag-empty-cta { display: flex; gap: 9px; flex-wrap: wrap; }
-.ag-empty-note { margin: 14px 0 0 !important; color: var(--grey2); font-size: 12.5px !important; }
-
-/* ── the four steps ────────────────────────────────────────────────────────── */
-
-.ag-steps-list { list-style: none; margin: 0; padding: 0; counter-reset: none; }
-
-.ag-step {
-  display: grid; grid-template-columns: 38px 1fr; gap: 16px;
-  padding: 18px 20px; margin-bottom: 8px;
-  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
-}
-/* The two that do not exist are drawn as outlines. A dashed border is the
-   cheapest honest signal that a row is a plan and not a feature. */
-.ag-step.is-next { background: transparent; border-style: dashed; }
-
-.ag-step-n {
-  width: 30px; height: 30px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 650;
-  background: var(--bg3); border: 1px solid var(--border2); color: var(--grey);
-}
-.ag-step.is-live .ag-step-n {
-  background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.45); color: var(--green);
-}
-
-.ag-step-body h3 {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  font-size: 15px; font-weight: 640; margin: 4px 0 7px;
-}
-.ag-step-body p { margin: 0; color: var(--grey); font-size: 13.5px; line-height: 1.65; }
-
-.ag-empty-honest { margin-top: 30px; font-size: 13px; line-height: 1.7; }
-.ag-empty-honest a { color: var(--green); text-decoration: underline; text-underline-offset: 2px; }
-
-@media (max-width: 560px) {
-  .ag-step { grid-template-columns: 1fr; gap: 10px; }
-}
 
 /* ── the report's contents strip ───────────────────────────────────────────── */
 /*
@@ -4393,44 +4327,140 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
    below where this lands a heading, or a click marks the previous section. */
 .wallet-section[id] { scroll-margin-top: calc(var(--nav-h) + 52px); }
 
-/* ── Agents — the signed-in user's own (2026-09-11) ─────────────────────── */
-.ag-mine { max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }
-.ag-mine-head h1 { font-size: 28px; line-height: 1.2; margin: 6px 0 6px; color: var(--white); }
-.ag-mine-limits, .ag-mine-status, .ag-mine-empty { color: var(--grey); font-size: 14px; line-height: 1.55; }
-.ag-mine-empty a { color: var(--white); }
-.ag-mine-section { margin-top: 36px; }
-.ag-mine-section > .tp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.ag-mine .is-pos { color: var(--green); }
-.ag-mine .is-neg { color: var(--red); }
-.ag-list { display: grid; gap: 14px; margin-top: 14px; }
+/* ===========================================================================
+   AGENTS  (.ag-*)  — the signed-in user's own, drawn like the rest of the site
+   (2026-09-19). The list is a Scout board: the agents that are running get a
+   card, every agent gets a row. One agent is a Game Center page: a hero, the
+   tiles, the curve, the trades. Nothing on either says where an agent came
+   from — a Lab theory and a hand-written daemon are both just agents.
+   =========================================================================== */
+
+.ag-pos { color: var(--green); }
+.ag-neg { color: var(--red); }
+
+/* ── list head ── */
+.ag-head { display: flex; align-items: flex-end; gap: 20px; }
+.ag-head .sc-h1-sub { max-width: 78ch; }
+.ag-head-cta { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.ag-cta-row { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 16px; }
+.ag-limits { font-size: 11.5px; color: var(--grey2); white-space: nowrap; }
+
+/* ── the running agents, one card each ── */
+.ag-grid {
+  display: grid; gap: 12px; margin-bottom: 22px;
+  grid-template-columns: repeat(auto-fill, minmax(262px, 1fr));
+}
 .ag-card {
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: rgba(255, 255, 255, .02);
-  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
+  padding: 13px 15px 12px; text-decoration: none; color: inherit;
+  transition: border-color .12s, background .12s;
 }
-.ag-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.ag-card-head h3 { margin: 0; font-size: 16px; line-height: 1.35; color: var(--white); }
-.ag-card-interp { margin: 6px 0 0; color: var(--grey); font-size: 13px; line-height: 1.5; }
-.ag-card-rows { margin: 14px 0 0; display: grid; gap: 8px; }
-.ag-card-rows > div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; font-size: 13px; }
-.ag-card-rows dt { color: var(--grey); text-transform: uppercase; letter-spacing: .04em; font-size: 11px; padding-top: 2px; }
-.ag-card-rows dd { margin: 0; color: var(--white); line-height: 1.5; }
-.ag-card-blocker { margin: 12px 0 0; font-size: 13px; }
-.ag-card-small { margin: 10px 0 0; color: var(--grey); font-size: 12px; }
-.ag-card-trades { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--border); }
-.ag-card-trades li {
-  display: grid; grid-template-columns: 64px 1fr 52px 56px; gap: 10px;
-  padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--grey);
+.ag-card:hover { border-color: var(--grey2); background: var(--bg3); }
+.ag-card-top { display: flex; align-items: center; gap: 8px; }
+.ag-kind {
+  font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--grey2); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ag-card-trade-what { color: var(--white); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ag-card-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.ag-card-error { margin: 10px 0 0; color: var(--red); font-size: 13px; }
-@media (max-width: 560px) {
-  .ag-card-rows > div { grid-template-columns: 1fr; gap: 2px; }
-  .ag-card-trades li { grid-template-columns: 56px 1fr 44px; }
-  .ag-card-trades li > :last-child { grid-column: 3; }
+.ag-card-top .np-badge { margin-left: auto; flex-shrink: 0; }
+.ag-card-name {
+  font-size: 16px; font-weight: 650; color: var(--white); line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.ag-spark { display: block; width: 100%; height: 44px; }
+.ag-spark-zero { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 3 3; }
+.ag-spark-none { font-size: 11.5px; color: var(--grey2); height: 44px; display: flex; align-items: center; }
+
+.ag-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.ag-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0;
+  padding: 7px 4px; border-radius: var(--r-sm);
+  background: var(--bg3); border: 1px solid transparent;
+}
+.ag-card:hover .ag-tile { background: var(--bg-hover); border-color: var(--border2); }
+.ag-tile em {
+  font-style: normal; font-size: 9.5px; letter-spacing: .06em;
+  color: var(--grey2); font-weight: 600; text-transform: uppercase;
+}
+.ag-tile b { font-size: 14px; font-weight: 600; color: var(--white); white-space: nowrap; }
+.ag-tile b.ag-pos { color: var(--green); }
+.ag-tile b.ag-neg { color: var(--red); }
+
+.ag-card-foot {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  padding-top: 10px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--grey2);
+}
+.ag-card-foot .sc-report { margin-left: auto; }
+.ag-card:hover .sc-report { gap: 8px; }
+
+/* ── every agent, one row ── */
+.ag-c-num { width: 66px; text-align: right; white-space: nowrap; }
+.ag-c-status { width: 1%; white-space: nowrap; }
+.ag-c-when { width: 1%; white-space: nowrap; text-align: right; color: var(--grey); font-size: 12px; }
+/* Beats `.sc-table thead th { text-align: left }` on specificity. */
+.sc-table thead th.ag-c-num, .sc-table thead th.ag-c-when { text-align: right; }
+.ag-row-name { display: block; color: var(--white); font-weight: 550; font-size: 13.5px; text-decoration: none; }
+.ag-row-sub {
+  display: block; margin-top: 1px; font-size: 11px; color: var(--grey2);
+  max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ag-empty {
+  background: var(--bg2); border: 1px dashed var(--border2); border-radius: var(--r);
+  padding: 22px; margin-bottom: 22px; color: var(--grey); font-size: 13.5px; line-height: 1.6;
+}
+.ag-empty b { color: var(--white); }
+.ag-empty .np-btn { margin-top: 12px; }
+
+/* ── one agent ── */
+.ag-back {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 18px;
+  font-size: 12px; color: var(--grey); text-decoration: none;
+}
+.ag-back:hover { color: var(--white); }
+.ag-hero-name { font-size: 24px; font-weight: 650; color: var(--white); line-height: 1.2; letter-spacing: -.02em; }
+.ag-hero-theory { margin-top: 6px; font-size: 13.5px; color: var(--grey); line-height: 1.55; max-width: 80ch; }
+.ag-hero-foot {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--grey2);
+}
+.ag-hero-actions { margin-left: auto; display: flex; gap: 8px; }
+.ag-hero-error { margin-top: 10px; font-size: 12.5px; color: var(--red); }
+.ag-note { margin-top: 10px; font-size: 12px; color: var(--grey2); line-height: 1.55; }
+.ag-note b { color: var(--grey); font-weight: 600; }
+/* The record as a length: won in green, lost in red, under the two numbers. */
+.ag-wl {
+  display: block; width: 100%; height: 5px; margin-top: 7px;
+  border-radius: 999px; overflow: hidden; background: rgba(239, 68, 68, .55);
+}
+.ag-wl-won { display: block; height: 100%; background: var(--green); }
+.ag-wl-sm { height: 4px; margin-top: 5px; }
+/* Six tiles, not the Game Center's five, so the row divides evenly on a phone
+   (two rows of three) instead of leaving a gap in the second one. */
+.ag-tiles { grid-template-columns: repeat(6, 1fr); }
+@media (max-width: 900px) { .ag-tiles { grid-template-columns: repeat(3, 1fr); } }
+.ag-chart-axis { fill: var(--grey2); font-size: 11px; font-family: var(--font-mono); }
+.ag-chart-zero { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 4 4; }
+
+.ag-c-placed { width: 1%; white-space: nowrap; font-size: 12px; color: var(--grey); }
+.ag-t-pick { display: block; color: var(--white); font-size: 13px; }
+.ag-t-event { display: block; margin-top: 1px; font-size: 11px; color: var(--grey2); }
+.ag-t-ctx { font-size: 11.5px; color: var(--grey); white-space: nowrap; }
+.ag-real { margin-left: 6px; }
+
+@media (max-width: 760px) {
+  .ag-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .ag-head-cta { margin-left: 0; align-items: flex-start; }
+  .ag-grid { grid-template-columns: 1fr; }
+  .ag-hide-m { display: none; }
+  .ag-c-num { width: 1%; }
+  .ag-row-sub { max-width: 26ch; }
+  .ag-hero-name { font-size: 20px; }
+  .ag-hero-actions { margin-left: 0; width: 100%; }
+}
+
 
 /* Lab — keep a tested theory as an agent */
 .bt-save { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 18px 0 6px; }
@@ -4726,22 +4756,63 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .sc-head .sc-h1 { font-size: 27px; line-height: 1.2; }
 .sc-head .sc-h1-sub { margin-top: 8px; max-width: 720px; font-size: 14px; line-height: 1.6; }
-.sc-does {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
-  margin-top: 16px; max-width: 780px;
-}
-.sc-does a {
-  display: flex; align-items: center; gap: 11px; min-width: 0;
-  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
-  padding: 10px 12px; color: var(--white); text-decoration: none;
-  transition: border-color .15s;
-}
-.sc-does a:hover { border-color: var(--green); }
-.sc-does svg { width: 18px; height: 18px; color: var(--green); flex: none; }
-.sc-does b { display: block; font-size: 13px; font-weight: 600; }
-.sc-does span { display: block; font-size: 11.5px; color: var(--grey); line-height: 1.4; }
 @media (max-width: 760px) {
-  .sc-does { grid-template-columns: 1fr; }
   .sc-head .sc-h1 { font-size: 22px; }
 }
-#games { scroll-margin-top: calc(var(--nav-h) + 12px); }
+
+
+/* ===========================================================================
+   MOBILE POLISH  (2026-09-19) — phone widths, last in the file so it wins.
+   Measured rather than eyeballed: a script walked every page at 375, 390 and
+   430px and listed what ran off the screen, every field under 16px (iOS
+   Safari zooms the page into a focused field below that and leaves it zoomed),
+   every control a thumb has to hit that is under ~32px tall, and text under
+   10.5px. This block is the answer to that list; the reasons are beside it.
+   =========================================================================== */
+@media (max-width: 760px) {
+  /* 16px or iOS zooms on focus. !important because the fields' own classes
+     set 12.5-15px, and this rule has to win on every one of them. */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* The board's controls. The search was the third item on a row that does
+     not wrap and ran ~125px off a 375px screen, so the box showed "Filte".
+     Now two rows: the search on its own, then the count and the sort. The
+     right-hand group dissolves (display: contents) so its children flow in
+     the bar itself. The odds format leaves this bar on a phone — it is in
+     the ☰ sheet, and here it pushed the sort onto a third row. */
+  .sc-bar { gap: 10px; align-items: center; }
+  .sc-bar-right { display: contents; }
+  .sc-bar-left { width: auto; }
+  .sc-search { order: -1; flex: 1 1 100%; width: 100%; height: 40px; }
+  .sc-bar .np-odds-bar { display: none; }
+  .sc-sort { margin-left: auto; }
+  .sc-sort-key { display: none; }
+  .sc-sort select { height: 36px; }
+
+  /* Thumbs, not cursors. The hit area grows; what is drawn stays put. */
+  .sc-star {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 40px; margin: -10px -8px; font-size: 16px;
+  }
+  .sc-go { min-width: 34px; min-height: 34px; justify-content: center; }
+  .np-odds button { padding: 7px 11px; }
+  .gc-legend-item { padding: 7px 12px; }
+  .gc-why, .gc-more { font-size: 12px; padding: 10px 0; }
+  .ag-back { padding: 8px 0; margin-top: 10px; }
+
+  /* A floor for the small print: the 9-10px mono labels read as texture on a
+     phone held at arm's length. */
+  .np-badge, .np-footer-legal, .sc-th-zone, .gcx-brief-tag { font-size: 10.5px; }
+  .sc-comp, .sc-mkts, .sc-cat-n, .sc-sort-key { font-size: 11px; }
+  .sc-big-odd em, .ag-tile em { font-size: 10.5px; }
+  .tp-chips-label, .lg-label, .pr-buy-label { font-size: 11px; }
+  .pr-save, .in-lead-flag, .gcx-tab-new { font-size: 10.5px; }
+  .do-top-label, .do-top-sel-label, .do-when, .do-chip, .do-pp { font-size: 10.5px; }
+  .do-top-odds em, .do-thin-chev, .gcx-pill { font-size: 10.5px; }
+  .gc-board th, .gcx-table th { font-size: 10.5px; }
+}
+

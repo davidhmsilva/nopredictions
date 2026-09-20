@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 // What the site leads with, in one place, so the browser tab, a search result
@@ -36,6 +36,14 @@ export const metadata: Metadata = {
     description: CARD,
     images: ['/banner.jpg'],
   },
+}
+
+// The page's own background, so a phone browser tints its toolbar to match
+// instead of framing a dark site in white. Width and scale stay Next's
+// defaults (device-width, 1) — zoom is never locked.
+export const viewport: Viewport = {
+  themeColor: '#0b0d10',
+  colorScheme: 'dark',
 }
 
 export default function RootLayout({

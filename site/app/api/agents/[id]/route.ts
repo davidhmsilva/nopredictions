@@ -1,9 +1,9 @@
-/** One agent: switch it on or off, publish it, rename it, or archive it.
- *  The owner check lives in every query in lib/agents, not here. */
+/** One agent: read its record, switch it on or off, publish it, rename it, or
+ *  archive it. The owner check lives in every query in lib/agents, not here. */
 
 import { NextResponse } from 'next/server'
 import { currentUser } from '../../../lib/supabaseAuth'
-import { archiveAgent, updateAgent, type RunStatus } from '../../../lib/agents'
+import { archiveAgent, getAgent, updateAgent, type RunStatus } from '../../../lib/agents'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +12,23 @@ const STATUSES: RunStatus[] = ['running', 'paused']
 function idOf(raw: string): number | null {
   const n = Number(raw)
   return Number.isInteger(n) && n > 0 ? n : null
+}
+
+export async function GET(_request: Request, { params }: { params: { id: string } }) {
+  const user = await currentUser()
+  if (!user) return NextResponse.json({ ok: false, error: 'Sign in first.' }, { status: 401 })
+  const id = idOf(params.id)
+  if (!id) return NextResponse.json({ ok: false, error: 'No such agent.' }, { status: 404 })
+  try {
+    // Someone else's agent and a missing one get the same 404: an id that
+    // answers differently would tell a stranger which ids exist.
+    const detail = await getAgent(user.id, id)
+    if (!detail) return NextResponse.json({ ok: false, error: 'No such agent.' }, { status: 404 })
+    return NextResponse.json({ ok: true, ...detail })
+  } catch (err) {
+    console.error('/api/agents/[id] GET failed', err)
+    return NextResponse.json({ ok: false, error: 'Could not load the agent.' }, { status: 502 })
+  }
 }
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {

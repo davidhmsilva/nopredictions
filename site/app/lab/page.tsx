@@ -422,8 +422,8 @@ export default function LabPage() {
             <div className="bt-save">
               {saved?.id ? (
                 <p className="bt-text">
-                  Saved to <Link href="/agent">your agents</Link>. It trades nothing until you
-                  switch it on there.
+                  Saved. <Link href={`/agent/${saved.id}`}>Open the agent</Link> and press Run it —
+                  it trades nothing until you do.
                 </p>
               ) : (
                 <>
@@ -436,8 +436,8 @@ export default function LabPage() {
                     {saved?.busy ? 'SAVING…' : 'SAVE AS AN AGENT'}
                   </button>
                   <span className="bt-save-note">
-                    Keeps the theory and this backtest. Switch it on later to paper-trade
-                    today&apos;s Polymarket boards with it.
+                    Whatever the verdict above. Switch it on in Agents and it paper-trades the
+                    next games that fit — the forward record is the test history cannot run.
                   </span>
                   {saved?.error && <p className="bt-text bt-neg">{saved.error}</p>}
                 </>

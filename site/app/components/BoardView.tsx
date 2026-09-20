@@ -439,6 +439,10 @@ export interface BoardViewProps {
   links?: React.ReactNode
   /** Seeded from ?q= by the nav search. */
   initialQuery?: string
+  /** Show only the first N rows. The home page leads with the top ten and
+   *  sends the rest to /soccer; the count still names the whole list, because
+   *  "Top 10 of 97" and "10 of 97" are different claims. */
+  limit?: number
 }
 
 export function BoardView({
@@ -455,6 +459,7 @@ export function BoardView({
   pending,
   links,
   initialQuery = '',
+  limit,
 }: BoardViewProps) {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<SortKey>('default')
@@ -500,6 +505,8 @@ export function BoardView({
     })
     return sortRows(filtered, sort)
   }, [rows, filter, sort, query, comp, watchlist])
+
+  const listed = limit != null ? shown.slice(0, limit) : shown
 
   /** Ordered by how much of today's card each competition is. Derived from the
    *  board rather than a hand-kept list, so a cup week shows up on its own. */
@@ -590,7 +597,11 @@ export function BoardView({
               </button>
             )}
             <span className="sc-count np-num">
-              {loading ? '' : `${shown.length} of ${rows.length}`}
+              {loading
+                ? ''
+                : limit != null && shown.length > limit
+                  ? `Top ${limit} of ${shown.length}`
+                  : `${shown.length} of ${rows.length}`}
             </span>
             {pending && <span className="sc-pending">{pending}</span>}
           </div>
@@ -669,7 +680,7 @@ export function BoardView({
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r, i) => (
+                {listed.map((r, i) => (
                   <Row
                     key={r.key}
                     r={r}

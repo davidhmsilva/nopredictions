@@ -17,10 +17,12 @@ import {
   type GameData,
   type MarketGroup,
   type PricePoint,
+  type LiveState,
 } from '../../lib/gamecenter'
 import { buildLooks, buildPulse } from '../../lib/looks'
 import { findKalshiFixture } from '../../lib/kalshiSoccer'
 import { matchKalshiMarkets } from '../../lib/kalshiGame'
+import { pmLiveOf } from '../../lib/scout'
 import { buildPricedLike } from '../../lib/pricedLike'
 
 // Top-of-book is fetched for the most-traded markets only. Every extra token is
@@ -56,6 +58,22 @@ function extractTeams(title: string): { home: string; away: string } | null {
   const clean = title.replace(/\s+-\s+.*$/, '').trim()
   const m = clean.match(/^(.+?)\s+vs\.?\s+(.+?)$/i)
   return m ? { home: m[1].trim(), away: m[2].trim() } : null
+}
+
+/** Polymarket's published minute and score as a LiveState. No statistics:
+ *  PM carries none, and a row of zeros would read on the page as "nothing is
+ *  happening". Half time has no minute in the feed, so it produces none here. */
+function pmClock(main: Record<string, unknown>): LiveState | null {
+  const pm = pmLiveOf(main)
+  if (!pm?.live || pm.minute == null || !pm.score) return null
+  return {
+    minute: pm.minute,
+    homeGoals: pm.score.home,
+    awayGoals: pm.score.away,
+    status: pm.phase ?? 'LIVE',
+    clockSource: 'polymarket',
+    stats: null,
+  }
 }
 
 export async function GET(request: Request) {
@@ -98,12 +116,20 @@ export async function GET(request: Request) {
     const groups = buildGroups(events)
 
     // Books and the live state in parallel — they hit unrelated hosts.
-    const [live, kalshiFixture] = await Promise.all([
+    const [af, kalshiFixture] = await Promise.all([
       fetchLive(teams.home, teams.away),
       // Time-budgeted: a cold Kalshi index is a 34-second sweep and this page
       // must not wait for it. In practice the board keeps it warm.
       findKalshiFixture({ home: teams.home, away: teams.away, kickoff }).catch(() => null),
     ])
+
+    // api-football first, because it also brings the in-game statistics.
+    // Polymarket's own live block is the fallback and costs nothing: it is on
+    // the event already fetched, it is the clock PM shows the trader, and it
+    // covers every listed fixture by construction. Without it this page had no
+    // minute at all whenever that key was refusing — which is most evenings —
+    // and every measured read stayed empty.
+    const live: LiveState | null = af ?? pmClock(main)
 
     // Executable prices for the headline markets. A Gamma mid is not a price you
     // can trade; presenting it as one is how a paper strategy books +141% that

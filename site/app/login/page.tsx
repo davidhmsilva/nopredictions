@@ -25,11 +25,13 @@
  *  phone the person came to sign in, not to read.
  */
 
-import { Suspense, useState, type FormEvent } from 'react'
+import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '../components/AppShell'
+import { takeSignupEmail } from '../lib/signupEmail'
 import { supabaseBrowser } from '../lib/supabaseBrowser'
+import { invalidateSession } from '../lib/useSession'
 
 const GOOGLE_ON = process.env.NEXT_PUBLIC_AUTH_GOOGLE === '1'
 const MAGIC_ON = process.env.NEXT_PUBLIC_AUTH_MAGIC_LINK === '1'
@@ -58,8 +60,14 @@ function LoginPageInner() {
   const [mode, setMode] = useState<Mode>(params.get('mode') === 'signup' ? 'signup' : 'signin')
   // Prefilled by /welcome with the address the payment was made on. Using a
   // different one here puts the subscription on the wrong account, so the field
-  // is filled rather than left for the reader to remember.
+  // is filled rather than left for the reader to remember. It arrives through
+  // sessionStorage (lib/signupEmail.ts); `?email=` still works for old links.
   const [email, setEmail] = useState(prefilled ?? '')
+  useEffect(() => {
+    if (prefilled) return
+    const handed = takeSignupEmail()
+    if (handed) setEmail((cur) => cur || handed)
+  }, [prefilled])
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice>(
@@ -77,6 +85,11 @@ function LoginPageInner() {
       if (mode === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
+        // The header's answer to "who is signed in" is cached for the life of
+        // the page's JS (useSession), and a client-side push keeps that JS.
+        // Without this the next page reads the signed-OUT answer from before
+        // the sign-in and offers "Log in" to someone who just did.
+        invalidateSession()
         router.push(next)
         router.refresh()
         return
@@ -92,8 +105,23 @@ function LoginPageInner() {
       if (error) throw error
 
       if (data.session) {
+        invalidateSession()
         router.push(next)
         router.refresh()
+      } else if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        // 🔑 Supabase answers a sign-up for an address that ALREADY has an
+        //    account with an obfuscated user carrying no identities, so this
+        //    form cannot be used to find out who is registered. The page read
+        //    that as success and said "Account created", which is the one
+        //    thing it must not say. This keeps Supabase's silence — it does
+        //    not confirm the address is taken — and still tells someone who
+        //    is stuck what to do next.
+        setMode('signin')
+        setPassword('')
+        setNotice({
+          kind: 'info',
+          text: `If ${email} is new, its confirmation link is on the way. If it already has an account, no second one was made — sign in below, or use "Forgot your password?".`,
+        })
       } else {
         setNotice({
           kind: 'info',
@@ -105,6 +133,29 @@ function LoginPageInner() {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** A link that signs you in once and lands on /account/password to set a new
+   *  one. Worded so it says nothing about whether the address has an account. */
+  async function resetPassword() {
+    if (!email) {
+      setNotice({ kind: 'error', text: 'Enter your email first.' })
+      return
+    }
+    setBusy(true)
+    const supabase = supabaseBrowser()
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=%2Faccount%2Fpassword`,
+    })
+    setBusy(false)
+    setNotice(
+      error
+        ? { kind: 'error', text: error.message }
+        : {
+            kind: 'info',
+            text: `If ${email} has an account, a link to set a new password is on its way. It works once, and not for long.`,
+          }
+    )
   }
 
   async function withGoogle() {
@@ -210,6 +261,12 @@ function LoginPageInner() {
           </button>
         </form>
 
+        {mode === 'signin' && (
+          <button className="lg-link" onClick={resetPassword} disabled={busy} type="button">
+            Forgot your password?
+          </button>
+        )}
+
         {MAGIC_ON && (
           <button className="lg-link" onClick={withMagicLink} disabled={busy}>
             Email me a sign-in link instead
@@ -229,7 +286,7 @@ function LoginPageInner() {
             <>
               An account changes nothing about what this site claims. The agent is
               still paper and still says so on{' '}
-              <Link href="/agent/ours">its own record</Link>.
+              <Link href="/agent">its own record</Link>.
             </>
           )}
         </p>
@@ -242,7 +299,7 @@ function LoginPageInner() {
           {mode === 'signup' ? 'It takes an email and a password.' : 'Welcome back.'}
         </h1>
         <p className="lg-sub">
-          Scout, Dropping odds, the Game Center and the agent’s record never needed
+          The boards, Dropping odds, the Game Center and the agent’s record never needed
           one and never will. An account is for the two tools that do real work.
         </p>
 

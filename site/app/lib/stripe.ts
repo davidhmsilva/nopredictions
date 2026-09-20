@@ -27,9 +27,11 @@ export function stripeConfigured(): boolean {
 
 /** True while the keys are Stripe's test-mode keys. The pricing page says so
  *  out loud, because a checkout that takes a 4242 card and grants Pro is a
- *  thing a real visitor must never mistake for a purchase. */
+ *  thing a real visitor must never mistake for a purchase.
+ *  Both prefixes: a restricted key (`rk_test_…`, the recommended kind) is a
+ *  test key too, and reading it as live would hide the warning. */
 export function stripeTestMode(): boolean {
-  return STRIPE_SECRET.startsWith('sk_test_')
+  return /^[rs]k_test_/.test(STRIPE_SECRET)
 }
 
 let client: Stripe | null = null

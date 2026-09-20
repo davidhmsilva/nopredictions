@@ -106,7 +106,7 @@ function AccountInner() {
           <span className="tp-eyebrow">ACCOUNT</span>
           <h1 className="tp-h1">You are not signed in.</h1>
           <p className="tp-sub">
-            Scout, Dropping odds, the Game Center and the agent’s record all work
+            The boards, Dropping odds, the Game Center and the agent’s record all work
             without an account. The Lab and the Wallet need one — three of each a
             day, free, no card.
           </p>
@@ -192,6 +192,7 @@ function AccountInner() {
       </div>
 
       <div className="ac-actions">
+        <Link href="/account/password" className="np-btn">Change password</Link>
         <button className="np-btn" onClick={signOut}>Sign out</button>
       </div>
     </div>

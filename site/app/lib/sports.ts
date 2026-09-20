@@ -150,92 +150,51 @@ function espnTeam(c: any): EspnTeam {
   }
 }
 
-/** Every ET date in the window, inclusive. ESPN files a game under its ET
- *  date, so this is the same calendar both exchanges use. */
-function etDays(from: Date, to: Date): string[] {
-  const out: string[] = []
-  for (let t = from.getTime(); t <= to.getTime() + 86400_000; t += 86400_000) {
-    const ymd = etOf(new Date(t)).ymd
-    if (out[out.length - 1] !== ymd) out.push(ymd)
-    if (out.length > 40) break
-  }
-  const last = etOf(to).ymd
-  if (out[out.length - 1] !== last) out.push(last)
-  return out
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-async function espnScoreboard(src: Source, dates: string, groups?: string): Promise<any[]> {
-  const qs = new URLSearchParams({ dates, limit: '500' })
-  if (groups) qs.set('groups', groups)
-  const d = await getJson<any>(
-    `https://site.api.espn.com/apis/site/v2/sports/${src.espn}/scoreboard?${qs}`
-  )
-  return d.events ?? []
-}
-
 /** The schedule.
  *
  *  ⚠️ ESPN's date-RANGE query is not reliable. `dates=20260919-20260929`
  *     answered on 2026-09-13 and returns `400 Failed to get events endpoint`
- *     on 2026-09-20, for every sport, while the same window asked one day at a
- *     time answers fine. It is their bug, not ours, and it took all six US
+ *     on 2026-09-20, for every sport, while a single day and a whole MONTH
+ *     both answer fine. It is their bug, not ours, and it took all six US
  *     boards down until the cache expired.
  *
- *     So the range is an OPTIMISATION — one request when it works — and the
- *     per-day fan-out is the guarantee. At three to nine days that is at most
- *     nine requests (eighteen for college football, which asks two groups),
- *     and the board is cached for a minute either way.
+ *     So the window is asked for BY MONTH — one or two requests — and cut to
+ *     size below. A day-by-day fan-out also works and was tried first; the
+ *     month is the same guarantee at a ninth of the cost.
  */
 async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame[]> {
   // From last night (a late game can still be live) to the end of the window.
-  const start = new Date(now.getTime() - 12 * 3600_000)
-  const end = new Date(now.getTime() + days * 86400_000)
-  const range = `${etOf(start).ymd}-${etOf(end).ymd}`
-  // Without a group the college scoreboard is a top-25 sample, and both
-  // exchanges list FCS games too.
-  const groups = src.espnGroups?.length ? src.espnGroups : [undefined]
+  const from = etOf(new Date(now.getTime() - 12 * 3600_000)).ymd
+  const to = etOf(new Date(now.getTime() + days * 86400_000)).ymd
 
-  let raw: any[]
-  try {
-    raw = (await Promise.all(groups.map((g) => espnScoreboard(src, range, g)))).flat()
-    // An empty range is ambiguous — the 400 above answers 200-with-nothing on
-    // some days — so it falls through to the day-by-day read, which can tell
-    // "no games" from "no answer".
-    if (raw.length === 0) throw new Error('empty range')
-  } catch {
-    const days_ = etDays(start, end)
-    let answered = 0
-    const pages = await Promise.all(
-      groups.flatMap((g) =>
-        days_.map((d) =>
-          espnScoreboard(src, d, g)
-            .then((evs) => {
-              answered++
-              return evs
-            })
-            .catch(() => [] as any[])
-        )
-      )
-    )
-    raw = pages.flat()
-    // ⚠️ An empty schedule is a STATE, not a failure: the NBA has no games in
-    //    September and the board should say so rather than show an error.
-    //    Only a window where ESPN answered nothing at all is an outage.
-    if (answered === 0) throw new Error('site.api.espn.com answered nothing')
-  }
-
+  // ⚠️ ESPN stopped answering a DATE RANGE (`dates=20260920-20260929` → 400,
+  //    every sport, soccer included; found 2026-09-20 with every US board
+  //    erroring). A single day and a whole MONTH still answer, so the window
+  //    is asked for by month — one or two requests — and cut to size below.
+  const months = [...new Set([from.slice(0, 6), to.slice(0, 6)])]
+  const queries = months.flatMap((month) => {
+    const base = { dates: month, limit: '500' }
+    return src.espnGroups?.length
+      ? src.espnGroups.map((groups) => new URLSearchParams({ ...base, groups }))
+      : [new URLSearchParams(base)]
+  })
+  const pages = await Promise.all(
+    queries.map((qs) => getJson<any>(`https://site.api.espn.com/apis/site/v2/sports/${src.espn}/scoreboard?${qs}`))
+  )
   const out: EspnGame[] = []
   const seen = new Set<string>()
-  // An FBS-v-FCS game is in both groups, and a day appears in both the range
-  // and the fallback. It is one game.
-  for (const e of raw) {
+  // An FBS-v-FCS game is in both groups, and a fixture on the boundary is in
+  // both months. It is one game.
+  for (const e of pages.flatMap((d) => d.events ?? [])) {
     if (seen.has(String(e.id))) continue
     seen.add(String(e.id))
     const c = e.competitions?.[0]
     const h = c?.competitors?.find((x: any) => x.homeAway === 'home')
     const a = c?.competitors?.find((x: any) => x.homeAway === 'away')
     if (!h?.team || !a?.team || !e.date) continue
+    // A month is wider than the window this board shows.
+    const ymd = etOf(new Date(e.date)).ymd
+    if (ymd < from || ymd > to) continue
     const st = c.status?.type ?? e.status?.type ?? {}
     const home = espnTeam(h)
     const away = espnTeam(a)
