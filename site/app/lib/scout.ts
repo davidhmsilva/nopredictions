@@ -217,7 +217,7 @@ function competitionOf(ev: Raw): string | null {
  *  This was here the whole time and the board was inferring liveness from
  *  resolved markets instead — Portland Thorns read as `board` with no clock
  *  while the same payload said 2H, 59', 1-0. */
-interface PmLive {
+export interface PmLive {
   live: boolean
   finished: boolean
   minute: number | null
@@ -229,7 +229,9 @@ interface PmLive {
   phase: MatchPhase | null
 }
 
-function pmLiveOf(ev: Raw): PmLive | null {
+/** Exported for the Game Center: /api/game has the same event in hand, and
+ *  Polymarket's own clock is the fallback when api-football has nothing. */
+export function pmLiveOf(ev: Record<string, unknown>): PmLive | null {
   if (!('live' in ev) && !('period' in ev)) return null
 
   const period = str(ev.period).toUpperCase()

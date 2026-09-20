@@ -56,7 +56,7 @@ export interface LiveState {
   homeGoals: number
   awayGoals: number
   status: string
-  clockSource: 'api-football' | null
+  clockSource: 'api-football' | 'polymarket' | null
   stats: LiveStats | null
 }
 

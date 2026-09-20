@@ -223,16 +223,22 @@ export function buildLooks(
 ): Look[] {
   const looks: Look[] = []
 
-  // The clock has to come from api-football. Polymarket's listed start time ran
-  // ~30 min early on the leagues that invalidated 73k of our own observations
-  // and eight hours late on others, and every table here is keyed on the minute.
-  const minute = live?.clockSource === 'api-football' ? live.minute : null
-  const goals =
-    live?.clockSource === 'api-football'
-      ? live.homeGoals + live.awayGoals
-      : board.certain
-        ? board.goals
-        : null
+  // The clock is a PUBLISHED minute — api-football's `elapsed`, or Polymarket's
+  // own live block, which is the minute it shows the trader on the same event.
+  // What is never used is Polymarket's listed START TIME: that ran ~30 min
+  // early on some leagues and eight hours late on others, and inferring a
+  // minute from it is what made 73k of our own observations unusable.
+  //
+  // ⚠️ Polymarket's score is read as a TOTAL and as "still 0-0", never as
+  //    home-vs-away: its title order cannot be trusted for sides, and every
+  //    table below is keyed on the total anyway.
+  const clocked = live?.clockSource === 'api-football' || live?.clockSource === 'polymarket'
+  const minute = clocked ? live!.minute : null
+  const goals = clocked
+    ? live!.homeGoals + live!.awayGoals
+    : board.certain
+      ? board.goals
+      : null
 
   const imported = !MEASURED_UNIVERSE.test(competition ?? '')
   const universeNote = imported
