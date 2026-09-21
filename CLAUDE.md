@@ -2402,6 +2402,7 @@ record. Football and the six US sports are now **one component**, `BoardView`.
 | `site/app/lib/kalshiSoccer.ts` · `/api/venues/soccer` | Kalshi's football board, swept and cached |
 | `site/app/lib/kalshiGame.ts` | one fixture's Kalshi prices against Polymarket's own markets |
 | `site/app/lib/venueMatch.ts` · `etDate.ts` · `teamMatch.ts` | the cross-venue join |
+| `agent/kalshi_aliases.json` (+ a copy in `site/app/lib/`) | clubs Kalshi spells its own way |
 | `db/055` · `H-BEST-VENUE` (id 37) | s16 **obs_version 6**, s17 **obs_version 7** |
 
 Measured on a live football board, 2026-09-20: **60 of 113 fixtures on both
@@ -2504,6 +2505,45 @@ per-day fan-out is the guarantee.
 `kalshi-soccer-index-v2`, `kalshi-soccer-priced-v2`). The Data Cache outlives a
 deploy, and a fixture written under an older shape is served straight into the
 new renderer.
+
+### Kalshi is a THIRD vocabulary (2026-09-20)
+
+Found by the user: Kalshi plainly had `kxligaportugalgame-26sep20fcpben` —
+FC Porto vs Sport Lisboa e Benfica — while the board said it did not. The data
+was in our index the whole time. The join refused it because it could not
+prove the away teams were the same club: **"Sport Lisboa e Benfica" against
+"SL Benfica" shares one of four tokens, 0.25 against a 0.60 bar**, and both
+sides have to clear it. Failing closed is right; this was a false negative.
+
+🔑 **The cause is that nothing was pointed at Kalshi's names.**
+`agent/fixture_aliases.json` is Polymarket ↔ api-football (62 entries) and
+`agent/team_aliases.json` is Polymarket ↔ our own database (461, shipped to
+the site as `pm_team_aliases.json`). Kalshi shortens and truncates where
+Polymarket writes the official name — "SL Benfica", "Benfica Lisbon",
+"Liverpool M", "Inter Milano", "Asociacion Deportiva Tarma" — so neither table
+reaches it, and the cross-venue matcher ran the raw scorer with no aliases.
+
+`agent/kalshi_aliases.json`, 8 clubs, shipped to both sides. Every spelling
+maps to a shared canonical and two names match only when **both resolve to the
+same canonical** — exact equality, never scoring. That directness is what
+makes a hand table safe: "Leuven" is aliased without the word swallowing every
+club that contains it. Measured on the live board: **58 fixtures placed before,
+65 after.**
+
+⚠️ **The table is hand-written and must stay so.** The scan that found Benfica
+also proposed `Fortaleza FC` = `Chaco For Ever` **at 1.00** — the abbreviation
+rule in `_token_hit` lets a 3-letter token prefix a longer one, so "For" (of
+"For Ever") prefixes "Fortaleza". That false positive is in the scorer today.
+What contains it is the requirement that BOTH sides of a fixture agree and
+that the pairing be unique, which is exactly what refused that fixture. It is
+worth its own look; loosening the scorer to reach Benfica would have made it
+worse.
+
+🐛 **The two normalisers disagreed on ø.** Python folds it to "o"
+(`fixture_match._LETTER_FOLD`); JavaScript's NFKD does not decompose it, so
+"HB Køge" keyed as `hb k ge` in the browser and `hb koge` in the agent — a
+shared table that matches on one side only. The fold is ported to
+`teamMatch.ts` and four keys are pinned in the tests.
 
 ### What the agents do now
 
