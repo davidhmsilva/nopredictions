@@ -603,6 +603,11 @@ async function build(sport: SportKey): Promise<SportBoardData> {
   }
 }
 
+/** ESPN's path for a sport ("football/nfl"), for the per-game summary. */
+export function espnPathOf(sport: SportKey): string {
+  return SOURCES[sport].espn
+}
+
 // ── cache: the scoutCache pattern, one board per sport ────────────────────────
 
 /** A minute: an in-play price is not stale in that time, and a visitor

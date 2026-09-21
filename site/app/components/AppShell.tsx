@@ -40,7 +40,7 @@ function isActive(pathname: string, href: string): boolean {
       pathname === '/' ||
       pathname === '/soccer' ||
       pathname.startsWith('/game') ||
-      SPORT_KEYS.some((k) => pathname === `/${k}`)
+      SPORT_KEYS.some((k) => pathname === `/${k}` || pathname.startsWith(`/${k}/`))
     )
   }
   return pathname === href || pathname.startsWith(href + '/')

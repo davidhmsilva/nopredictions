@@ -111,9 +111,8 @@ export function rowFromSportGame(g: SportGame, sport: SportKey): BoardRow {
   return {
     key: g.id,
     sport,
-    // The US sports have no Game Center of their own yet, so the row's links
-    // are the exchanges. Stated here rather than faked with a dead href.
-    href: null,
+    // The Game Center for a US game lives under its sport, keyed on ESPN's id.
+    href: `/${sport}/${g.id}`,
     left: g.away.short,
     right: g.home.short,
     competition: SPORT_META[sport].label,
