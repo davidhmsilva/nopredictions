@@ -31,23 +31,23 @@ type Period = 'monthly' | 'yearly'
  *  as planned — a matrix row that is a dash in both columns reads as "Pro does
  *  not get this either", which is true but is not what a comparison is for. */
 const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
-  { k: 'US sports — Kalshi and Polymarket side by side', free: '✓', pro: '✓', href: '/nfl' },
-  { k: 'Every board — soccer and US sports', free: '✓', pro: '✓', href: '/' },
-  { k: 'Live clock, score and book quality on every fixture', free: '✓', pro: '✓' },
-  { k: 'Game Center on any fixture', free: '✓', pro: '✓' },
-  { k: 'Dropping odds — where the money went', free: '✓', pro: '✓', href: '/dropping-odds' },
-  { k: 'Insights — what we measured, including the failures', free: '✓', pro: '✓', href: '/insights' },
+  { k: 'Polymarket and Kalshi odds side by side, the better price marked', free: '✓', pro: '✓', href: '/' },
+  { k: 'NFL, college football, MLB, NBA, NHL, WNBA and soccer', free: '✓', pro: '✓', href: '/nfl' },
+  { k: 'Live scores on every game', free: '✓', pro: '✓' },
+  { k: 'A full match page for every soccer game', free: '✓', pro: '✓', href: '/soccer' },
+  { k: 'Dropping odds — where the money moved', free: '✓', pro: '✓', href: '/dropping-odds' },
+  { k: 'Insights — what our research found, misses included', free: '✓', pro: '✓', href: '/insights' },
   // The agent's paper record left this table on 2026-09-13. It is the
   // operator's own and private now, and it was never what a plan sells.
-  { k: 'Lab — a theory replayed over 111,475 games', free: '3 a day', pro: 'Unlimited', href: '/lab' },
-  { k: 'Wallet — any trader’s record rebuilt from their fills', free: '3 a day', pro: 'Unlimited', href: '/wallet' },
+  { k: 'Lab — test a betting idea on 111,475 real games', free: '3 a day', pro: 'Unlimited', href: '/lab' },
+  { k: 'Wallet — any Polymarket trader’s full record', free: '3 a day', pro: 'Unlimited', href: '/wallet' },
   { k: 'Watchlist', free: 'This browser', pro: 'Every device' },
 ]
 
 /** The three lines on each card. Short on purpose: the card is the decision,
  *  the table below is the detail. */
 const FREE_POINTS = [
-  'The whole board, the Game Center and the movers',
+  'Odds on every game, in every sport',
   'Three Lab tests and three wallet reads a day',
   'No card, ever',
 ]
@@ -102,11 +102,10 @@ export default function PricingPage() {
       <div className="pr-page">
         <header className="tp-head">
           <span className="tp-eyebrow">PRICING</span>
-          <h1 className="tp-h1">The board is free. The tools have a limit.</h1>
+          <h1 className="tp-h1">Compare odds free, forever.</h1>
           <p className="tp-sub">
-            Everything you can look at costs nothing and always will — it is how
-            anyone decides this site is worth an account. What Pro removes is the
-            daily limit on the two things that do real work.
+            Every odds page on this site is free and always will be. Pro takes the daily limit
+            off the Lab and the Wallet.
           </p>
         </header>
 
@@ -153,7 +152,7 @@ export default function PricingPage() {
 
           <section className="pr-card is-pro">
             <h2 className="pr-name">
-              Pro <span className="np-badge is-good">NO LIMIT</span>
+              Pro <span className="np-badge">Unlimited</span>
             </h2>
             <div className="pr-price">
               <span className="np-num">${price}</span>
@@ -240,18 +239,16 @@ export default function PricingPage() {
             matrix row that is a dash in both columns reads as a Pro limitation
             instead of an unbuilt feature. */}
         <div className="pr-next">
-          <strong>Not built yet, and not part of what you would be paying for:</strong>{' '}
-          email alerts when a game on your watchlist is about to start, when its book first
-          grades clean, or when its price moves. When they exist they go to Pro, and this
-          page will move them into the table above.
+          <strong>Coming later, and not part of Pro today:</strong> email alerts when a game on
+          your watchlist is about to start or its price moves. When they arrive they go to Pro,
+          and they&apos;ll move into the table above.
         </div>
 
         <div className="np-note pr-honest">
-          <strong>What Pro is not.</strong> It is not a tip service, and nothing on this
-          site tells you what to bet. We do not place trades, and we never hold anyone’s
-          money. What you are paying for is unlimited use of two tools that measure — a
-          backtest against Pinnacle’s closing line, and a trader’s record rebuilt from
-          their actual fills.
+          <strong>What Pro is not.</strong> It isn&apos;t a tip service — nothing here tells you
+          what to bet. We don&apos;t place bets and we never hold your money. You&apos;re paying for
+          unlimited use of two tools: testing a betting idea against real results, and reading
+          any trader&apos;s record from their actual trades.
         </div>
       </div>
     </AppShell>

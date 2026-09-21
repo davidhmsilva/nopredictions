@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppShell } from '../../components/AppShell'
+import { VenueLogo } from '../../components/VenueLogo'
 import type { GameData, Headline, MarketGroup, PricePoint } from '../../lib/gamecenter'
 import { outcomeKey, pickFor, type KalshiGame, type KalshiQuoteRef } from '../../lib/kalshiGame'
 import { netCost, type BestPick, type Quote } from '../../lib/venues'
@@ -552,7 +553,7 @@ function Board({ groups, kalshi }: { groups: MarketGroup[]; kalshi: KalshiGame |
 
   return (
     <section className="gc-section">
-      <h2 className="gc-h2">The board, on both exchanges</h2>
+      <h2 className="gc-h2">Every market, on both apps</h2>
       <p className="gc-quiet">
         {rows.length} of {quoted} quoted Polymarket outcomes have a real order book — the rest are
         Gamma mids, a number rather than a price you can pay.{' '}
@@ -586,8 +587,16 @@ function Board({ groups, kalshi }: { groups: MarketGroup[]; kalshi: KalshiGame |
             <tr>
               <th>Market</th>
               <th>Side</th>
-              <th className="gc-r">Polymarket</th>
-              <th className="gc-r">Kalshi</th>
+              <th className="gc-r">
+                <span className="gc-venue-h">
+                  <VenueLogo venue="polymarket" size={13} title="" /> Polymarket
+                </span>
+              </th>
+              <th className="gc-r">
+                <span className="gc-venue-h">
+                  <VenueLogo venue="kalshi" size={13} title="" /> Kalshi
+                </span>
+              </th>
               <th className="gc-r">Spread</th>
               <th className="gc-r">Depth</th>
             </tr>
@@ -626,7 +635,7 @@ function Board({ groups, kalshi }: { groups: MarketGroup[]; kalshi: KalshiGame |
       )}
 
       <p className="gc-quiet gc-board-note">
-        Prices are each exchange&apos;s ask — what buying that side costs now — and the highlight
+        Prices are each exchange&apos;s ask — what buying that side costs now — and the outline
         marks the cheaper of the two <b>after each venue&apos;s taker fee</b>: Polymarket
         0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract. Spread and depth are
         Polymarket&apos;s, from its own book. This is a price comparison and never an arb: across

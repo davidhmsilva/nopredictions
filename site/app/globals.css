@@ -4816,3 +4816,298 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .gc-board th, .gcx-table th { font-size: 10.5px; }
 }
 
+
+
+/* ===========================================================================
+   SIMPLER BOARDS  (2026-09-21) — one look for every sport, and no colour code.
+   The boards coloured venue names green or amber by book grade and the
+   winning price green; the tape above the nav was green and red. To someone
+   who does not know what a book grade is, that was noise. What is left:
+     · the two app logos — the only colour on a board, and the brand IS the
+       colour;
+     · the red dot on a live game, which every sports site uses;
+     · the green primary button, which is the brand's.
+   The better price is marked by an outline and its app's logo, not a colour.
+   Last in the file so it wins over the older rules above.
+   =========================================================================== */
+
+.np-venue-logo {
+  display: inline-block; flex-shrink: 0; vertical-align: -2px;
+  border-radius: 3px;
+}
+
+/* ── neutral where it used to be green, amber or blue ── */
+.sc-eyebrow { color: var(--grey); }
+.sc-star.is-on { color: var(--white); }
+.sc-cat.is-link { color: var(--grey); }
+.sc-cat.is-link:hover { color: var(--white); }
+.sc-cat-more { color: var(--grey); }
+.sc-cat-icn.is-live-icn { color: var(--red); }
+.sc-table tbody tr:hover .sc-go {
+  color: var(--white); border-color: var(--grey2); background: var(--bg3);
+}
+.sc-report { color: var(--grey); }
+.gc-board td.is-best {
+  color: var(--white); background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.28); border-radius: 4px;
+}
+.np-badge.is-live { color: #f87171; border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.07); }
+
+/* ── the page head ── */
+.sc-head { padding: 28px 0 18px; }
+.sc-head .sc-h1 { font-size: 28px; font-weight: 700; letter-spacing: -.025em; }
+.sc-head .sc-h1-sub { margin-top: 6px; max-width: 640px; font-size: 14.5px; line-height: 1.55; color: var(--grey); }
+
+/* ── every game: its own section under the cards ── */
+.bd-all { margin-top: 30px; }
+.bd-h2 {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 18px; font-weight: 650; letter-spacing: -.01em; color: var(--white);
+  margin: 0 0 10px;
+}
+.bd-h2-n { font-size: 12px; font-weight: 500; color: var(--grey2); }
+
+/* The chip row now sits inside the page, above the table, instead of as a
+   full-width bar under the nav. */
+.sc-cats {
+  display: flex; align-items: center; gap: 4px;
+  border: none; background: none; margin: 0 0 8px;
+  overflow-x: auto; scrollbar-width: none; white-space: nowrap;
+}
+.sc-cat { border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
+.sc-cat:hover { border-color: var(--border2); }
+.sc-cat.is-on { background: var(--white); color: var(--bg); border-color: var(--white); }
+.sc-cat.is-on .sc-cat-n { color: var(--bg); opacity: .6; }
+.sc-cat-group { gap: 6px; }
+.sc-cat.is-link { margin-left: 0; padding-left: 12px; }
+.sc-cat.is-link::before { display: none; }
+.sc-bar { padding: 4px 0 12px; }
+
+/* ── the table ── */
+.sc-table thead th { font-size: 10.5px; letter-spacing: .06em; }
+.sc-teams { font-size: 14px; }
+.sc-c-odd { width: 76px; }
+.sc-odd { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.sc-c-odd.is-best { color: var(--white); font-weight: 650; background: none; }
+.sc-c-odd.is-best .sc-odd {
+  padding: 3px 7px; margin: -4px -8px -4px 0;
+  border: 1px solid rgba(255,255,255,.3); border-radius: 6px;
+}
+.sc-c-odd.is-empty { color: var(--grey2); }
+.sc-meta { align-items: center; margin-top: 3px; }
+.sc-venues { gap: 5px; }
+.sc-venue { display: inline-flex; border: none; opacity: .9; transition: opacity .12s, transform .12s; }
+.sc-venue:hover { opacity: 1; transform: translateY(-1px); border: none; }
+.sc-error-detail { color: var(--grey2); font-size: 12px; }
+
+/* ── how the prices are read, folded ── */
+.bd-how {
+  margin: 28px 0 48px; max-width: 760px;
+  border: 1px solid var(--border); border-radius: var(--r); background: var(--bg2);
+}
+.bd-how summary {
+  cursor: pointer; list-style: none; padding: 13px 16px;
+  font-size: 13.5px; font-weight: 600; color: var(--white);
+  display: flex; align-items: center; gap: 8px;
+}
+.bd-how summary::-webkit-details-marker { display: none; }
+.bd-how summary::before {
+  content: '+'; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border2);
+  font-size: 13px; line-height: 1; color: var(--grey);
+}
+.bd-how[open] summary::before { content: '−'; }
+.bd-how-body { padding: 0 16px 16px; }
+.bd-how-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 13.5px; color: var(--grey); line-height: 1.55; }
+.bd-how-steps b { color: var(--white); font-weight: 600; }
+.bd-how-fine { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.6; color: var(--grey2); }
+.bd-how-fine b { color: var(--grey); font-weight: 600; }
+
+/* ===========================================================================
+   GAME CARDS  (.gm-*) — the home page grid and the top of every sport page.
+   One line per outcome, the way a sportsbook prints a moneyline.
+   =========================================================================== */
+
+.gm-grid { display: grid; gap: 12px; }
+.gm-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.gm-card {
+  position: relative;
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 14px 14px 12px;
+  transition: border-color .12s, background .12s;
+}
+.gm-card:hover { border-color: var(--border2); background: #151920; }
+
+.gm-top { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.gm-league {
+  font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--grey); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gm-top .np-badge, .gm-top .sc-in { margin-left: auto; flex-shrink: 0; }
+.gm-top .sc-in { font-size: 12px; }
+
+.gm-lines { display: flex; flex-direction: column; gap: 6px; }
+.gm-line { display: flex; align-items: center; gap: 8px; min-height: 34px; }
+.gm-name {
+  flex: 1; min-width: 0;
+  font-size: 14.5px; font-weight: 600; color: var(--white);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gm-line.is-draw .gm-name { font-weight: 500; color: var(--grey); }
+.gm-score { font-size: 15px; font-weight: 700; color: var(--white); min-width: 16px; text-align: right; }
+
+.gm-price {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 92px; height: 34px; padding: 0 10px; flex-shrink: 0;
+  border-radius: var(--r-sm); background: var(--bg3); border: 1px solid transparent;
+}
+.gm-price b { font-size: 14.5px; font-weight: 650; color: var(--white); margin-left: auto; }
+.gm-price.is-best { border-color: rgba(255,255,255,.34); background: #20252d; }
+.gm-logo-gap { display: inline-block; width: 14px; }
+
+.gm-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding-top: 10px; border-top: 1px solid var(--border);
+}
+.gm-vol { font-size: 12px; color: var(--grey); }
+.gm-venues { display: inline-flex; gap: 5px; position: relative; z-index: 1; }
+.gm-venues a { display: inline-flex; opacity: .9; transition: opacity .12s, transform .12s; }
+.gm-venues a:hover { opacity: 1; transform: translateY(-1px); }
+.gm-go {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12.5px; font-weight: 600; color: var(--white); text-decoration: none;
+  transition: gap .12s;
+}
+/* The whole card opens the game. */
+.gm-go::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.gm-card:hover .gm-go { gap: 8px; }
+
+/* Loading: the shape of a card, so nothing moves when they land. */
+.gm-card.is-skeleton { gap: 14px; min-height: 196px; }
+.gm-sk {
+  display: block; height: 30px; border-radius: var(--r-sm);
+  background: linear-gradient(90deg, var(--bg3), #20252d, var(--bg3));
+  background-size: 200% 100%; animation: gm-shimmer 1.4s ease-in-out infinite;
+}
+.gm-sk-s { height: 12px; width: 40%; }
+@keyframes gm-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* ===========================================================================
+   HOME  (.hm-*)
+   =========================================================================== */
+
+.hm-hero { padding: 40px 0 30px; max-width: 760px; }
+.hm-h1 {
+  font-size: 40px; line-height: 1.1; font-weight: 750; letter-spacing: -.035em; color: var(--white);
+}
+.hm-sub { margin-top: 14px; font-size: 16.5px; line-height: 1.6; color: var(--grey); }
+.hm-venue { display: inline-flex; align-items: center; gap: 6px; color: var(--white); font-weight: 600; white-space: nowrap; }
+.hm-venue .np-venue-logo { border-radius: 4px; vertical-align: -3px; }
+.hm-trust { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 18px 0 0; padding: 0; list-style: none; }
+.hm-trust li { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--grey); }
+.hm-trust li::before { content: '✓'; color: var(--white); font-weight: 700; font-size: 12px; }
+
+.hm-sec { margin-bottom: 40px; }
+.hm-sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.hm-h2 { font-size: 19px; font-weight: 700; letter-spacing: -.015em; color: var(--white); margin: 0; }
+.hm-sec-note { font-size: 12.5px; color: var(--grey2); }
+
+.hm-sports { display: grid; gap: 10px; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.hm-sport {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 14px; border-radius: var(--r-lg);
+  background: var(--bg2); border: 1px solid var(--border); text-decoration: none;
+  transition: border-color .12s, background .12s;
+}
+.hm-sport:hover { border-color: var(--border2); background: #151920; }
+.hm-sport b { font-size: 15px; font-weight: 700; color: var(--white); }
+.hm-sport span { font-size: 12.5px; color: var(--grey); }
+.hm-sport em { font-style: normal; font-size: 12px; color: var(--grey2); }
+.hm-sport.is-empty { opacity: .55; }
+
+.hm-steps { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
+.hm-steps li {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px; border-radius: var(--r-lg); background: var(--bg2); border: 1px solid var(--border);
+}
+.hm-step-n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--white); color: var(--bg); font-size: 12px; font-weight: 700;
+  margin-bottom: 4px;
+}
+.hm-steps b { font-size: 15px; font-weight: 650; color: var(--white); }
+.hm-steps span { font-size: 13.5px; line-height: 1.55; color: var(--grey); }
+
+.hm-more-h { border-left: none; padding-left: 0; }
+.hm-more-card { border-radius: var(--r-lg); }
+.hm-more-icn { color: var(--white); }
+.hm-more-card em { font-family: var(--font); font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--white); }
+.hm-join {
+  background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r-lg);
+  margin-top: 14px;
+}
+
+@media (max-width: 1240px) {
+  .gm-grid-4 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .gm-grid-4 > :nth-child(n+7) { display: none; }
+  .gm-grid-feature > :nth-child(n+4) { display: none; }
+  .hm-sports { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 980px) {
+  .gm-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gm-grid-4 > :nth-child(n+5) { display: none; }
+  .gm-grid-feature > :nth-child(n+3) { display: none; }
+}
+@media (max-width: 760px) {
+  .hm-hero { padding: 24px 0 20px; }
+  .hm-h1 { font-size: 29px; }
+  .hm-sub { font-size: 15px; }
+  .hm-sports { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hm-steps { grid-template-columns: 1fr; }
+  .sc-head .sc-h1 { font-size: 23px; }
+  .sc-go-text { display: none; }
+
+  /* Cards become a snap slider on a phone, bled to the screen edge so a
+     half-visible next card says there is more. Every card is shown here. */
+  .gm-grid-4 {
+    display: flex; gap: 10px; overflow-x: auto;
+    scroll-snap-type: x mandatory; scrollbar-width: none;
+    margin: 0 -14px; padding: 0 14px 2px;
+  }
+  .gm-grid-4::-webkit-scrollbar { display: none; }
+  .gm-grid-4 > * { flex: 0 0 84%; scroll-snap-align: start; }
+  .gm-grid-4 > :nth-child(n) { display: flex; }
+}
+
+/* Numbers in the UI face, with tabular figures so columns still line up. The
+   monospace read as a trading terminal; aligned digits are all it was for.
+   The monospace survives where a string is code-like (wallet addresses). */
+.np-num { font-family: var(--font); font-variant-numeric: tabular-nums; }
+.np-badge { font-family: var(--font); font-size: 11px; font-weight: 600; letter-spacing: .01em; }
+.np-odds button { font-family: var(--font); font-variant-numeric: tabular-nums; }
+.sc-sort-key { font-family: var(--font); font-size: 11.5px; letter-spacing: 0; }
+.np-footer-legal { font-family: var(--font); letter-spacing: .03em; }
+.gc-venue-h { display: inline-flex; align-items: center; gap: 6px; }
+
+/* One control row: the chips scroll on the left, sort and search hold the
+   right. The clear button, the count and "loading Kalshi" sit under it, and
+   only when there is something to say. */
+.bd-controls { flex-wrap: nowrap; gap: 14px; padding: 0 0 12px; }
+.bd-controls .sc-cats { flex: 1 1 auto; min-width: 0; margin: 0; }
+.bd-controls .sc-bar-right { flex-shrink: 0; }
+.bd-status { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; }
+/* On a sport's own page the league is the page, so the start time leads. */
+.gm-top.is-bare .np-badge, .gm-top.is-bare .sc-in { margin-left: 0; }
+@media (max-width: 760px) {
+  .bd-controls { flex-wrap: wrap; }
+  .bd-controls .sc-cats { order: 0; flex: 1 1 100%; }
+}
+
+/* Pricing and the tool pages: the same neutral palette as the boards. */
+.tp-eyebrow { color: var(--grey); }
+.pr-buy-note a, .pr-honest a { color: var(--white); }
+.pr-feat a:hover { color: var(--white); }
+.pr-val.is-pro.is-tick, .pr-val.is-pro:not(.is-tick) { color: var(--white); }

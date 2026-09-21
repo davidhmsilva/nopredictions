@@ -12,13 +12,19 @@
  */
 
 import type { LiveSource, MatchPhase, ScoutFixture } from './scoutTypes'
-import type { SportGame } from './sportsMeta'
+import { SPORT_META, type SportGame, type SportKey } from './sportsMeta'
 import { combinedVolume, type BestPick, type OutcomeKey, type VenueBook } from './venues'
+
+/** Every board the site has: soccer, and the six US sports. */
+export type BoardSport = 'soccer' | SportKey
 
 export interface BoardRow {
   /** Stable across refreshes: the Polymarket slug on football, ESPN's event id
    *  on the US sports. Also the watchlist key. */
   key: string
+  /** Which board it came from. The home page mixes every sport on one grid,
+   *  so a row has to carry what its prices mean. */
+  sport: BoardSport
   /** Our own page for it, where one exists. Null means the row's only links
    *  are the two exchanges. */
   href: string | null
@@ -26,8 +32,6 @@ export interface BoardRow {
    *  "away @ home". */
   left: string
   right: string
-  leftLogo: string | null
-  rightLogo: string | null
   competition: string | null
   kickoff: string | null
   live: boolean
@@ -79,11 +83,10 @@ export const US_COLUMNS: BoardColumn[] = [
 export function rowFromScout(f: ScoutFixture): BoardRow {
   return {
     key: f.slug,
+    sport: 'soccer',
     href: `/game/${f.slug}`,
     left: f.home,
     right: f.away,
-    leftLogo: null,
-    rightLogo: null,
     competition: f.competition,
     kickoff: f.kickoff,
     live: f.live,
@@ -103,18 +106,17 @@ export function rowFromScout(f: ScoutFixture): BoardRow {
   }
 }
 
-export function rowFromSportGame(g: SportGame, competition: string): BoardRow {
+export function rowFromSportGame(g: SportGame, sport: SportKey): BoardRow {
   const scored = g.state !== 'pre'
   return {
     key: g.id,
+    sport,
     // The US sports have no Game Center of their own yet, so the row's links
     // are the exchanges. Stated here rather than faked with a dead href.
     href: null,
     left: g.away.short,
     right: g.home.short,
-    leftLogo: g.away.logo,
-    rightLogo: g.home.logo,
-    competition,
+    competition: SPORT_META[sport].label,
     kickoff: g.start,
     live: g.state === 'in',
     finished: g.state === 'post',
@@ -130,6 +132,38 @@ export function rowFromSportGame(g: SportGame, competition: string): BoardRow {
     venues: g.venues ?? [],
     volume: g.volumeCombined ?? 0,
   }
+}
+
+/** The columns a row is priced in. Soccer is three-way plus the goals line; a
+ *  US sport is the two moneylines. */
+export function columnsFor(row: BoardRow): BoardColumn[] {
+  return row.sport === 'soccer' ? SOCCER_COLUMNS : US_COLUMNS
+}
+
+/** What an outcome is called on a card: the team's own name rather than
+ *  "Home" or "Away", which a reader has to translate back into a team. */
+export function outcomeLabel(row: BoardRow, key: OutcomeKey): string {
+  const homeIsLeft = row.sport === 'soccer'
+  switch (key) {
+    case 'home':
+      return homeIsLeft ? row.left : row.right
+    case 'away':
+      return homeIsLeft ? row.right : row.left
+    case 'draw':
+      return 'Draw'
+    case 'over25':
+      return 'Over 2.5 goals'
+  }
+}
+
+/** Whether a card for this row would show at least one price. A game whose
+ *  every outcome is decided (or unquoted) has nothing to compare, and a card
+ *  of dashes reads as a broken page. */
+export function hasPrice(row: BoardRow): boolean {
+  return columnsFor(row).some((c) => {
+    const a = row.best[c.key]?.ask
+    return a != null && a > 0.01 && a < 0.99
+  })
 }
 
 /** Per-venue volume off the row's books, for the footer and the tooltip that

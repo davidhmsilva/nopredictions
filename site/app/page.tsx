@@ -1,7 +1,6 @@
-import { SoccerBoard } from './components/SoccerBoard'
+import { HomeBoard } from './components/HomeBoard'
 
-/** Home: the intro, the games leading the card, the top of the soccer board,
- *  a way to all of it (/soccer), and what else the site does. */
+/** Home: the biggest games in every sport, then a way into each one. */
 export default function HomePage() {
-  return <SoccerBoard mode="home" />
+  return <HomeBoard />
 }

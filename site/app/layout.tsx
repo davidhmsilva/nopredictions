@@ -4,11 +4,11 @@ import './globals.css'
 // What the site leads with, in one place, so the browser tab, a search result
 // and a link pasted on X all say the same thing. The title names what the tool
 // DOES, not a venue or a sport; the description says what is on it today.
-const TITLE = 'NOPREDICTIONS — See if the price is wrong before you trade it'
+const TITLE = 'NOPREDICTIONS — Find the better odds on every game'
 const DESCRIPTION =
-  'Kalshi and Polymarket side by side for the NFL, college football, MLB, NBA, NHL and WNBA, and every Polymarket soccer board checked against how matches priced the same way actually ended. American, decimal or implied odds. No tips: the numbers, and you decide.'
+  'Polymarket and Kalshi side by side for the NFL, college football, MLB, NBA, NHL, WNBA and soccer, with the better price marked after fees. American, decimal or implied odds. Free, no tips.'
 const CARD =
-  'Kalshi and Polymarket side by side for US sports, and every Polymarket soccer board checked against the sharp closing line. No tips.'
+  'Polymarket and Kalshi side by side on every game, with the better price marked after fees. Free, no tips.'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nopredictions.com'),

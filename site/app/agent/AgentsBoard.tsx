@@ -109,9 +109,9 @@ export function AgentsBoard({ agents, limits }: { agents: AgentSummary[]; limits
           <p className="sc-eyebrow">AGENTS · Paper trading</p>
           <h1 className="sc-h1">Your agents</h1>
           <p className="sc-h1-sub">
-            Each one trades today&apos;s Polymarket boards on paper — 1 unit at the real ask, logged
-            before the event and settled on the result. Nothing here places an order. Run anything,
-            watch what it does, and keep what earns its place.
+            Each one places practice bets on today&apos;s Polymarket games at the real price —
+            logged before kickoff and settled on the result. No real money, ever. Run anything,
+            watch what it does, and keep what works.
           </p>
         </div>
         <div className="ag-head-cta">

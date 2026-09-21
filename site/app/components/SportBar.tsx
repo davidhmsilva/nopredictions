@@ -2,9 +2,9 @@
 
 /** Which sport's board you are on.
  *
- *  The US sports lead, in the order a US bettor's season runs through them.
- *  Soccer has its own page like the rest (/soccer); the home page shows only
- *  the top of that board, so no tab is lit there.
+ *  "Top" is the home page — the biggest games across every sport. The US
+ *  sports follow in the order a US bettor's season runs through them, and
+ *  soccer has its own page like the rest (/soccer).
  */
 
 import Link from 'next/link'
@@ -12,6 +12,7 @@ import { usePathname } from 'next/navigation'
 import { SPORT_KEYS, SPORT_META } from '../lib/sportsMeta'
 
 const ITEMS = [
+  { href: '/', label: 'Top' },
   ...SPORT_KEYS.map((k) => ({ href: SPORT_META[k].path, label: SPORT_META[k].tab ?? SPORT_META[k].label })),
   { href: '/soccer', label: 'Soccer' },
 ]

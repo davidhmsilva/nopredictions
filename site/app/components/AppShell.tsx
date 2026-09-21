@@ -46,95 +46,6 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + '/')
 }
 
-// ── the tape ─────────────────────────────────────────────────────────────────
-
-interface Pulse {
-  boards: number
-  markets: number
-  competitions: number
-  live: number
-  clean: number
-  volumeUsd: number
-  liquidityUsd: number
-}
-
-function money(v: number): string {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}k`
-  return `$${v.toFixed(0)}`
-}
-
-/** Every number here is counted off the live board, not typed in. It runs on
- *  every page and shares the board cache with the table, so a page that shows
- *  both pays for one sweep. */
-function Tape() {
-  const [p, setPulse] = useState<Pulse | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/pulse')
-      .then((r) => r.json())
-      .then((b) => {
-        if (!cancelled && b.ok) setPulse(b)
-      })
-      .catch(() => {
-        /* the tape is decoration; a page without it still works */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const cells: { label: string; value: string; cls?: string }[] = p
-    ? [
-        { label: 'FOOTBALL BOARDS', value: String(p.boards) },
-        { label: 'MARKETS', value: p.markets.toLocaleString('en-US') },
-        { label: 'COMPETITIONS', value: String(p.competitions) },
-        { label: 'IN PLAY', value: String(p.live), cls: 'is-live' },
-        { label: 'CLEAN BOOKS', value: String(p.clean), cls: 'is-good' },
-        {
-          label: 'CLEAN SHARE',
-          value: p.boards ? `${Math.round((p.clean / p.boards) * 100)}%` : '—',
-          cls: 'is-good',
-        },
-        { label: 'VOLUME', value: money(p.volumeUsd) },
-        { label: 'LIQUIDITY', value: money(p.liquidityUsd) },
-        { label: 'VENUE', value: 'POLYMARKET' },
-      ]
-    : []
-
-  if (!p) {
-    return (
-      <div className="np-tape">
-        <div className="np-tape-static">
-          <span className="np-tape-cell">READING THE BOARD…</span>
-        </div>
-      </div>
-    )
-  }
-
-  // The list is rendered twice so the marquee can loop without a gap. The
-  // duplicate is hidden from assistive tech rather than read out again.
-  const strip = (dup: boolean) => (
-    <div className="np-tape-strip" aria-hidden={dup || undefined}>
-      {cells.map((c) => (
-        <span key={c.label} className={`np-tape-cell ${c.cls ?? ''}`}>
-          <b className="np-num">{c.value}</b> {c.label}
-        </span>
-      ))}
-    </div>
-  )
-
-  return (
-    <div className="np-tape">
-      <div className="np-tape-track">
-        {strip(false)}
-        {strip(true)}
-      </div>
-    </div>
-  )
-}
-
 // ── nav ──────────────────────────────────────────────────────────────────────
 
 function NavSearch({
@@ -167,7 +78,7 @@ function NavSearch({
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search a team, or paste a Polymarket link…"
+        placeholder="Search a soccer team, or paste a Polymarket link…"
         aria-label="Search fixtures"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus={autoFocus}
@@ -320,7 +231,7 @@ function AccountActions() {
                   Pricing
                 </Link>
                 <div className="np-sheet-note">
-                  The boards, Agents and the Game Center work without an account.
+                  Every odds page works without an account.
                 </div>
               </>
             )}
@@ -336,8 +247,9 @@ export function AppNav() {
 
   return (
     <>
-      <Tape />
-
+      {/* The scrolling tape of board counts is gone: "clean books", "clean
+          share" and "liquidity" in a green-and-red marquee read as a trading
+          terminal, and it counted soccer alone on a site with seven sports. */}
       <header className="np-nav">
         <div className="np-nav-inner">
           <Link href="/" className="np-brand">
@@ -397,8 +309,8 @@ export function AppFooter() {
       <div className="np-footer-inner">
         <div className="np-footer-brand">NOPREDICTIONS</div>
         <div className="np-footer-note">
-          Every number on this site is measured, and the ones that are not measured say so.
-          Nothing here is a tip.
+          Odds comparison for Polymarket and Kalshi. Every number here is measured, and nothing
+          here is a tip.
         </div>
         {/* What a US reader expects at the foot of anything about betting: the
             age line, what this is and is not, and where to get help. "Paper

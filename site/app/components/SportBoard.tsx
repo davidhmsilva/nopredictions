@@ -1,6 +1,6 @@
 'use client'
 
-/** One US sport's board — the same table the football board uses.
+/** One US sport's board — the same page the soccer board uses.
  *
  *  Every game either exchange lists, placed on ESPN's schedule, with both
  *  moneylines and the cheaper venue marked after each one's taker fee.
@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { BoardView } from './BoardView'
+import { BoardView, HowPricesWork } from './BoardView'
 import { rankRows, rowFromSportGame, US_COLUMNS } from '../lib/boardRow'
 import { timeText } from '../lib/display'
 import { SPORT_META, type SportBoardData, type SportKey } from '../lib/sportsMeta'
@@ -55,40 +55,38 @@ export function SportBoard({ sport }: { sport: SportKey }) {
   }, [sport])
 
   const rows = useMemo(
-    () => (data ? rankRows(data.games.map((g) => rowFromSportGame(g, meta.label))) : []),
-    [data, meta.label]
+    () => (data ? rankRows(data.games.map((g) => rowFromSportGame(g, sport))) : []),
+    [data, sport]
   )
 
   const c = data?.counts
 
   const head = (
     <div className="sc-head">
-      <p className="sc-eyebrow">NOPREDICTIONS · {meta.label} on the prediction markets</p>
-      <h1 className="sc-h1">{meta.label}: the better price, on two exchanges</h1>
+      <h1 className="sc-h1">{meta.label} odds</h1>
       <p className="sc-h1-sub">
-        Every {meta.label} game either exchange lists in the next {meta.days} days, placed on
-        ESPN&apos;s schedule, ranked by the money through both. Both moneylines at the ask, the
-        book behind each, and the cheaper venue marked — after each one&apos;s taker fee. No tips:
-        the numbers, and you decide.
+        Every {meta.label} game on Polymarket and Kalshi, side by side. When one app pays more,
+        its price is outlined with its logo.
       </p>
     </div>
   )
 
-  const foot = data && c && (
-    <p className="sp-foot">
-      Prices are each exchange&apos;s <b>ask</b> — what buying that side costs right now — and the
-      board marks the cheaper of the two <b>after each venue&apos;s taker fee</b>: Polymarket
-      0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract, 40% more. That does
-      not change who wins a price by a cent or more, but it roughly halves what the win is worth.
-      A venue can only be marked cheaper where its book is real; Kalshi&apos;s placeholder books
-      land outside that by construction. Placed on ESPN&apos;s schedule: Kalshi{' '}
-      <b className="np-num">{c.kalshiPlaced}</b> of <b className="np-num">{c.kalshi}</b> games,
-      Polymarket <b className="np-num">{c.polymarketPlaced}</b> of{' '}
-      <b className="np-num">{c.polymarket}</b>. A market we cannot put on a game with both teams
-      matched exactly is left out, never guessed. Volume adds Polymarket&apos;s dollars traded to
-      Kalshi&apos;s $1 contracts — close enough to rank on, which is all it is used for. Updated{' '}
-      {timeText(new Date(data.generatedAt))}.
-    </p>
+  const foot = (
+    <HowPricesWork>
+      {data && c && (
+        <p>
+          The fine print. A price is the app&apos;s <b>ask</b>, per $1 of payout. Fees: Polymarket
+          0.05 × p × (1 − p) per share, Kalshi 0.07 × p × (1 − p) per contract. Games come from
+          ESPN&apos;s schedule for the next {meta.days} days; we matched Kalshi on{' '}
+          <b className="np-num">{c.kalshiPlaced}</b> of <b className="np-num">{c.kalshi}</b> and
+          Polymarket on <b className="np-num">{c.polymarketPlaced}</b> of{' '}
+          <b className="np-num">{c.polymarket}</b>. A market we can&apos;t match to a game with
+          both teams exactly is left out, never guessed. &ldquo;Traded&rdquo; adds Polymarket
+          dollars to Kalshi $1 contracts — close enough to rank on. Updated{' '}
+          {timeText(new Date(data.generatedAt))}.
+        </p>
+      )}
+    </HowPricesWork>
   )
 
   return (
@@ -98,11 +96,12 @@ export function SportBoard({ sport }: { sport: SportKey }) {
       loading={!data && !error}
       error={!data ? error : null}
       joiner="@"
-      competitionChips={false}
+      leagueFilter={false}
       allLabel={`All ${meta.label}`}
+      allTitle={`All ${meta.label} games`}
       head={head}
-      foot={foot || undefined}
-      emptyLabel={`Neither Kalshi nor Polymarket lists any ${meta.label} game in the next ${meta.days} days.`}
+      foot={foot}
+      emptyLabel={`No ${meta.label} games on Polymarket or Kalshi in the next ${meta.days} days.`}
     />
   )
 }

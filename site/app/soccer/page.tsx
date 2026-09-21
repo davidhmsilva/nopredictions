@@ -4,9 +4,9 @@ import { SoccerBoard } from '../components/SoccerBoard'
 // Every soccer game on the board — what the home page lists the top ten of.
 // A static route, so it wins over the [sport] segment the US sports use.
 
-const title = 'Every soccer game on the prediction markets — NOPREDICTIONS'
+const title = 'Soccer odds: Polymarket vs Kalshi — NOPREDICTIONS'
 const description =
-  'Every soccer game on the board, biggest markets first: the price, the volume, and a full report on each. American, decimal or implied odds. No tips.'
+  'Every soccer game on Polymarket and Kalshi, side by side, with the better price marked after fees. Biggest games first, and a full match page for each. Free.'
 
 export const metadata: Metadata = {
   title,
@@ -24,5 +24,5 @@ export const metadata: Metadata = {
 }
 
 export default function SoccerPage() {
-  return <SoccerBoard mode="all" />
+  return <SoccerBoard />
 }

@@ -62,9 +62,9 @@ export default function AgentsPage() {
               <h1 className="sc-h1">Theories that keep working after you look away</h1>
               <p className="sc-h1-sub">
                 Write a theory in the Lab, see how it would have done, and switch it on. From then
-                on it paper-trades today&apos;s Polymarket boards — 1 unit at the real ask, logged
-                before the event, settled on the result — and you watch the record build. Nothing
-                places an order.
+                on it places practice bets on today&apos;s games at the real price — logged before
+                kickoff, settled on the result — and you watch its record build. No real money,
+                ever.
               </p>
               <div className="ag-cta-row">
                 <Link href="/login?next=%2Fagent" className="np-btn np-btn-primary">Sign in to see yours →</Link>
