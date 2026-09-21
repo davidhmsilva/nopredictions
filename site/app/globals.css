@@ -4839,7 +4839,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 /* ── neutral where it used to be green, amber or blue ── */
 .sc-eyebrow { color: var(--grey); }
 .sc-star.is-on { color: var(--white); }
-.sc-cat.is-link { color: var(--grey); }
+.sc-cat.is-link { color: var(--white); }
 .sc-cat.is-link:hover { color: var(--white); }
 .sc-cat-more { color: var(--grey); }
 .sc-cat-icn.is-live-icn { color: var(--red); }
@@ -4859,7 +4859,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .sc-head .sc-h1-sub { margin-top: 6px; max-width: 640px; font-size: 14.5px; line-height: 1.55; color: var(--grey); }
 
 /* ── every game: its own section under the cards ── */
-.bd-all { margin-top: 30px; }
+.bd-all { margin-top: 26px; }
 .bd-h2 {
   display: flex; align-items: baseline; gap: 8px;
   font-size: 18px; font-weight: 650; letter-spacing: -.01em; color: var(--white);
@@ -4867,21 +4867,6 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .bd-h2-n { font-size: 12px; font-weight: 500; color: var(--grey2); }
 
-/* The chip row now sits inside the page, above the table, instead of as a
-   full-width bar under the nav. */
-.sc-cats {
-  display: flex; align-items: center; gap: 4px;
-  border: none; background: none; margin: 0 0 8px;
-  overflow-x: auto; scrollbar-width: none; white-space: nowrap;
-}
-.sc-cat { border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
-.sc-cat:hover { border-color: var(--border2); }
-.sc-cat.is-on { background: var(--white); color: var(--bg); border-color: var(--white); }
-.sc-cat.is-on .sc-cat-n { color: var(--bg); opacity: .6; }
-.sc-cat-group { gap: 6px; }
-.sc-cat.is-link { margin-left: 0; padding-left: 12px; }
-.sc-cat.is-link::before { display: none; }
-.sc-bar { padding: 4px 0 12px; }
 
 /* ── the table ── */
 .sc-table thead th { font-size: 10.5px; letter-spacing: .06em; }
@@ -5092,19 +5077,8 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .np-footer-legal { font-family: var(--font); letter-spacing: .03em; }
 .gc-venue-h { display: inline-flex; align-items: center; gap: 6px; }
 
-/* One control row: the chips scroll on the left, sort and search hold the
-   right. The clear button, the count and "loading Kalshi" sit under it, and
-   only when there is something to say. */
-.bd-controls { flex-wrap: nowrap; gap: 14px; padding: 0 0 12px; }
-.bd-controls .sc-cats { flex: 1 1 auto; min-width: 0; margin: 0; }
-.bd-controls .sc-bar-right { flex-shrink: 0; }
-.bd-status { display: flex; align-items: center; gap: 10px; margin: -2px 0 12px; }
 /* On a sport's own page the league is the page, so the start time leads. */
 .gm-top.is-bare .np-badge, .gm-top.is-bare .sc-in { margin-left: 0; }
-@media (max-width: 760px) {
-  .bd-controls { flex-wrap: wrap; }
-  .bd-controls .sc-cats { order: 0; flex: 1 1 100%; }
-}
 
 /* Pricing and the tool pages: the same neutral palette as the boards. */
 .tp-eyebrow { color: var(--grey); }

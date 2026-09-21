@@ -26,7 +26,7 @@
  *  only colour on a board, and live games keep their red dot.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AppShell } from './AppShell'
@@ -35,7 +35,7 @@ import { SportBar } from './SportBar'
 import { GameCard } from './GameCard'
 import { VenueLogo } from './VenueLogo'
 import { LiveState, money, odds, pickTitle } from './boardParts'
-import { IconAll, IconClock, IconLive, IconStar, IconVenues } from './icons'
+import { IconAll, IconClock, IconDrop, IconInsights, IconLive, IconStar, IconVenues } from './icons'
 import { formatName, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
 import { hasPrice, volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
 import { VENUE_NAME, type Venue } from '../lib/venues'
@@ -94,7 +94,6 @@ function VenueLinks({ r }: { r: BoardRow }) {
 function Row({
   r,
   columns,
-  joiner,
   showCompetition,
   reports,
   watched,
@@ -102,7 +101,6 @@ function Row({
 }: {
   r: BoardRow
   columns: BoardColumn[]
-  joiner: string
   showCompetition: boolean
   /** Whether the board has a page of its own to send anyone to. Soccer does;
    *  the US sports do not yet, and a column of em-dashes is worse than none. */
@@ -135,7 +133,7 @@ function Row({
       </td>
 
       <td className="sc-c-fixture">
-        <FixtureCell r={r} joiner={joiner} showCompetition={showCompetition} />
+        <FixtureCell r={r} showCompetition={showCompetition} />
       </td>
 
       <td className="sc-c-state">
@@ -162,15 +160,10 @@ function Row({
   )
 }
 
-function FixtureCell({
-  r,
-  joiner,
-  showCompetition,
-}: {
-  r: BoardRow
-  joiner: string
-  showCompetition: boolean
-}) {
+function FixtureCell({ r, showCompetition }: { r: BoardRow; showCompetition: boolean }) {
+  // "v" between a soccer home and away, "@" before a US home side — per row,
+  // because the home page mixes every sport in one list.
+  const joiner = r.sport === 'soccer' ? 'v' : '@'
   const inner = (
     <span className="sc-teams">
       {r.left} <span className="sc-v">{joiner}</span> {r.right}
@@ -257,6 +250,10 @@ function sortRows(rows: BoardRow[], key: SortKey): BoardRow[] {
 /** "Starting soon" is the next two hours. */
 const SOON_MS = 2 * 3600_000
 
+/** How many competitions get their own chip before the rest go behind "More".
+ *  A Saturday soccer card runs to nearly 60 of them. */
+const COMPS_SHOWN = 9
+
 // ── the page ─────────────────────────────────────────────────────────────────
 
 export interface BoardViewProps {
@@ -264,15 +261,13 @@ export interface BoardViewProps {
   rows: BoardRow[]
   loading: boolean
   error: string | null
-  /** Written between the two sides: "v" on soccer, "@" on a US sport. */
-  joiner: string
   /** A league picker, and the league named on each row and card. Off where
    *  every row is the same competition — one option narrows nothing. */
   leagueFilter: boolean
   /** The picker's "everything" option: "All leagues". */
   allLabel: string
-  /** The heading over the table: "All NFL games". */
-  allTitle: string
+  /** The heading over the table: "All NFL games". None on the home page. */
+  allTitle?: string
   /** Rendered above the cards: the page's heading. */
   head: React.ReactNode
   /** Rendered under the table. */
@@ -280,12 +275,14 @@ export interface BoardViewProps {
   emptyLabel: string
   /** Kalshi is still arriving. The prices are there, just not compared yet. */
   pending?: string | null
-  /** Extra chips beside the filters — soccer's two links out. */
-  links?: React.ReactNode
   /** Seeded from ?q= by the nav search. */
   initialQuery?: string
   /** How many of the biggest games lead the page as cards. */
   featured?: number
+  /** Show only the first N rows. The home page leads with the top ten; the
+   *  count still names the whole list, because "Top 10 of 97" and "10 of 97"
+   *  are different claims. */
+  limit?: number
 }
 
 export function BoardView({
@@ -293,7 +290,6 @@ export function BoardView({
   rows,
   loading,
   error,
-  joiner,
   leagueFilter,
   allLabel,
   allTitle,
@@ -301,14 +297,15 @@ export function BoardView({
   foot,
   emptyLabel,
   pending,
-  links,
   initialQuery = '',
   featured = 4,
+  limit,
 }: BoardViewProps) {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<SortKey>('default')
   const [query, setQuery] = useState(initialQuery)
   const [comp, setComp] = useState<string | null>(null)
+  const [allComps, setAllComps] = useState(false)
   const { me } = useSession()
   const oddsFmt = useOddsFormat()
   // Named once, in the column head. Computed on the client: the server runs in
@@ -365,72 +362,114 @@ export function BoardView({
       .map(([name, n]) => ({ name, n }))
   }, [rows])
 
+  const listed = limit != null ? shown.slice(0, limit) : shown
+
   return (
     <AppShell>
       <SportBar />
+      {/* The menu under the sports: filters, Dropping odds and Insights, then
+          the leagues. Full width and scrollable, so a phone reaches all of it. */}
+      <div className="sc-cats">
+        <div className="sc-cats-inner">
+          <div className="sc-cat-group">
+            {FILTERS.map((x) => (
+              <Fragment key={x.id}>
+                <button
+                  className={`sc-cat${filter === x.id ? ' is-on' : ''}`}
+                  onClick={() => setFilter(x.id)}
+                  title={x.title}
+                >
+                  <x.Icon className={`sc-cat-icn ${x.cls ?? ''}`} />
+                  {x.label}
+                  {x.id === 'watchlist' && watchlist.length > 0 && (
+                    <span className="sc-cat-n np-num">{watchlist.length}</span>
+                  )}
+                  {x.id === 'both' && bothCount > 0 && (
+                    <span className="sc-cat-n np-num">{bothCount}</span>
+                  )}
+                </button>
+                {x.id === 'both' && <MenuLinks />}
+              </Fragment>
+            ))}
+          </div>
+
+          {leagueFilter && competitions.length > 1 && (
+            <>
+              <span className="sc-cat-div" aria-hidden="true" />
+              <div className="sc-cat-group">
+                <button
+                  className={`sc-cat${comp === null ? ' is-on' : ''}`}
+                  onClick={() => setComp(null)}
+                >
+                  {allLabel}
+                </button>
+                {(allComps ? competitions : competitions.slice(0, COMPS_SHOWN)).map((c) => (
+                  <button
+                    key={c.name}
+                    className={`sc-cat${comp === c.name ? ' is-on' : ''}`}
+                    onClick={() => setComp(comp === c.name ? null : c.name)}
+                  >
+                    {c.name}
+                    <span className="sc-cat-n np-num">{c.n}</span>
+                  </button>
+                ))}
+                {competitions.length > COMPS_SHOWN && (
+                  <button className="sc-cat sc-cat-more" onClick={() => setAllComps(!allComps)}>
+                    {allComps ? 'Less' : `More (${competitions.length - COMPS_SHOWN})`}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="np-wrap">
         {head}
 
         {!error && featured > 0 && top.length > 0 && (
           <div className="gm-grid gm-grid-4 gm-grid-feature">
             {top.map((r) => (
-              <GameCard key={r.key} r={r} showLeague={leagueFilter} />
+              <GameCard key={`${r.sport}:${r.key}`} r={r} showLeague={leagueFilter} />
             ))}
           </div>
         )}
 
-        <section className="bd-all" aria-labelledby="bd-all-h">
-          <h2 id="bd-all-h" className="bd-h2">
-            {allTitle}
-            {!loading && <span className="bd-h2-n np-num">{rows.length}</span>}
-          </h2>
+        <section className={allTitle ? 'bd-all' : 'bd-all is-bare'}>
+          {allTitle && (
+            <h2 className="bd-h2">
+              {allTitle}
+              {!loading && <span className="bd-h2-n np-num">{rows.length}</span>}
+            </h2>
+          )}
 
-          <div className="sc-bar bd-controls">
-            <div className="sc-cats">
-              <div className="sc-cat-group">
-                {FILTERS.map((x) => (
-                  <button
-                    key={x.id}
-                    className={`sc-cat${filter === x.id ? ' is-on' : ''}`}
-                    onClick={() => setFilter(x.id)}
-                    title={x.title}
-                  >
-                    <x.Icon className={`sc-cat-icn ${x.cls ?? ''}`} />
-                    {x.label}
-                    {x.id === 'watchlist' && watchlist.length > 0 && (
-                      <span className="sc-cat-n np-num">{watchlist.length}</span>
-                    )}
-                    {x.id === 'both' && bothCount > 0 && (
-                      <span className="sc-cat-n np-num">{bothCount}</span>
-                    )}
-                  </button>
-                ))}
-                {links}
-              </div>
-
+          <div className="sc-bar">
+            <div className="sc-bar-left">
+              {(comp || query || filter !== 'all') && (
+                <button
+                  className="sc-clear"
+                  onClick={() => {
+                    setFilter('all')
+                    setComp(null)
+                    setQuery('')
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+              <span className="sc-count np-num">
+                {loading
+                  ? ''
+                  : limit != null && shown.length > limit
+                    ? `Top ${limit} of ${shown.length}`
+                    : `${shown.length} of ${rows.length}`}
+              </span>
+              {pending && <span className="sc-pending">{pending}</span>}
             </div>
 
             <div className="sc-bar-right">
               {/* Below 1100px the nav has no room for it, so it lives here. */}
               <OddsToggle className="np-odds-bar" />
-              {/* A dropdown, not a chip per league: a Saturday soccer card runs
-                  to nearly 60 of them, and a row of chips that long is a wall. */}
-              {leagueFilter && competitions.length > 1 && (
-                <label className="sc-sort">
-                  <select
-                    value={comp ?? ''}
-                    onChange={(e) => setComp(e.target.value || null)}
-                    aria-label="League"
-                  >
-                    <option value="">{allLabel}</option>
-                    {competitions.map((c) => (
-                      <option key={c.name} value={c.name}>
-                        {c.name} ({c.n})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
               <label className="sc-sort">
                 <span className="sc-sort-key">Sort</span>
                 <select
@@ -455,29 +494,6 @@ export function BoardView({
             </div>
           </div>
 
-          {(comp || query || filter !== 'all' || pending) && (
-            <div className="sc-bar-left bd-status">
-              {(comp || query || filter !== 'all') && (
-                <button
-                  className="sc-clear"
-                  onClick={() => {
-                    setFilter('all')
-                    setComp(null)
-                    setQuery('')
-                  }}
-                >
-                  Clear filters
-                </button>
-              )}
-              {!loading && shown.length !== rows.length && (
-                <span className="sc-count np-num">
-                  {shown.length} of {rows.length}
-                </span>
-              )}
-              {pending && <span className="sc-pending">{pending}</span>}
-            </div>
-          )}
-
           {loading && <div className="np-empty">Loading the latest odds…</div>}
 
           {error && (
@@ -499,7 +515,7 @@ export function BoardView({
             </div>
           )}
 
-          {shown.length > 0 && (
+          {listed.length > 0 && (
             <div className="sc-table-wrap">
               <table className="sc-table">
                 <thead>
@@ -525,12 +541,11 @@ export function BoardView({
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((r) => (
+                  {listed.map((r) => (
                     <Row
-                      key={r.key}
+                      key={`${r.sport}:${r.key}`}
                       r={r}
                       columns={columns}
-                      joiner={joiner}
                       showCompetition={leagueFilter}
                       reports={reports}
                       watched={watchlist.includes(r.key)}
@@ -546,6 +561,32 @@ export function BoardView({
         {foot}
       </div>
     </AppShell>
+  )
+}
+
+/** Dropping odds and Insights, in the menu of every board. */
+function MenuLinks() {
+  return (
+    <>
+      <Link
+        href="/dropping-odds"
+        className="sc-cat is-link"
+        title="Where the market moved in the last 24 hours — pre-match, and only on books with real money through them"
+      >
+        <IconDrop className="sc-cat-icn" />
+        Dropping odds
+        <span className="sc-cat-go" aria-hidden="true">→</span>
+      </Link>
+      <Link
+        href="/insights"
+        className="sc-cat is-link"
+        title="What we measured, and what it said — including the results that went the wrong way"
+      >
+        <IconInsights className="sc-cat-icn" />
+        Insights
+        <span className="sc-cat-go" aria-hidden="true">→</span>
+      </Link>
+    </>
   )
 }
 

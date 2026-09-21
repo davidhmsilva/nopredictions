@@ -95,7 +95,6 @@ export function SportBoard({ sport }: { sport: SportKey }) {
       rows={rows}
       loading={!data && !error}
       error={!data ? error : null}
-      joiner="@"
       leagueFilter={false}
       allLabel={`All ${meta.label}`}
       allTitle={`All ${meta.label} games`}

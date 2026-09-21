@@ -8,9 +8,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { BoardView, HowPricesWork } from './BoardView'
-import { IconDrop, IconInsights } from './icons'
 import { SOCCER_COLUMNS } from '../lib/boardRow'
 import { useSoccerRows } from './useBoards'
 
@@ -63,34 +61,12 @@ export function SoccerBoard() {
     </HowPricesWork>
   )
 
-  const links = (
-    <>
-      <Link
-        href="/dropping-odds"
-        className="sc-cat is-link"
-        title="Prices that moved most in the last 24 hours"
-      >
-        <IconDrop className="sc-cat-icn" />
-        Dropping odds
-      </Link>
-      <Link
-        href="/insights"
-        className="sc-cat is-link"
-        title="What our research found — including the results that went the wrong way"
-      >
-        <IconInsights className="sc-cat-icn" />
-        Insights
-      </Link>
-    </>
-  )
-
   return (
     <BoardView
       columns={SOCCER_COLUMNS}
       rows={rows}
       loading={loading}
       error={error}
-      joiner="v"
       leagueFilter
       allLabel="All leagues"
       allTitle="All soccer games"
@@ -98,7 +74,6 @@ export function SoccerBoard() {
       foot={foot}
       emptyLabel="No games match that right now."
       pending={kalshiPending ? 'Loading Kalshi prices…' : null}
-      links={links}
       initialQuery={query}
     />
   )
