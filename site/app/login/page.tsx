@@ -281,7 +281,11 @@ function LoginPageInner() {
 
         <p className="lg-foot">
           {mode === 'signup' ? (
-            'No card. The free plan has no expiry and no trial to forget about.'
+            <>
+              No card. The free plan has no expiry and no trial to forget about. By creating an
+              account you agree to the <Link href="/terms">Terms</Link> and{' '}
+              <Link href="/privacy">Privacy Policy</Link>.
+            </>
           ) : (
             <>
               An account changes nothing about what this site claims. The agent is

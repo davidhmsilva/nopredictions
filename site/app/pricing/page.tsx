@@ -161,7 +161,8 @@ export default function PricingPage() {
             <p className="pr-note">
               {period === 'yearly'
                 ? `$${(YEARLY_USD / 12).toFixed(2)} a month, billed once. Cancel any time.`
-                : 'Cancel any time, from Stripe’s own portal.'}
+                : 'Cancel any time, from Stripe’s own portal.'}{' '}
+              <Link href="/refunds">14-day money-back guarantee.</Link>
             </p>
 
             <ul className="pr-points">
@@ -175,9 +176,15 @@ export default function PricingPage() {
                 You are on Pro — manage billing
               </Link>
             ) : signedIn ? (
-              <button className="np-btn np-btn-primary pr-cta" onClick={() => upgrade()} disabled={busy}>
-                {busy ? 'Opening checkout…' : `Upgrade — $${price}${unit}`}
-              </button>
+              <>
+                <button className="np-btn np-btn-primary pr-cta" onClick={() => upgrade()} disabled={busy}>
+                  {busy ? 'Opening checkout…' : `Upgrade — $${price}${unit}`}
+                </button>
+                <p className="pr-buy-note">
+                  By upgrading you agree to the <Link href="/terms">Terms</Link> and{' '}
+                  <Link href="/privacy">Privacy Policy</Link>.
+                </p>
+              </>
             ) : (
               <form className="pr-buy" onSubmit={upgrade}>
                 <label className="pr-buy-label" htmlFor="pr-email">
@@ -200,6 +207,10 @@ export default function PricingPage() {
                 <p className="pr-buy-note">
                   Pay first, pick a password after. Already have an account?{' '}
                   <Link href="/login?next=%2Fpricing">Sign in</Link> and it goes on that one.
+                </p>
+                <p className="pr-buy-note">
+                  By continuing you agree to the <Link href="/terms">Terms</Link> and{' '}
+                  <Link href="/privacy">Privacy Policy</Link>.
                 </p>
               </form>
             )}

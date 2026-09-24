@@ -327,6 +327,12 @@ export function AppFooter() {
           FINANCIAL OR BETTING ADVICE · PAST RESULTS DO NOT PREDICT FUTURE RESULTS
         </div>
         <div className="np-footer-legal">GAMBLING PROBLEM? CALL 1-800-GAMBLER</div>
+        <nav className="np-footer-links" aria-label="Legal">
+          <Link href="/terms">Terms</Link>
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/refunds">Refunds</Link>
+          <a href="mailto:nopredictions.info@gmail.com">Contact</a>
+        </nav>
       </div>
     </footer>
   )
