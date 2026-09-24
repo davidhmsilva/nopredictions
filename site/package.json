@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.111.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.43.0",
+    "@vercel/analytics": "^2.0.1",
     "gray-matter": "^4.0.3",
     "marked": "^18.0.12",
     "next": "^14.2.0",
