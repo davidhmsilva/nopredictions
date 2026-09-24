@@ -4,6 +4,10 @@ import { rankRows, rowFromScout, rowFromSportGame } from './lib/boardRow'
 import { getBoard } from './lib/scoutCache'
 import { getSportBoard } from './lib/sports'
 import { SPORT_KEYS } from './lib/sportsMeta'
+import { within } from './lib/deadline'
+
+/** How long the server waits for the boards before sending the page anyway. */
+const SERVER_WAIT_MS = 3000
 
 export const metadata: Metadata = { alternates: { canonical: '/' } }
 
@@ -24,8 +28,8 @@ const SERVER_ROWS = 40
 /** Home: the biggest games in every sport, then a way into each one. */
 export default async function HomePage() {
   const [soccer, ...sports] = await Promise.all([
-    getBoard().catch(() => null),
-    ...SPORT_KEYS.map((k) => getSportBoard(k).catch(() => null)),
+    within(getBoard(), SERVER_WAIT_MS),
+    ...SPORT_KEYS.map((k) => within(getSportBoard(k), SERVER_WAIT_MS)),
   ])
   const rows = rankRows([
     ...(soccer?.fixtures ?? []).map(rowFromScout),

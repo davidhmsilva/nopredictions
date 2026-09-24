@@ -3,6 +3,7 @@ import { articleSlugs } from './lib/insights'
 import { getBoard } from './lib/scoutCache'
 import { getSportBoard } from './lib/sports'
 import { SPORT_KEYS } from './lib/sportsMeta'
+import { within } from './lib/deadline'
 
 /** Every page worth finding: the boards, every game on them right now, the
  *  articles, and the tools. Games come and go daily, so the list is rebuilt
@@ -38,8 +39,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ]
 
   const [soccer, ...sports] = await Promise.all([
-    getBoard().catch(() => null),
-    ...SPORT_KEYS.map((k) => getSportBoard(k).catch(() => null)),
+    within(getBoard(), 20_000),
+    ...SPORT_KEYS.map((k) => within(getSportBoard(k), 20_000)),
   ])
 
   const games: MetadataRoute.Sitemap = [

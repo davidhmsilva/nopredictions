@@ -4,6 +4,7 @@ import { EventJsonLd, SPORT_LD, etDay, etFull } from '../../components/EventJson
 import { SportGameView } from '../../components/SportGameView'
 import { priceText } from '../../lib/priceFormat'
 import { getSportGame } from '../../lib/sportGame'
+import { within } from '../../lib/deadline'
 import { SPORT_META, isSportKey } from '../../lib/sportsMeta'
 
 // The Game Center for a US game: /nfl/<ESPN event id>. The id is ESPN's
@@ -17,7 +18,7 @@ const valid = (p: { sport: string; id: string }) => isSportKey(p.sport) && /^\d{
 
 async function load(p: { sport: string; id: string }) {
   if (!valid(p) || !isSportKey(p.sport)) return null
-  return getSportGame(p.sport, p.id).catch(() => null)
+  return within(getSportGame(p.sport, p.id), 5000)
 }
 
 /** A moneyline the way a US bettor reads it: +270 / −286. */

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { SoccerBoard } from '../components/SoccerBoard'
 import { getBoard } from '../lib/scoutCache'
+import { within } from '../lib/deadline'
 
 // Every soccer game on the board — what the home page lists the top ten of.
 // A static route, so it wins over the [sport] segment the US sports use.
@@ -35,6 +36,6 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic'
 
 export default async function SoccerPage() {
-  const board = await getBoard().catch(() => null)
+  const board = await within(getBoard(), 3000)
   return <SoccerBoard initial={board?.fixtures ?? null} />
 }

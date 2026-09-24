@@ -3,6 +3,7 @@ import { EventJsonLd, SPORT_LD, etDay, etFull } from '../../components/EventJson
 import { priceText } from '../../lib/priceFormat'
 import { loadFixture } from '../../lib/matchcontext'
 import { getBoard } from '../../lib/scoutCache'
+import { within } from '../../lib/deadline'
 
 // The soccer Game Center's page is a client component and cannot export
 // metadata, so the title, the description and the event's structured data
@@ -19,7 +20,7 @@ interface Fx {
 }
 
 async function fixture(slug: string): Promise<Fx | null> {
-  const board = await getBoard().catch(() => null)
+  const board = await within(getBoard(), 2500)
   const f = board?.fixtures.find((x) => x.slug === slug)
   if (f) {
     return {
@@ -34,7 +35,7 @@ async function fixture(slug: string): Promise<Fx | null> {
       },
     }
   }
-  const fx = await loadFixture(slug).catch(() => null)
+  const fx = await within(loadFixture(slug), 2500)
   return fx
     ? {
         home: fx.home,

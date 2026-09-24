@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { SportBoard } from '../components/SportBoard'
 import { getSportBoard } from '../lib/sports'
+import { within } from '../lib/deadline'
 import { SPORT_META, isSportKey } from '../lib/sportsMeta'
 
 // One page per US sport: /nfl, /cfb, /mlb, /nba, /nhl, /wnba. Anything else at
@@ -42,6 +43,6 @@ export function generateMetadata({ params }: { params: { sport: string } }): Met
 
 export default async function SportPage({ params }: { params: { sport: string } }) {
   if (!isSportKey(params.sport)) notFound()
-  const initial = await getSportBoard(params.sport).catch(() => null)
+  const initial = await within(getSportBoard(params.sport), 3000)
   return <SportBoard sport={params.sport} initial={initial} />
 }
