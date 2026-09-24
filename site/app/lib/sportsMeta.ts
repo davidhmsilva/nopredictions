@@ -53,6 +53,11 @@ export interface SportGame {
   venues: VenueBook[]
   /** Where to buy each side, net of each venue's taker fee. */
   best: Record<'home' | 'away', BestPick>
+  /** Polymarket's main game total: of every full-game Over/Under line it
+   *  lists, the one priced closest to even money. Polymarket only — Kalshi's
+   *  totals ladders are not read on these boards yet. Optional because a
+   *  board cached before it existed has no such field. */
+  total?: { line: number; over: Quote; under: Quote } | null
   /** Polymarket dollars + Kalshi contracts. What the board ranks on. */
   volumeCombined: number
   /** Polymarket's moneyline, in dollars — the book the 24h move is read off. */

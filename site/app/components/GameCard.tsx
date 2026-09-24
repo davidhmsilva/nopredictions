@@ -9,7 +9,9 @@
  *  app's logo — the job the boxed "P" and "K" used to do.
  *
  *  Soccer shows home / draw / away; the goals line stays in the table. A US
- *  game shows the two sides, away first, the way its schedule prints them.
+ *  game shows the two sides, away first, the way its schedule prints them,
+ *  and the Over on its main total in the third line, where football has the
+ *  draw. That line is Polymarket's alone, so it never carries a logo.
  */
 
 import Link from 'next/link'
@@ -17,7 +19,10 @@ import { LiveState, money, odds, pickTitle } from './boardParts'
 import { VenueLogo } from './VenueLogo'
 import { columnsFor, outcomeLabel, type BoardRow } from '../lib/boardRow'
 import { useOddsFormat } from '../lib/display'
-import { VENUE_NAME, type OutcomeKey } from '../lib/venues'
+import { VENUE_NAME, gradeOf, type OutcomeKey } from '../lib/venues'
+
+/** What the total counts, for the tooltip. */
+const TOTAL_UNIT: Record<string, string> = { mlb: 'runs', nhl: 'goals' }
 
 function scoreFor(r: BoardRow, key: OutcomeKey): number | null {
   if (!r.score || (!r.live && !r.finished)) return null
@@ -57,6 +62,7 @@ export function GameCard({ r, showLeague = true }: { r: BoardRow; showLeague?: b
             </div>
           )
         })}
+        {r.sport !== 'soccer' && <TotalLine r={r} />}
       </div>
 
       <footer className="gm-foot">
@@ -83,6 +89,31 @@ export function GameCard({ r, showLeague = true }: { r: BoardRow; showLeague?: b
         )}
       </footer>
     </article>
+  )
+}
+
+/** The Over on a US game's main total, from Polymarket's own book. A quote
+ *  with no real market behind it prints as a dash, the same as a price the
+ *  venue does not offer. */
+function TotalLine({ r }: { r: BoardRow }) {
+  const f = useOddsFormat()
+  const t = r.total
+  const q = t && gradeOf([t.over]) !== 'none' ? t.over : null
+  const unit = TOTAL_UNIT[r.sport] ?? 'points'
+  return (
+    <div className="gm-line is-total">
+      <span className="gm-name">{t ? `Over ${t.line}` : 'Over / under'}</span>
+      <span
+        className="gm-price"
+        title={
+          t && q
+            ? `Over ${t.line} total ${unit} on Polymarket. Kalshi's totals are not compared here yet.`
+            : 'Not offered right now'
+        }
+      >
+        <b className="np-num">{odds(q?.ask ?? null, f)}</b>
+      </span>
+    </div>
   )
 }
 

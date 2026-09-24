@@ -328,6 +328,8 @@ interface PmTeam {
 
 interface PmMarket {
   sportsMarketType?: string
+  question?: string
+  line?: number | string
   outcomes?: string
   outcomePrices?: string
   clobTokenIds?: string
@@ -356,6 +358,8 @@ interface PmGame {
   tokens: { home: string; away: string }
   gamma: { home: Quote; away: Quote }
   volume: number | null
+  /** The main game total, off the same listing — no extra request. */
+  total: PmTotal | null
   /** The side that shortened over 24 hours, off the same listing — no extra
    *  request. Null where Gamma published no change or nothing shortened. */
   move: {
@@ -366,6 +370,61 @@ interface PmGame {
     pp1h: number | null
     tokenId: string
   } | null
+}
+
+interface PmTotal {
+  line: number
+  tokens: { over: string; under: string }
+  gamma: { over: Quote; under: Quote }
+}
+
+/** The full-game total a sportsbook would headline: of every Over/Under line
+ *  on the event, the one whose price sits closest to even money, with the
+ *  most volume breaking a tie.
+ *
+ *  ⚠️ `totals` is the full game only (halves and team totals carry their own
+ *     `sportsMarketType`), but the question is checked as well, the same
+ *     filter the NFL agent uses: a first-half line headlined as the game
+ *     total would be a different bet with the same label. */
+function pmTotal(ev: PmEvent): PmTotal | null {
+  let best: { t: PmTotal; dist: number; vol: number } | null = null
+  for (const m of ev.markets ?? []) {
+    if ((m.sportsMarketType ?? '').toLowerCase() !== 'totals') continue
+    const q = (m.question ?? '').toLowerCase()
+    if (/\b(1h|2h|1q|2q|3q|4q|first half|second half|team total)\b/.test(q)) continue
+    const line = num(m.line)
+    let outcomes: string[]
+    let tokens: string[]
+    try {
+      outcomes = JSON.parse(m.outcomes ?? '[]').map((o: string) => String(o).trim().toLowerCase())
+      tokens = JSON.parse(m.clobTokenIds ?? '[]')
+    } catch {
+      continue
+    }
+    if (line == null || tokens.length !== 2) continue
+    const oi = outcomes.indexOf('over')
+    const ui = outcomes.indexOf('under')
+    if (oi < 0 || ui < 0 || oi === ui) continue
+    // Gamma's bestBid/bestAsk are outcome 0's; outcome 1 is the mirror.
+    const bb = num(m.bestBid)
+    const ba = num(m.bestAsk)
+    if (bb == null || ba == null) continue
+    const q0 = quoteOf(bb, ba, null)
+    const q1 = quoteOf(1 - ba, 1 - bb, null)
+    const dist = Math.abs((bb + ba) / 2 - 0.5)
+    const vol = num(m.volumeNum) ?? 0
+    if (best && (dist > best.dist || (dist === best.dist && vol <= best.vol))) continue
+    best = {
+      dist,
+      vol,
+      t: {
+        line,
+        tokens: { over: tokens[oi], under: tokens[ui] },
+        gamma: { over: oi === 0 ? q0 : q1, under: ui === 0 ? q0 : q1 },
+      },
+    }
+  }
+  return best?.t ?? null
 }
 
 async function pmEvents(tagId: number, now: Date, days: number): Promise<PmEvent[]> {
@@ -456,6 +515,7 @@ function parsePm(ev: PmEvent): PmGame | null {
     tokens: { home: first ? tokens[0] : tokens[1], away: first ? tokens[1] : tokens[0] },
     gamma: { home: first ? q0 : q1, away: first ? q1 : q0 },
     volume: num(ml.volumeNum),
+    total: pmTotal(ev),
   }
 }
 
@@ -590,6 +650,7 @@ async function build(sport: SportKey): Promise<SportBoardData> {
   const tokens: string[] = []
   slots.forEach((s) => {
     if (s.pm) tokens.push(s.pm.tokens.home, s.pm.tokens.away)
+    if (s.pm?.total) tokens.push(s.pm.total.tokens.over, s.pm.total.tokens.under)
   })
   // A failed book read leaves Gamma's quote in place, without depth.
   const books = tokens.length ? await pmBooks(tokens).catch(() => new Map<string, Quote>()) : new Map()
@@ -631,6 +692,13 @@ async function build(sport: SportKey): Promise<SportBoardData> {
           }
         : null,
       pmVolume: s.pm?.volume ?? null,
+      total: s.pm?.total
+        ? {
+            line: s.pm.total.line,
+            over: books.get(s.pm.total.tokens.over) ?? s.pm.total.gamma.over,
+            under: books.get(s.pm.total.tokens.under) ?? s.pm.total.gamma.under,
+          }
+        : null,
       pmTokens: s.pm ? { home: s.pm.tokens.home, away: s.pm.tokens.away } : null,
       start: g.start,
       state: g.state,
@@ -669,7 +737,7 @@ export function espnPathOf(sport: SportKey): string {
  *  landing on an instance that never swept reads someone else's sweep. */
 const TTL_MS = 60_000
 
-const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v4'], {
+const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v5'], {
   revalidate: TTL_MS / 1000,
   tags: ['sport-board'],
 })
