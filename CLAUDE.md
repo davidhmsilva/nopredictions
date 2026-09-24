@@ -1608,9 +1608,13 @@ real errors — a `Set` the unset (therefore ES5) target could not iterate, and
 a deploy; there was no eslint config at all, and one was added only so
 `npm run lint` runs.
 
-⚠️ **Git auto-deploy is still not on.** `vercel git connect` returns 400 — the
-Vercel account has no GitHub login connection. Until someone authorises that in
-the Vercel dashboard, deploys stay `cd site && vercel --prod --yes`.
+✅ **Git auto-deploy is on (2026-09-24).** Every push to `main` deploys to
+production; other branches get preview deploys. The Vercel project's **Root
+Directory is `site`**. The site lives in a subfolder, so with the default `./`
+the first Git build ran at the repo root, found no `package.json` and failed
+(`missing_pages_app`). A failed deploy never replaces the live one.
+`cd site && vercel --prod --yes` still works for a manual deploy.
+Web Analytics is on too: `<Analytics />` in `app/layout.tsx`.
 
 ## The anon key could TRUNCATE the research — closed 2026-09-08
 

@@ -13,7 +13,7 @@
 
 import type { LiveSource, MatchPhase, ScoutFixture } from './scoutTypes'
 import { SPORT_META, type SportGame, type SportKey } from './sportsMeta'
-import { combinedVolume, type BestPick, type OutcomeKey, type VenueBook } from './venues'
+import { combinedVolume, type BestPick, type OutcomeKey, type Quote, type VenueBook } from './venues'
 
 /** Every board the site has: soccer, and the six US sports. */
 export type BoardSport = 'soccer' | SportKey
@@ -55,6 +55,9 @@ export interface BoardRow {
   /** Both exchanges. ⚠️ Polymarket counts dollars traded and Kalshi $1
    *  contracts; close enough to RANK on, and the footer says so. */
   volume: number
+  /** A US game's main total on Polymarket — what fills the card's third line,
+   *  where football has the draw. Null on football and where none is listed. */
+  total: { line: number; over: Quote } | null
 }
 
 export interface BoardColumn {
@@ -111,6 +114,7 @@ export function rowFromScout(f: ScoutFixture): BoardRow {
     best: f.best ?? {},
     venues: f.venues ?? [],
     volume: f.volumeCombinedUsd ?? f.volumeUsd ?? 0,
+    total: null,
   }
 }
 
@@ -147,6 +151,7 @@ export function rowFromSportGame(g: SportGame, sport: SportKey): BoardRow {
     best: g.best ?? {},
     venues: g.venues ?? [],
     volume: g.volumeCombined ?? 0,
+    total: g.total ? { line: g.total.line, over: g.total.over } : null,
   }
 }
 
