@@ -17,7 +17,7 @@ import { AppShell } from './AppShell'
 import { VenueLogo } from './VenueLogo'
 import { money, odds, paysMorePct } from './boardParts'
 import { BriefCard } from '../game/[slug]/Insights'
-import { kickoffText, priceText, useOddsFormat, type OddsFormat } from '../lib/display'
+import { kickoffText, priceText, useMounted, useOddsFormat, type OddsFormat } from '../lib/display'
 import { SPORT_META, type SportKey } from '../lib/sportsMeta'
 import type {
   GameTeam,
@@ -66,6 +66,7 @@ function HeroTeam({ t, side }: { t: GameTeam; side: 'home' | 'away' }) {
 }
 
 function Hero({ g }: { g: SportGamePage }) {
+  const mounted = useMounted()
   const started = g.state !== 'pre'
   const meta = [g.venue, g.broadcasts.join(' · ') || null].filter(Boolean)
   const periods = Math.max(g.home.periods.length, g.away.periods.length)
@@ -78,7 +79,7 @@ function Hero({ g }: { g: SportGamePage }) {
         ) : g.state === 'in' ? (
           <span className="np-badge is-live">● {g.detail || 'Live'}</span>
         ) : (
-          <span className="gc-hero-ko np-num">{kickoffText(new Date(g.start))}</span>
+          <span className="gc-hero-ko np-num">{mounted ? kickoffText(new Date(g.start)) : ''}</span>
         )}
       </div>
 
@@ -413,10 +414,11 @@ function PriceHistory({ g, f }: { g: SportGamePage; f: OddsFormat }) {
 
 /** Once the game is on: ESPN's win chance through it, and every score. */
 function GameTab({ g }: { g: SportGamePage }) {
+  const mounted = useMounted()
   if (g.state === 'pre') {
     return (
       <p className="gc-quiet sg-mkts-lede">
-        The game starts {kickoffText(new Date(g.start))}. The score by period, every score and the
+        The game starts {mounted ? kickoffText(new Date(g.start)) : 'soon'}. The score by period, every score and the
         win chance through the game appear here once it does.
       </p>
     )
@@ -498,8 +500,18 @@ function MarketGroup({ group, f }: { group: PmMarketGroup; f: OddsFormat }) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
-export function SportGameView({ sport, id }: { sport: SportKey; id: string }) {
-  const [g, setG] = useState<SportGamePage | null>(null)
+/** `initial` is the game as the server rendered it, so the page arrives with
+ *  its content in the HTML. The browser refreshes it every minute from there. */
+export function SportGameView({
+  sport,
+  id,
+  initial = null,
+}: {
+  sport: SportKey
+  id: string
+  initial?: SportGamePage | null
+}) {
+  const [g, setG] = useState<SportGamePage | null>(initial)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const f = useOddsFormat()

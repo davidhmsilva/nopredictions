@@ -20,7 +20,13 @@
 
 import { useSyncExternalStore } from 'react'
 
-export type OddsFormat = 'american' | 'decimal' | 'implied'
+import { americanText, priceText, type OddsFormat } from './priceFormat'
+
+// The pure formatters live in ./priceFormat, which has no React in it, so a
+// server component (a page's metadata, its structured data) can use the same
+// arithmetic the page does. Re-exported here so every caller is unchanged.
+export { americanText, priceText }
+export type { OddsFormat }
 
 export const ODDS_FORMATS: { id: OddsFormat; name: string; example: string; title: string }[] = [
   {
@@ -121,31 +127,6 @@ export function useOddsFormat(): OddsFormat {
 
 // ── prices ───────────────────────────────────────────────────────────────────
 
-const MINUS = '−'
-
-/** A probability as a price, in the reader's format.
- *
- *  Callers keep their own guards — what counts as settled, what counts as no
- *  price at all — because those differ from page to page. This decides only
- *  how a real price is written. */
-export function priceText(p: number, f: OddsFormat): string {
-  if (!(p > 0 && p < 1)) return '—'
-  if (f === 'implied') {
-    const pc = p * 100
-    return pc < 1 || pc > 99 ? `${pc.toFixed(1)}%` : `${Math.round(pc)}%`
-  }
-  const dec = 1 / p
-  return f === 'decimal' ? dec.toFixed(2) : americanText(dec)
-}
-
-/** Decimal odds in American form. Evens is +100, the way a US book prints it. */
-export function americanText(dec: number): string {
-  if (!(dec > 1)) return '—'
-  return dec >= 2
-    ? `+${Math.round((dec - 1) * 100)}`
-    : `${MINUS}${Math.round(100 / (dec - 1))}`
-}
-
 /** Decimal odds — a closing price from our own database — in the reader's format. */
 export function oddsText(dec: number | null | undefined, f: OddsFormat): string {
   return dec != null && dec > 1 ? priceText(1 / dec, f) : '—'
@@ -212,4 +193,19 @@ export function kickoffText(d: Date): string {
   })
   const z = zoneLabel(d)
   return z ? `${s} ${z}` : s
+}
+
+// ── after hydration ──────────────────────────────────────────────────────────
+
+const noSubscribe = () => () => {}
+
+/** False on the server and during hydration, true after. For text that depends
+ *  on the reader's clock or zone — "in 3h 20m", "Sun 19:00 CEST" — which a
+ *  server-rendered page cannot know and must not guess, or hydration fails. */
+export function useMounted(): boolean {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => true,
+    () => false
+  )
 }

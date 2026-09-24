@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { SoccerBoard } from '../components/SoccerBoard'
+import { getBoard } from '../lib/scoutCache'
 
 // Every soccer game on the board — what the home page lists the top ten of.
 // A static route, so it wins over the [sport] segment the US sports use.
@@ -15,7 +16,7 @@ export const metadata: Metadata = {
   openGraph: {
     title,
     description,
-    url: 'https://nopredictions.com/soccer',
+    url: 'https://www.nopredictions.com/soccer',
     type: 'website',
     siteName: 'NOPREDICTIONS',
     images: [{ url: '/banner.jpg', width: 1200, height: 460 }],
@@ -23,6 +24,10 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title, description, images: ['/banner.jpg'] },
 }
 
-export default function SoccerPage() {
-  return <SoccerBoard />
+/** Rebuilt at most once a minute, so the games are in the HTML. */
+export const revalidate = 60
+
+export default async function SoccerPage() {
+  const board = await getBoard().catch(() => null)
+  return <SoccerBoard initial={board?.fixtures ?? null} />
 }

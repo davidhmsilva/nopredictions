@@ -5,7 +5,7 @@
  *  (BoardView) and the cards (GameCard), so the two can never write the same
  *  number two ways. */
 
-import { dayTimeText, priceText, timeText, type OddsFormat } from '../lib/display'
+import { dayTimeText, priceText, timeText, useMounted, type OddsFormat } from '../lib/display'
 import type { BoardRow } from '../lib/boardRow'
 import { VENUE_NAME, gradeOf, type BestPick, type OutcomeKey, type VenueBook } from '../lib/venues'
 
@@ -46,6 +46,7 @@ export function paysMorePct(pick: BestPick | undefined): number | null {
 // ── what the clock is doing ──────────────────────────────────────────────────
 
 export function LiveState({ r }: { r: BoardRow }) {
+  const mounted = useMounted()
   if (r.finished) return <span className="np-badge">{r.detail || 'FT'}</span>
 
   if (r.live) {
@@ -82,7 +83,9 @@ export function LiveState({ r }: { r: BoardRow }) {
       </span>
     )
   }
-  return <span className="sc-in np-num">{clock(r.kickoff)}</span>
+  // The start time is written in the reader's zone and relative to their
+  // clock, neither of which a server render knows.
+  return <span className="sc-in np-num">{mounted ? clock(r.kickoff) : ''}</span>
 }
 
 // ── one price, across both exchanges ─────────────────────────────────────────

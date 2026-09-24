@@ -16,6 +16,7 @@ import { KINDS, formatDate, listArticles, type ArticleCard } from '../lib/insigh
 
 export const metadata: Metadata = {
   title: 'Insights — NOPREDICTIONS',
+  alternates: { canonical: '/insights' },
   description:
     'What we measured on prediction markets, what it said, and what it did not. Including the results that went the wrong way.',
 }

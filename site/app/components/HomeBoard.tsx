@@ -17,7 +17,7 @@ import Link from 'next/link'
 import { BoardView } from './BoardView'
 import { IconAgent, IconLab, IconWallet } from './icons'
 import { useAllSports, useSoccerRows } from './useBoards'
-import { rankRows, SOCCER_COLUMNS } from '../lib/boardRow'
+import { rankRows, SOCCER_COLUMNS, type BoardRow } from '../lib/boardRow'
 import { SPORT_KEYS } from '../lib/sportsMeta'
 import { useSession } from '../lib/useSession'
 
@@ -51,7 +51,10 @@ const MORE = [
   },
 ]
 
-export function HomeBoard() {
+/** `initial` is the top of the board as the server ranked it: the home page
+ *  arrives with its games in the HTML, and the browser swaps in the full,
+ *  live list once every board has answered. */
+export function HomeBoard({ initial = null }: { initial?: BoardRow[] | null }) {
   const soccer = useSoccerRows()
   const sports = useAllSports()
   const { me } = useSession()
@@ -89,10 +92,11 @@ export function HomeBoard() {
   const settled = !soccer.loading && SPORT_KEYS.every((k) => !sports[k].loading)
   const ready = settled || waited
 
-  const rows = useMemo(
+  const live = useMemo(
     () => rankRows([soccer.rows, ...SPORT_KEYS.map((k) => sports[k].rows)].flat()),
     [soccer.rows, sports]
   )
+  const rows = ready ? live : (initial ?? [])
 
   const head = (
     <div className="sc-head">
@@ -152,8 +156,8 @@ export function HomeBoard() {
   return (
     <BoardView
       columns={SOCCER_COLUMNS}
-      rows={ready ? rows : []}
-      loading={!ready}
+      rows={rows}
+      loading={!ready && rows.length === 0}
       error={null}
       leagueFilter
       allLabel="All sports"

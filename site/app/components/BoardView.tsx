@@ -36,7 +36,7 @@ import { GameCard } from './GameCard'
 import { VenueLogo } from './VenueLogo'
 import { LiveState, money, odds, pickTitle } from './boardParts'
 import { IconAll, IconClock, IconDrop, IconInsights, IconLive, IconStar, IconVenues } from './icons'
-import { formatName, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
+import { formatName, useMounted, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
 import { columnsFor, hasPrice, volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
 import { VENUE_NAME, type Venue } from '../lib/venues'
 import { useSession } from '../lib/useSession'
@@ -357,7 +357,8 @@ export function BoardView({
   const oddsFmt = useOddsFormat()
   // Named once, in the column head. Computed on the client: the server runs in
   // UTC and has no reader to ask.
-  const zone = useMemo(() => zoneLabel(), [])
+  const mounted = useMounted()
+  const zone = mounted ? zoneLabel() : ''
   const { slugs: watchlist, toggle: toggleWatch, synced } = useWatchlist(me?.plan === 'pro')
 
   // The nav search lands on the board with ?q=; the page reads it after mount,

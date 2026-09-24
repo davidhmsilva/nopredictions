@@ -39,10 +39,12 @@ export interface SoccerRows {
   kalshiPending: boolean
 }
 
-export function useSoccerRows(): SoccerRows {
-  const [fixtures, setFixtures] = useState<ScoutFixture[]>([])
+/** `initial` is Polymarket's board as the server rendered it; with it, the
+ *  page's first render already has its games and the browser only refreshes. */
+export function useSoccerRows(initial?: ScoutFixture[] | null): SoccerRows {
+  const [fixtures, setFixtures] = useState<ScoutFixture[]>(initial ?? [])
   const [kalshi, setKalshi] = useState<KalshiFixture[] | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!initial)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {

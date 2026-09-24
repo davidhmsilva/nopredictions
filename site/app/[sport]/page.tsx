@@ -1,12 +1,16 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { SportBoard } from '../components/SportBoard'
+import { getSportBoard } from '../lib/sports'
 import { SPORT_KEYS, SPORT_META, isSportKey } from '../lib/sportsMeta'
 
 // One page per US sport: /nfl, /cfb, /mlb, /nba, /nhl, /wnba. Anything else at
 // the top level still 404s — the static routes (lab, pricing, …) win over this
 // segment, and `dynamicParams = false` refuses every name not listed here.
 export const dynamicParams = false
+
+/** Rebuilt at most once a minute, so the games are in the HTML. */
+export const revalidate = 60
 
 export function generateStaticParams() {
   return SPORT_KEYS.map((sport) => ({ sport }))
@@ -17,7 +21,7 @@ export function generateMetadata({ params }: { params: { sport: string } }): Met
   const { label } = SPORT_META[params.sport]
   const title = `${label} odds: Polymarket vs Kalshi — NOPREDICTIONS`
   const description = `Every ${label} game on Polymarket and Kalshi, side by side, with the better price marked after fees. American, decimal or implied odds. Free.`
-  const url = `https://nopredictions.com/${params.sport}`
+  const url = `https://www.nopredictions.com/${params.sport}`
   return {
     title,
     description,
@@ -34,7 +38,8 @@ export function generateMetadata({ params }: { params: { sport: string } }): Met
   }
 }
 
-export default function SportPage({ params }: { params: { sport: string } }) {
+export default async function SportPage({ params }: { params: { sport: string } }) {
   if (!isSportKey(params.sport)) notFound()
-  return <SportBoard sport={params.sport} />
+  const initial = await getSportBoard(params.sport).catch(() => null)
+  return <SportBoard sport={params.sport} initial={initial} />
 }

@@ -11,9 +11,10 @@ import { useEffect, useState } from 'react'
 import { BoardView, HowPricesWork } from './BoardView'
 import { SOCCER_COLUMNS } from '../lib/boardRow'
 import { useSoccerRows } from './useBoards'
+import type { ScoutFixture } from '../lib/scoutTypes'
 
-export function SoccerBoard() {
-  const { rows, placed, loading, error, kalshiPending } = useSoccerRows()
+export function SoccerBoard({ initial = null }: { initial?: ScoutFixture[] | null }) {
+  const { rows, placed, loading, error, kalshiPending } = useSoccerRows(initial)
   const [query, setQuery] = useState('')
 
   useEffect(() => {

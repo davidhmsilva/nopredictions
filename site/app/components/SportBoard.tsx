@@ -16,16 +16,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BoardView, HowPricesWork } from './BoardView'
 import { rankRows, rowFromSportGame, US_COLUMNS } from '../lib/boardRow'
-import { timeText } from '../lib/display'
+import { timeText, useMounted } from '../lib/display'
 import { SPORT_META, type SportBoardData, type SportKey } from '../lib/sportsMeta'
 
 /** A live board moves; a pre-match one barely does. The server caches for a
  *  minute, so asking more often than that would only re-read the same board. */
 const REFRESH_MS = 60_000
 
-export function SportBoard({ sport }: { sport: SportKey }) {
+/** `initial` is the board as the server rendered it, so the page arrives with
+ *  its games in the HTML — for search engines and for a first paint that does
+ *  not wait on a request. The browser refreshes it from there. */
+export function SportBoard({ sport, initial = null }: { sport: SportKey; initial?: SportBoardData | null }) {
   const meta = SPORT_META[sport]
-  const [data, setData] = useState<SportBoardData | null>(null)
+  const mounted = useMounted()
+  const [data, setData] = useState<SportBoardData | null>(initial)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -83,7 +87,7 @@ export function SportBoard({ sport }: { sport: SportKey }) {
           <b className="np-num">{c.polymarket}</b>. A market we can&apos;t match to a game with
           both teams exactly is left out, never guessed. &ldquo;Traded&rdquo; adds Polymarket
           dollars to Kalshi $1 contracts — close enough to rank on. Updated{' '}
-          {timeText(new Date(data.generatedAt))}.
+          {mounted ? timeText(new Date(data.generatedAt)) : ''}.
         </p>
       )}
     </HowPricesWork>

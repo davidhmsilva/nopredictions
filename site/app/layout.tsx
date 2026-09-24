@@ -11,10 +11,9 @@ const CARD =
   'Polymarket and Kalshi side by side on every game, with the better price marked after fees. Free, no tips.'
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://nopredictions.com'),
+  metadataBase: new URL('https://www.nopredictions.com'),
   title: TITLE,
   description: DESCRIPTION,
-  alternates: { canonical: '/' },
   icons: {
     icon: [
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
@@ -26,7 +25,7 @@ export const metadata: Metadata = {
     title: TITLE,
     description: CARD,
     type: 'website',
-    url: 'https://nopredictions.com',
+    url: 'https://www.nopredictions.com',
     siteName: 'NOPREDICTIONS',
     images: [{ url: '/banner.jpg', width: 1200, height: 460 }],
   },

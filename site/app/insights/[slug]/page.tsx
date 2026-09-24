@@ -25,6 +25,7 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   return {
     title: `${a.title} — NOPREDICTIONS`,
     description: a.summary,
+    alternates: { canonical: `/insights/${params.slug}` },
     openGraph: {
       title: a.title,
       description: a.summary,
