@@ -9,7 +9,9 @@ import { SPORT_KEYS } from './lib/sportsMeta'
  *  every hour from the same caches the boards read — no extra sweep.
  *
  *  A board that fails to load costs its games, not the sitemap. */
-export const revalidate = 3600
+export const dynamic = 'force-dynamic'
+// See app/page.tsx: a static build of this file would swallow the board reads
+// and list no games.
 
 const SITE = 'https://www.nopredictions.com'
 
