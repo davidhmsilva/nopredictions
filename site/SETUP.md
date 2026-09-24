@@ -17,12 +17,19 @@ npm run dev
 
 ## Deploy to Vercel
 
+Deploys come from Git: a push (or a merged PR) to `main` goes to production,
+and any other branch gets a preview URL. The Vercel project's **Root Directory
+must be `site`** (Settings → Build and Deployment); with the default `./` the
+build runs at the repo root and fails.
+
+For a manual deploy from this folder:
+
 ```bash
 npm install -g vercel
 vercel --prod
 ```
 
-Vercel will auto-detect Next.js. Add these env vars in the Vercel dashboard:
+Add these env vars in the Vercel dashboard:
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://pnpjyrvvbzsdrwtymyzz.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<your anon key>
