@@ -58,9 +58,32 @@ export function HomeBoard() {
   const [waited, setWaited] = useState(false)
   const [all, setAll] = useState(false)
 
+  const [query, setQuery] = useState('')
+
   useEffect(() => {
     const t = setTimeout(() => setWaited(true), WAIT_MS)
     return () => clearTimeout(t)
+  }, [])
+
+  useEffect(() => {
+    // The nav search sends a team, or a pasted link, here as ?q=. Read from the
+    // URL directly rather than through useSearchParams, which would opt this
+    // statically rendered page into a Suspense boundary for one string.
+    const read = () => {
+      try {
+        setQuery(new URLSearchParams(window.location.search).get('q') ?? '')
+      } catch {
+        /* no query string is the normal case */
+      }
+    }
+    const fromNav = (e: Event) => setQuery(String((e as CustomEvent).detail ?? ''))
+    read()
+    window.addEventListener('popstate', read)
+    window.addEventListener('np-search', fromNav)
+    return () => {
+      window.removeEventListener('popstate', read)
+      window.removeEventListener('np-search', fromNav)
+    }
   }, [])
 
   const settled = !soccer.loading && SPORT_KEYS.every((k) => !sports[k].loading)
@@ -138,7 +161,9 @@ export function HomeBoard() {
       foot={foot}
       emptyLabel="No game matches that filter right now."
       pending={soccer.kalshiPending ? 'Kalshi loading…' : null}
-      limit={all ? undefined : HOME_ROWS}
+      initialQuery={query}
+      // A search shows every match, not the top ten of them.
+      limit={all || query ? undefined : HOME_ROWS}
     />
   )
 }

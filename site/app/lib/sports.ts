@@ -329,10 +329,15 @@ interface PmTeam {
 interface PmMarket {
   sportsMarketType?: string
   outcomes?: string
+  outcomePrices?: string
   clobTokenIds?: string
   bestBid?: number
   bestAsk?: number
   volumeNum?: number
+  /** Outcome 0's price change over 24h / 1h, in probability. Outcome 1 moved
+   *  by the opposite amount. */
+  oneDayPriceChange?: number
+  oneHourPriceChange?: number
 }
 
 interface PmEvent {
@@ -351,6 +356,16 @@ interface PmGame {
   tokens: { home: string; away: string }
   gamma: { home: Quote; away: Quote }
   volume: number | null
+  /** The side that shortened over 24 hours, off the same listing — no extra
+   *  request. Null where Gamma published no change or nothing shortened. */
+  move: {
+    side: 'home' | 'away'
+    now: number
+    before: number
+    pp: number
+    pp1h: number | null
+    tokenId: string
+  } | null
 }
 
 async function pmEvents(tagId: number, now: Date, days: number): Promise<PmEvent[]> {
@@ -407,7 +422,33 @@ function parsePm(ev: PmEvent): PmGame | null {
   const q0 = quoteOf(bb, ba, null)
   const q1 = quoteOf(ba != null ? 1 - ba : null, bb != null ? 1 - bb : null, null)
   const first = s0 === 'home'
+
+  // "Dropping odds" is a price RISING. Gamma's change is outcome 0's; outcome 1
+  // moved the other way by the same amount.
+  let move: PmGame['move'] = null
+  const chg = num(ml.oneDayPriceChange)
+  const chg1h = num(ml.oneHourPriceChange)
+  let p0: number | null = null
+  try {
+    p0 = num(JSON.parse(ml.outcomePrices ?? '[]')[0])
+  } catch {
+    p0 = null
+  }
+  if (chg != null && chg !== 0 && p0 != null && p0 > 0 && p0 < 1) {
+    const up0 = chg > 0
+    const now = up0 ? p0 : 1 - p0
+    move = {
+      side: up0 ? s0 : s1,
+      now,
+      before: Math.min(1, Math.max(0, now - Math.abs(chg))),
+      pp: Math.abs(chg) * 100,
+      pp1h: chg1h == null ? null : (up0 ? chg1h : -chg1h) * 100,
+      tokenId: up0 ? tokens[0] : tokens[1],
+    }
+  }
+
   return {
+    move,
     slug: ev.slug,
     start: Date.parse(ev.startTime),
     home,
@@ -575,8 +616,22 @@ async function build(sport: SportKey): Promise<SportBoardData> {
     }
     // Polymarket first, the way every board on the site orders them.
     const venues = [polymarket, s.kalshi].filter((v): v is VenueBook => v != null)
+    const mv = s.pm?.move ?? null
     rows.push({
       id: g.id,
+      move: mv
+        ? {
+            side: mv.side,
+            label: mv.side === 'home' ? g.home.short || g.home.display : g.away.short || g.away.display,
+            now: mv.now,
+            before: mv.before,
+            pp: mv.pp,
+            pp1h: mv.pp1h,
+            tokenId: mv.tokenId,
+          }
+        : null,
+      pmVolume: s.pm?.volume ?? null,
+      pmTokens: s.pm ? { home: s.pm.tokens.home, away: s.pm.tokens.away } : null,
       start: g.start,
       state: g.state,
       detail: g.detail,
@@ -614,7 +669,7 @@ export function espnPathOf(sport: SportKey): string {
  *  landing on an instance that never swept reads someone else's sweep. */
 const TTL_MS = 60_000
 
-const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v2'], {
+const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v4'], {
   revalidate: TTL_MS / 1000,
   tags: ['sport-board'],
 })

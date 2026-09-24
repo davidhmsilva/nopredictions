@@ -185,7 +185,7 @@ export function briefFacts(
   }
 }
 
-async function write(facts: unknown, lineups: boolean, inPlay: boolean): Promise<Brief> {
+async function write(facts: unknown, lineups: boolean, inPlay: boolean, system: string = SYSTEM): Promise<Brief> {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not set')
   const client = new Anthropic()
   const msg = await client.beta.messages.parse({
@@ -196,7 +196,7 @@ async function write(facts: unknown, lineups: boolean, inPlay: boolean): Promise
     betas: ['server-side-fallback-2026-06-01'],
     fallbacks: [{ model: 'claude-opus-4-8' }],
     output_config: { effort: 'low', format: betaZodOutputFormat(BriefSchema) },
-    system: SYSTEM,
+    system,
     messages: [{ role: 'user', content: JSON.stringify(facts) }],
   })
   if (msg.stop_reason === 'refusal') throw new Error('brief declined')
@@ -216,4 +216,13 @@ export function cachedBrief(slug: string, lineups: boolean, inPlay: boolean, fac
     // Capped on the way out as well as on the way in: a brief cached before a
     // rule changed must not outlive the rule.
     .then((b) => ({ ...b, points: b.points.slice(0, 5) }))
+}
+
+/** The same writer with a different set of instructions — the US Game Center
+ *  gives it that sport's facts and rules. Cached on `key`, which must name the
+ *  game and its phase, for the same reason as above. */
+export function cachedBriefWith(key: string[], system: string, facts: unknown, inPlay: boolean): Promise<Brief> {
+  return unstable_cache(() => write(facts, false, inPlay, system), key, { revalidate: 12 * 3600 })().then(
+    (b) => ({ ...b, points: b.points.slice(0, 5) })
+  )
 }

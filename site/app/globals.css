@@ -5190,3 +5190,68 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .sg-out { flex: 1; min-width: 0; }
   .sg-mkt-vol { display: none; }
 }
+
+/* Prices on a phone, where the price columns are hidden: each row becomes a
+   grid — star, game, start, traded, arrow on one line, and the prices on a
+   line of their own underneath, the full width of the row. */
+.sc-c-modds { display: none; }
+@media (max-width: 760px) {
+  .sc-table thead { display: none; }
+  .sc-table tbody tr {
+    display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
+    align-items: center; column-gap: 6px; padding: 10px 0;
+  }
+  .sc-table tbody tr td { padding: 0 2px; }
+  .sc-c-state, .sc-c-vol, .sc-c-go { width: auto; }
+  .sc-c-modds { display: block; grid-column: 2 / -1; padding-top: 8px !important; }
+  .sc-modds { display: flex; gap: 6px; }
+  .sc-modd {
+    flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 6px 8px; border-radius: var(--r-sm);
+    background: var(--bg3); border: 1px solid transparent;
+  }
+  .sc-modd em {
+    font-style: normal; font-size: 11px; color: var(--grey);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sc-modd-p { display: inline-flex; align-items: center; gap: 5px; }
+  .sc-modd b { font-size: 14px; color: var(--white); font-weight: 650; }
+  .sc-modd.is-best { border-color: rgba(255,255,255,.3); }
+}
+
+/* Dropping odds, every sport: the chip holds 1 / X / 2 on soccer and a team
+   code (LAR, NYY) on a US game, and it is neutral like the boards. */
+.do-chip { width: auto; min-width: 18px; padding: 0 4px; font-family: var(--font); }
+.do-chip.is-home, .do-chip.is-away, .do-chip.is-draw {
+  color: var(--white); border-color: var(--border2); background: var(--bg3);
+}
+.do-sports { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 16px; }
+
+/* US Game Center, second pass: charts, scores, standings. */
+.sg-line { stroke: var(--white); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sg-line.is-dashed { stroke: var(--grey); stroke-dasharray: 5 4; }
+.sg-key { display: inline-flex; align-items: center; gap: 5px; margin-left: 12px; }
+.sg-key i { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--white); }
+.sg-key i.sg-key-dash { border-top: 2px dashed var(--grey); }
+.sg-plays { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--border); }
+.sg-plays li {
+  display: grid; grid-template-columns: 92px 48px minmax(0, 1fr) 56px; align-items: baseline; gap: 10px;
+  padding: 8px 2px; border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.sg-play-when { color: var(--grey2); font-size: 12px; }
+.sg-play-team { color: var(--white); font-weight: 650; font-size: 12px; }
+.sg-play-text { color: var(--grey); }
+.sg-play-score { text-align: right; color: var(--white); font-weight: 650; }
+.sg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sg-table th { text-align: right; color: var(--grey2); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.sg-table td { text-align: right; color: var(--grey); padding: 7px 8px; border-bottom: 1px solid var(--border); }
+.sg-table th:first-child, .sg-table td:first-child { text-align: left; }
+.sg-table td:first-child { color: var(--white); }
+.sg-table tr.is-mark td { color: var(--white); font-weight: 650; background: var(--bg2); }
+@media (max-width: 760px) {
+  .sg-plays li { grid-template-columns: 70px 40px minmax(0, 1fr) 46px; gap: 6px; font-size: 12.5px; }
+  .sg-key { margin-left: 8px; }
+}
+
+.sc-row-score { white-space: nowrap; }

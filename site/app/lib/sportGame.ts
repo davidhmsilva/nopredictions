@@ -24,8 +24,11 @@ import type {
   Leader,
   PmMarketGroup,
   PmMarketRow,
+  PricePoint,
   RecentGame,
+  ScoringPlay,
   SportGamePage,
+  StandingsGroup,
   StatLine,
 } from './sportGameTypes'
 
@@ -132,6 +135,79 @@ function statsOf(box: any, ids: { home: string; away: string }): StatLine[] {
     }))
     .filter((s: StatLine) => s.label && (s.home || s.away))
     .slice(0, 14)
+}
+
+/** Against the spread: the first record ESPN gives, where it has one. Early
+ *  in a season the list is empty, and the page says nothing rather than 0-0. */
+function atsOf(block: any): string | null {
+  const r = (block?.records ?? []).find((x: any) => x?.summary)
+  return r?.summary ? String(r.summary) : null
+}
+
+/** The groups each team plays in, with the columns a reader expects. */
+function standingsOf(block: any, ids: { home: string; away: string }): StandingsGroup[] {
+  const WANT = ['W', 'L', 'T', 'OTL', 'PCT', 'GB', 'PF', 'PA', 'PTS']
+  return (block?.groups ?? [])
+    .map((g: any) => {
+      const entries: any[] = g?.standings?.entries ?? []
+      if (!entries.some((e) => String(e.id) === ids.home || String(e.id) === ids.away)) return null
+      const first = entries[0]?.stats ?? []
+      const cols = WANT.filter((k) => first.some((st: any) => st.abbreviation === k)).slice(0, 5)
+      return {
+        title: String(g.header ?? '').replace(/^\d{4}\s+/, ''),
+        cols,
+        rows: entries.slice(0, 10).map((e) => ({
+          team: e.team ?? '',
+          side: String(e.id) === ids.home ? 'home' : String(e.id) === ids.away ? 'away' : null,
+          cells: cols.map((k) => e.stats?.find((st: any) => st.abbreviation === k)?.displayValue ?? ''),
+        })),
+      }
+    })
+    .filter((x: StandingsGroup | null): x is StandingsGroup => x != null)
+}
+
+/** Every score in order. Football and hockey publish `scoringPlays`; baseball
+ *  marks them inside `plays`. Basketball scores every possession, so a list of
+ *  them is noise and is left out. */
+function scoringOf(summary: any, sport: SportKey): ScoringPlay[] {
+  if (sport === 'nba' || sport === 'wnba') return []
+  const src: any[] = summary?.scoringPlays?.length
+    ? summary.scoringPlays
+    : (summary?.plays ?? []).filter((p: any) => p?.scoringPlay)
+  return src.slice(0, 60).map((p: any) => ({
+    period:
+      p.period?.displayValue ??
+      (p.period?.number != null ? (sport === 'nhl' ? `P${p.period.number}` : `Q${p.period.number}`) : ''),
+    clock: p.clock?.displayValue ?? null,
+    team: p.team?.abbreviation ?? null,
+    text: p.text ?? p.type?.text ?? '',
+    away: num(p.awayScore),
+    home: num(p.homeScore),
+  }))
+}
+
+/** ESPN's win chance through the game, thinned to what a small chart can show. */
+function winProbOf(list: any[] | undefined): number[] {
+  const all = (list ?? [])
+    .map((x) => num(x?.homeWinPercentage))
+    .filter((x): x is number => x != null)
+    .map((x) => x * 100)
+  if (all.length <= 120) return all
+  const step = all.length / 120
+  return Array.from({ length: 120 }, (_, i) => all[Math.floor(i * step)]).concat(all[all.length - 1])
+}
+
+/** Polymarket's price path for one token, the last three days, half-hourly. */
+async function historyOf(token: string): Promise<PricePoint[]> {
+  const now = Math.floor(Date.now() / 1000)
+  try {
+    const b = await getJson<{ history?: { t: number; p: number }[] }>(
+      `https://clob.polymarket.com/prices-history?market=${token}&startTs=${now - 72 * 3600}&endTs=${now}&fidelity=30`
+    )
+    return (b.history ?? []).filter((h) => Number.isFinite(h.p) && Number.isFinite(h.t))
+  } catch {
+    return []
+  }
 }
 
 // ── Polymarket: every other market on the game ───────────────────────────────
@@ -257,7 +333,11 @@ async function build(sport: SportKey, id: string): Promise<SportGamePage> {
   const pmBook = row?.venues.find((v) => v.venue === 'polymarket') ?? null
   const kalshiBook = row?.venues.find((v) => v.venue === 'kalshi') ?? null
   const pmSlug = pmBook?.url.match(/\/event\/([^/?#]+)/)?.[1] ?? null
-  const markets = pmSlug ? await pmMarkets(pmSlug).catch(() => []) : []
+  const [markets, histHome, histAway] = await Promise.all([
+    pmSlug ? pmMarkets(pmSlug).catch(() => []) : Promise.resolve([]),
+    row?.pmTokens ? historyOf(row.pmTokens.home) : Promise.resolve([]),
+    row?.pmTokens ? historyOf(row.pmTokens.away) : Promise.resolve([]),
+  ])
 
   const byTeam = <T,>(list: any[] | undefined, pick: (x: any) => T[]): { home: T[]; away: T[] } => {
     const out = { home: [] as T[], away: [] as T[] }
@@ -309,6 +389,19 @@ async function build(sport: SportKey, id: string): Promise<SportGamePage> {
     recent: byTeam(summary.lastFiveGames, recentOf),
     stats: statsOf(summary.boxscore, ids),
     markets,
+    ats: (() => {
+      const out = { home: null as string | null, away: null as string | null }
+      for (const x of summary.againstTheSpread ?? []) {
+        const side = sideOf(x?.team?.id, ids)
+        if (side) out[side] = atsOf(x)
+      }
+      return out
+    })(),
+    series: (summary.seasonseries ?? [])[0]?.summary ?? null,
+    standings: standingsOf(summary.standings, ids),
+    scoring: st.state === 'pre' ? [] : scoringOf(summary, sport),
+    winProb: st.state === 'pre' ? [] : winProbOf(summary.winprobability),
+    history: { home: histHome, away: histAway },
     pmUrl: pmBook?.url ?? null,
     kalshiUrl: kalshiBook?.url ?? null,
     generatedAt: new Date().toISOString(),
@@ -319,7 +412,7 @@ async function build(sport: SportKey, id: string): Promise<SportGamePage> {
 
 /** A minute, like the board: shared across instances, so a busy game costs
  *  one ESPN summary, one Gamma event and one book read a minute. */
-const buildShared = unstable_cache((sport: SportKey, id: string) => build(sport, id), ['sport-game-v1'], {
+const buildShared = unstable_cache((sport: SportKey, id: string) => build(sport, id), ['sport-game-v2'], {
   revalidate: 60,
   tags: ['sport-game'],
 })

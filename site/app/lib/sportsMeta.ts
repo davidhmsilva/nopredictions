@@ -55,6 +55,22 @@ export interface SportGame {
   best: Record<'home' | 'away', BestPick>
   /** Polymarket dollars + Kalshi contracts. What the board ranks on. */
   volumeCombined: number
+  /** Polymarket's moneyline, in dollars — the book the 24h move is read off. */
+  pmVolume: number | null
+  /** Polymarket's moneyline tokens by side, as the board placed them — what
+   *  the Game Center draws the price history from. */
+  pmTokens: { home: string; away: string } | null
+  /** The side whose Polymarket price rose most over 24 hours (its odds
+   *  dropped). Null where nothing shortened or Gamma published no change. */
+  move: {
+    side: 'home' | 'away'
+    label: string
+    now: number
+    before: number
+    pp: number
+    pp1h: number | null
+    tokenId: string
+  } | null
 }
 
 export interface SportBoardData {

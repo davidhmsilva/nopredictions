@@ -32,6 +32,10 @@ export interface BoardRow {
    *  "away @ home". */
   left: string
   right: string
+  /** Everything a search should find this row by, lower-cased: every form of
+   *  both names, the competition, and each venue's link (so a pasted
+   *  Polymarket URL finds its game). */
+  search: string
   competition: string | null
   kickoff: string | null
   live: boolean
@@ -87,6 +91,10 @@ export function rowFromScout(f: ScoutFixture): BoardRow {
     href: `/game/${f.slug}`,
     left: f.home,
     right: f.away,
+    search: [f.home, f.away, f.competition, f.slug, ...(f.venues ?? []).map((v) => v.url)]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase(),
     competition: f.competition,
     kickoff: f.kickoff,
     live: f.live,
@@ -115,6 +123,15 @@ export function rowFromSportGame(g: SportGame, sport: SportKey): BoardRow {
     href: `/${sport}/${g.id}`,
     left: g.away.short,
     right: g.home.short,
+    search: [
+      g.away.name, g.away.short, g.away.abbr,
+      g.home.name, g.home.short, g.home.abbr,
+      SPORT_META[sport].label, sport,
+      ...(g.venues ?? []).map((v) => v.url),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase(),
     competition: SPORT_META[sport].label,
     kickoff: g.start,
     live: g.state === 'in',

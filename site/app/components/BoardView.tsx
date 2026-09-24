@@ -37,7 +37,7 @@ import { VenueLogo } from './VenueLogo'
 import { LiveState, money, odds, pickTitle } from './boardParts'
 import { IconAll, IconClock, IconDrop, IconInsights, IconLive, IconStar, IconVenues } from './icons'
 import { formatName, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
-import { hasPrice, volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
+import { columnsFor, hasPrice, volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
 import { VENUE_NAME, type Venue } from '../lib/venues'
 import { useSession } from '../lib/useSession'
 import { useWatchlist } from '../lib/useWatchlist'
@@ -133,7 +133,7 @@ function Row({
       </td>
 
       <td className="sc-c-fixture">
-        <FixtureCell r={r} showCompetition={showCompetition} />
+        <FixtureCell r={r} showCompetition={showCompetition} f={f} />
       </td>
 
       <td className="sc-c-state">
@@ -156,11 +156,24 @@ function Row({
           )}
         </td>
       )}
+      {/* A phone's own line of prices, under the game and the full width of
+          the row. Hidden on a wide screen, where the price columns show. */}
+      <td className="sc-c-modds">
+        <MobileOdds r={r} f={f} />
+      </td>
     </tr>
   )
 }
 
-function FixtureCell({ r, showCompetition }: { r: BoardRow; showCompetition: boolean }) {
+function FixtureCell({
+  r,
+  showCompetition,
+  f,
+}: {
+  r: BoardRow
+  showCompetition: boolean
+  f: OddsFormat
+}) {
   // "v" between a soccer home and away, "@" before a US home side — per row,
   // because the home page mixes every sport in one list.
   const joiner = r.sport === 'soccer' ? 'v' : '@'
@@ -189,6 +202,40 @@ function FixtureCell({ r, showCompetition }: { r: BoardRow; showCompetition: boo
         <VenueLinks r={r} />
       </span>
     </>
+  )
+}
+
+/** The prices under the teams, shown only on a phone — where the price
+ *  columns do not fit beside the game. Each row prices its OWN outcomes, so a
+ *  US game on the mixed home board shows its two sides by name rather than
+ *  the soccer columns it sits under. */
+function MobileOdds({ r, f }: { r: BoardRow; f: OddsFormat }) {
+  const cols = columnsFor(r).filter((c) => {
+    const a = r.best[c.key]?.ask
+    return a != null && a > 0.01 && a < 0.99
+  })
+  if (!cols.length) return null
+  return (
+    <span className="sc-modds">
+      {cols.map((c) => {
+        const pick = r.best[c.key]
+        const label =
+          r.sport === 'soccer' ? c.label : c.key === 'away' ? r.left : c.key === 'home' ? r.right : c.label
+        return (
+          <span
+            key={c.key}
+            className={`sc-modd${pick?.venue ? ' is-best' : ''}`}
+            title={pick ? pickTitle(pick, r.venues, c.key, f) : undefined}
+          >
+            <em>{label}</em>
+            <span className="sc-modd-p">
+              {pick?.venue && <VenueLogo venue={pick.venue} size={12} title="" />}
+              <b className="np-num">{odds(pick?.ask ?? null, f)}</b>
+            </span>
+          </span>
+        )
+      })}
+    </span>
   )
 }
 
@@ -316,7 +363,7 @@ export function BoardView({
   // The nav search lands on the board with ?q=; the page reads it after mount,
   // so it arrives as a prop change rather than as an initial value.
   useEffect(() => {
-    if (initialQuery) setQuery(initialQuery)
+    setQuery(initialQuery)
   }, [initialQuery])
 
   const bothCount = useMemo(() => rows.filter((r) => r.venues.length > 1).length, [rows])
@@ -329,7 +376,7 @@ export function BoardView({
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     const filtered = rows.filter((r) => {
-      if (q && !`${r.left} ${r.right} ${r.competition ?? ''}`.toLowerCase().includes(q)) return false
+      if (q && !r.search.includes(q)) return false
       if (comp && r.competition !== comp) return false
       switch (filter) {
         case 'live':
@@ -362,7 +409,9 @@ export function BoardView({
       .map(([name, n]) => ({ name, n }))
   }, [rows])
 
-  const listed = limit != null ? shown.slice(0, limit) : shown
+  // A search shows every match, not the top N of them.
+  const capped = limit != null && !query.trim()
+  const listed = capped ? shown.slice(0, limit) : shown
 
   return (
     <AppShell>
@@ -460,7 +509,7 @@ export function BoardView({
               <span className="sc-count np-num">
                 {loading
                   ? ''
-                  : limit != null && shown.length > limit
+                  : capped && shown.length > (limit as number)
                     ? `Top ${limit} of ${shown.length}`
                     : `${shown.length} of ${rows.length}`}
               </span>

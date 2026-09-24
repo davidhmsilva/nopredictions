@@ -21,10 +21,12 @@
  *     says so rather than leaving the arrows to imply otherwise.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
-import type { Mover, MoversMeta } from '../lib/movers'
+import type { MoverRow, MoversMeta } from '../lib/movers'
+import { SPORT_KEYS, SPORT_META } from '../lib/sportsMeta'
+import type { BoardSport } from '../lib/boardRow'
 import { kickoffText, priceText, useOddsFormat, type OddsFormat } from '../lib/display'
 
 // ── formatting ───────────────────────────────────────────────────────────────
@@ -42,7 +44,7 @@ function money(v: number): string {
 
 /** How far the DECIMAL fell, as a percentage of what it was — the visceral
  *  number, and the one the phrase "dropping odds" actually describes. */
-function dropPct(m: Mover['move']): number {
+function dropPct(m: MoverRow['move']): number {
   const was = 1 / m.before
   const now = 1 / m.now
   return was > 0 ? ((was - now) / was) * 100 : 0
@@ -106,27 +108,27 @@ function Spark({ points, w = 96, h = 26 }: { points: number[]; w?: number; h?: n
 
 // ── one row ──────────────────────────────────────────────────────────────────
 
-function Row({ f }: { f: Mover }) {
+const CHIP_CLASS: Record<MoverRow['backed'], string> = { left: 'is-home', right: 'is-away', draw: 'is-draw' }
+
+function Row({ f }: { f: MoverRow }) {
   const oddsFmt = useOddsFormat()
   return (
-    <Link href={`/game/${f.slug}`} className="do-row">
+    <Link href={f.href} className="do-row">
       <div className="do-c-match">
         <div className="do-teams">
-          <span className={f.move.side === 'home' ? 'is-backed' : ''}>{f.home}</span>
-          <span className="do-vs">v</span>
-          <span className={f.move.side === 'away' ? 'is-backed' : ''}>{f.away}</span>
+          <span className={f.backed === 'left' ? 'is-backed' : ''}>{f.left}</span>
+          <span className="do-vs">{f.joiner}</span>
+          <span className={f.backed === 'right' ? 'is-backed' : ''}>{f.right}</span>
         </div>
         <div className="do-when">{kickoff(f.kickoff, f.hoursToKickoff)}</div>
       </div>
 
       <div className="do-c-league">
-        <span className="np-badge">{f.competition ?? 'Football'}</span>
+        <span className="np-badge">{f.competition ?? 'Soccer'}</span>
       </div>
 
       <div className="do-c-backed">
-        <span className={`do-chip is-${f.move.side}`}>
-          {f.move.side === 'draw' ? 'X' : f.move.side === 'home' ? '1' : '2'}
-        </span>
+        <span className={`do-chip ${CHIP_CLASS[f.backed]}`}>{f.chip}</span>
         <span className="do-backed-name">{f.move.label}</span>
       </div>
 
@@ -147,7 +149,7 @@ function Row({ f }: { f: Mover }) {
   )
 }
 
-function Table({ rows }: { rows: Mover[] }) {
+function Table({ rows }: { rows: MoverRow[] }) {
   return (
     <div className="do-table">
       <div className="do-head-row">
@@ -161,7 +163,7 @@ function Table({ rows }: { rows: Mover[] }) {
         <span>Volume</span>
       </div>
       {rows.map((f) => (
-        <Row key={f.slug} f={f} />
+        <Row key={f.key} f={f} />
       ))}
     </div>
   )
@@ -170,8 +172,9 @@ function Table({ rows }: { rows: Mover[] }) {
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function DroppingOddsPage() {
-  const [funded, setFunded] = useState<Mover[] | null>(null)
-  const [thin, setThin] = useState<Mover[]>([])
+  const [allFunded, setFunded] = useState<MoverRow[] | null>(null)
+  const [allThin, setThin] = useState<MoverRow[]>([])
+  const [sport, setSport] = useState<BoardSport | null>(null)
   const [showThin, setShowThin] = useState(false)
   const [meta, setMeta] = useState<MoversMeta | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -199,6 +202,14 @@ export default function DroppingOddsPage() {
     }
   }, [])
 
+  // Only the sports that actually have a mover get a chip.
+  const sportsHere = useMemo(() => {
+    const present = new Set([...(allFunded ?? []), ...allThin].map((m) => m.sport))
+    return (['soccer', ...SPORT_KEYS] as BoardSport[]).filter((k) => present.has(k))
+  }, [allFunded, allThin])
+  const funded = allFunded && (sport ? allFunded.filter((m) => m.sport === sport) : allFunded)
+  const thin = sport ? allThin.filter((m) => m.sport === sport) : allThin
+
   const top = funded?.[0] ?? null
 
   return (
@@ -213,9 +224,9 @@ export default function DroppingOddsPage() {
               Not the tip.
             </h1>
             <p>
-              Every Polymarket football board, ranked by the side that shortened most
-              in the last 24 hours. Pre-match only, and only where enough has traded
-              for the move to mean anything.
+              Every game on Polymarket — soccer, NFL, college football, MLB, NBA, NHL and
+              WNBA — ranked by the side that shortened most in the last 24 hours. Pre-match
+              only, and only where enough has traded for the move to mean anything.
             </p>
             <div className="do-hero-cta">
               <Link href="/" className="np-btn np-btn-primary">
@@ -229,7 +240,7 @@ export default function DroppingOddsPage() {
 
           <div className="do-hero-panel">
             {top ? (
-              <Link href={`/game/${top.slug}`} className="do-top">
+              <Link href={top.href} className="do-top">
                 <div className="do-top-head">
                   <span className="do-top-label">Biggest move now</span>
                   <b className="np-num do-top-pct">↓{dropPct(top.move).toFixed(1)}%</b>
@@ -239,7 +250,7 @@ export default function DroppingOddsPage() {
                   <span className="do-top-sel-label">BACKED SELECTION</span>
                   <b>{top.move.label}</b>
                   <span className="do-top-fixture">
-                    {top.home} <em>v</em> {top.away}
+                    {top.left} <em>{top.joiner}</em> {top.right}
                   </span>
                 </div>
 
@@ -260,7 +271,7 @@ export default function DroppingOddsPage() {
                 </div>
 
                 <div className="do-top-foot">
-                  {top.competition ?? 'Football'} · {kickoff(top.kickoff, top.hoursToKickoff)} ·{' '}
+                  {top.competition ?? 'Soccer'} · {kickoff(top.kickoff, top.hoursToKickoff)} ·{' '}
                   {money(top.volumeUsd)} traded
                 </div>
               </Link>
@@ -275,6 +286,23 @@ export default function DroppingOddsPage() {
             )}
           </div>
         </section>
+
+        {sportsHere.length > 1 && (
+          <div className="do-sports" role="group" aria-label="Sport">
+            <button className={`sc-cat${sport === null ? ' is-on' : ''}`} onClick={() => setSport(null)}>
+              All sports
+            </button>
+            {sportsHere.map((k) => (
+              <button
+                key={k}
+                className={`sc-cat${sport === k ? ' is-on' : ''}`}
+                onClick={() => setSport(sport === k ? null : k)}
+              >
+                {k === 'soccer' ? 'Soccer' : SPORT_META[k].tab ?? SPORT_META[k].label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div className="np-note do-error">
@@ -334,7 +362,7 @@ export default function DroppingOddsPage() {
         {meta && (
           <div className="do-meta">
             <b className="np-num">{meta.shown}</b> shown of{' '}
-            <b className="np-num">{meta.candidates}</b> pre-match fixtures ·{' '}
+            <b className="np-num">{meta.candidates}</b> pre-match games ·{' '}
             <b className="np-num">{meta.droppedForSmallMove}</b> moved less than{' '}
             {meta.minMovePp}pp · <b className="np-num">{meta.droppedForVolume}</b> moved but
             had under ${meta.minVolumeUsd.toLocaleString('en-US')} through them ·{' '}

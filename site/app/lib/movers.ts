@@ -1,6 +1,7 @@
-/** Dropping odds — the board of what the market moved on.
+/** Dropping odds — the board of what the market moved on, in every sport.
  *
- *  Derived entirely from the sweep Scout already does. Gamma publishes
+ *  Derived entirely from sweeps the boards already do — Scout for soccer,
+ *  lib/sports for the six US sports. Gamma publishes
  *  `oneDayPriceChange` and `oneHourPriceChange` on every market in the listing
  *  response, so this page costs **no extra request** — the same shape as the
  *  live block that was sitting in those bytes all along.
@@ -32,6 +33,8 @@
 
 import { unstable_cache } from 'next/cache'
 import type { ScoutFixture } from './scout'
+import type { BoardSport } from './boardRow'
+import { SPORT_META, type SportBoardData, type SportKey } from './sportsMeta'
 
 /** Below this, a "mover" is two people rather than a market. */
 export const MIN_VOLUME_USD = 1_000
@@ -54,15 +57,42 @@ export const FUNDED_VOLUME_USD = 5_000
 /** Below this, the move is inside the spread. */
 export const MIN_MOVE_PP = 2
 
-export interface Mover extends ScoutFixture {
-  /** Non-null by construction — `movers()` drops fixtures without one. */
-  move: NonNullable<ScoutFixture['move']>
-  /** Hours until kickoff. Negative should not occur here; see `movers()`. */
+/** One mover, whatever sport it came from. Soccer reads "home v away", a US
+ *  game "away @ home"; `backed` says which of the two names shortened. */
+export interface MoverRow {
+  key: string
+  href: string
+  sport: BoardSport
+  left: string
+  right: string
+  joiner: 'v' | '@'
+  backed: 'left' | 'right' | 'draw'
+  /** What the small chip says: 1 / X / 2 on soccer, the team code on a US game. */
+  chip: string
+  competition: string | null
+  kickoff: string | null
   hoursToKickoff: number | null
+  /** Polymarket dollars on the market that moved. */
+  volumeUsd: number
+  move: {
+    label: string
+    now: number
+    before: number
+    pp: number
+    pp1h: number | null
+    tokenId: string | null
+  }
   /** The backed side's price path over the window, oldest first, as
    *  probabilities. Empty when the CLOB had nothing to say — the row still
    *  renders, without a line, because a missing chart is not a missing move. */
   spark: number[]
+}
+
+/** A pre-match game before the filters run — the move may be missing. */
+export type MoverCandidate = Omit<MoverRow, 'move' | 'spark' | 'hoursToKickoff'> & {
+  move: MoverRow['move'] | null
+  live: boolean
+  finished: boolean
 }
 
 function hoursTo(iso: string | null): number | null {
@@ -71,22 +101,78 @@ function hoursTo(iso: string | null): number | null {
   return Number.isNaN(t) ? null : (t - Date.now()) / 3_600_000
 }
 
-/** Movers on a funded book, and movers on a thin one, kept apart. */
-export interface MoverBoard {
-  funded: Mover[]
-  thin: Mover[]
+export function soccerCandidates(fixtures: ScoutFixture[]): MoverCandidate[] {
+  return fixtures.map((f) => ({
+    key: `soccer:${f.slug}`,
+    href: `/game/${f.slug}`,
+    sport: 'soccer' as const,
+    left: f.home,
+    right: f.away,
+    joiner: 'v' as const,
+    backed: !f.move ? 'draw' : f.move.side === 'home' ? 'left' : f.move.side === 'away' ? 'right' : 'draw',
+    chip: !f.move ? '' : f.move.side === 'home' ? '1' : f.move.side === 'away' ? '2' : 'X',
+    competition: f.competition,
+    kickoff: f.kickoff,
+    volumeUsd: f.volumeUsd,
+    live: f.live,
+    finished: f.finished,
+    move: f.move
+      ? {
+          label: f.move.label,
+          now: f.move.now,
+          before: f.move.before,
+          pp: f.move.pp,
+          pp1h: f.move.pp1h,
+          tokenId: f.move.tokenId,
+        }
+      : null,
+  }))
 }
 
-export function moverBoard(fixtures: ScoutFixture[]): MoverBoard {
-  const all = movers(fixtures)
+export function sportCandidates(sport: SportKey, board: SportBoardData): MoverCandidate[] {
+  return board.games.map((g) => ({
+    key: `${sport}:${g.id}`,
+    href: `/${sport}/${g.id}`,
+    sport,
+    left: g.away.short,
+    right: g.home.short,
+    joiner: '@' as const,
+    backed: g.move?.side === 'home' ? 'right' : 'left',
+    chip: g.move ? (g.move.side === 'home' ? g.home.abbr : g.away.abbr) : '',
+    competition: SPORT_META[sport].label,
+    kickoff: g.start,
+    volumeUsd: g.pmVolume ?? 0,
+    live: g.state === 'in',
+    finished: g.state === 'post',
+    move: g.move
+      ? {
+          label: g.move.label,
+          now: g.move.now,
+          before: g.move.before,
+          pp: g.move.pp,
+          pp1h: g.move.pp1h,
+          tokenId: g.move.tokenId,
+        }
+      : null,
+  }))
+}
+
+/** Movers on a funded book, and movers on a thin one, kept apart. */
+export interface MoverBoard {
+  funded: MoverRow[]
+  thin: MoverRow[]
+}
+
+export function moverBoard(candidates: MoverCandidate[]): MoverBoard {
+  const all = movers(candidates)
   return {
     funded: all.filter((m) => m.volumeUsd >= FUNDED_VOLUME_USD),
     thin: all.filter((m) => m.volumeUsd < FUNDED_VOLUME_USD),
   }
 }
 
-export function movers(fixtures: ScoutFixture[]): Mover[] {
-  return fixtures
+export function movers(candidates: MoverCandidate[]): MoverRow[] {
+  return candidates
     .filter((f) => {
       if (f.live || f.finished) return false
       if (!f.move || f.move.pp < MIN_MOVE_PP) return false
@@ -96,7 +182,12 @@ export function movers(fixtures: ScoutFixture[]): Mover[] {
       const h = hoursTo(f.kickoff)
       return h != null && h > 0
     })
-    .map((f) => ({ ...f, move: f.move!, hoursToKickoff: hoursTo(f.kickoff), spark: [] }))
+    .map(({ live: _l, finished: _f, ...f }) => ({
+      ...f,
+      move: f.move!,
+      hoursToKickoff: hoursTo(f.kickoff),
+      spark: [],
+    }))
     // Sorted by PROBABILITY POINTS, not by the percentage the odds fell.
     // ⚠️ Those rank differently and the difference is not cosmetic: 11.87 →
     //    10.20 is a 14.1% drop in the odds and only 1.4pp of probability,
@@ -112,11 +203,11 @@ export function movers(fixtures: ScoutFixture[]): Mover[] {
  *  rather than hiding them. */
 export interface MoversMeta {
   shown: number
-  /** Fixtures that were pre-match and priced, before the filters ran. */
+  /** Games that were pre-match and priced, before the filters ran. */
   candidates: number
   droppedForVolume: number
   droppedForSmallMove: number
-  /** How many pre-match fixtures Gamma published no 24h change for. Worth
+  /** How many pre-match games Gamma published no 24h change for. Worth
    *  showing: it is a third of the board and it is absence, not stillness. */
   noChangePublished: number
   minVolumeUsd: number
@@ -124,8 +215,8 @@ export interface MoversMeta {
   minMovePp: number
 }
 
-export function moversMeta(fixtures: ScoutFixture[], shown: number): MoversMeta {
-  const pre = fixtures.filter((f) => {
+export function moversMeta(candidates: MoverCandidate[], shown: number): MoversMeta {
+  const pre = candidates.filter((f) => {
     const h = hoursTo(f.kickoff)
     return !f.live && !f.finished && h != null && h > 0
   })
@@ -181,7 +272,7 @@ async function pathOf(tokenId: string): Promise<number[]> {
  *  Cheap enough to do for the whole board, which is why it is not limited to
  *  the top few. Behind the shared Data Cache so a page load pays for it once
  *  across every serverless instance. */
-async function fetchSparks(rows: Mover[]): Promise<Mover[]> {
+async function fetchSparks(rows: MoverRow[]): Promise<MoverRow[]> {
   const paths = await Promise.all(
     rows.map((m) => (m.move.tokenId ? pathOf(m.move.tokenId) : Promise.resolve([])))
   )
@@ -190,7 +281,7 @@ async function fetchSparks(rows: Mover[]): Promise<Mover[]> {
 
 export const withSparklines = unstable_cache(
   fetchSparks,
-  ['movers-sparklines-v1'],
+  ['movers-sparklines-v2'],
   // Longer than the board\'s own 45s: a 24-hour line does not visibly change
   // in a minute, and this is the only part of the page that costs requests.
   { revalidate: 300, tags: ['movers-sparklines'] }

@@ -16,9 +16,16 @@ import { useEffect, useState } from 'react'
 import { AppShell } from './AppShell'
 import { VenueLogo } from './VenueLogo'
 import { money, odds, paysMorePct } from './boardParts'
+import { BriefCard } from '../game/[slug]/Insights'
 import { kickoffText, priceText, useOddsFormat, type OddsFormat } from '../lib/display'
 import { SPORT_META, type SportKey } from '../lib/sportsMeta'
-import type { GameTeam, PmMarketGroup, RecentGame, SportGamePage } from '../lib/sportGameTypes'
+import type {
+  GameTeam,
+  PmMarketGroup,
+  PricePoint,
+  RecentGame,
+  SportGamePage,
+} from '../lib/sportGameTypes'
 import { VENUE_NAME, type Venue } from '../lib/venues'
 import { useSession } from '../lib/useSession'
 import { useWatchlist } from '../lib/useWatchlist'
@@ -27,6 +34,7 @@ const REFRESH_MS = 60_000
 
 const TABS = [
   ['overview', 'Overview'],
+  ['game', 'Game'],
   ['markets', 'Markets'],
   ['stats', 'Stats'],
 ] as const
@@ -186,7 +194,7 @@ function Moneyline({ g, f }: { g: SportGamePage; f: OddsFormat }) {
 function Elsewhere({ g, f }: { g: SportGamePage; f: OddsFormat }) {
   const sb = g.sportsbook
   const pr = g.predictor
-  if (!sb && !pr) return null
+  if (!sb && !pr && !g.ats.home && !g.ats.away && !g.series) return null
   const market = (key: 'home' | 'away') => g.board?.best[key]?.ask ?? null
   return (
     <section className="gc-section">
@@ -214,6 +222,28 @@ function Elsewhere({ g, f }: { g: SportGamePage; f: OddsFormat }) {
               {sb.overUnder != null && (
                 <span>
                   Total <b className="np-num">{sb.overUnder}</b>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        {(g.ats.home || g.ats.away || g.series) && (
+          <div className="sg-else-card">
+            <span className="sg-else-k">Against the spread</span>
+            <div className="sg-else-rows">
+              {g.ats.away && (
+                <span>
+                  {g.away.short} <b className="np-num">{g.ats.away}</b>
+                </span>
+              )}
+              {g.ats.home && (
+                <span>
+                  {g.home.short} <b className="np-num">{g.ats.home}</b>
+                </span>
+              )}
+              {g.series && (
+                <span>
+                  Season series <b>{g.series}</b>
                 </span>
               )}
             </div>
@@ -288,6 +318,144 @@ function TwoColumns({
         ))}
       </div>
     </section>
+  )
+}
+
+// ── charts ───────────────────────────────────────────────────────────────────
+
+/** A small line chart. Two lines are told apart by weight and dash, not by
+ *  colour — the boards carry no colour code, and neither does this. */
+function LineChart({
+  lines,
+  fixed,
+  caption,
+}: {
+  lines: { label: string; ys: number[]; dashed?: boolean }[]
+  /** A fixed 0-100 axis (a win chance) instead of one fitted to the data. */
+  fixed?: boolean
+  caption: React.ReactNode
+}) {
+  const W = 960
+  const H = 220
+  const PAD = 40
+  const all = lines.flatMap((l) => l.ys)
+  if (all.length < 2) return null
+  let lo = fixed ? 0 : Math.min(...all)
+  let hi = fixed ? 100 : Math.max(...all)
+  if (!fixed) {
+    const pad = Math.max(2, (hi - lo) * 0.15)
+    lo = Math.max(0, lo - pad)
+    hi = Math.min(100, hi + pad)
+  }
+  const span = hi - lo || 1
+  const y = (v: number) => 8 + (1 - (v - lo) / span) * (H - 24)
+  const ticks = fixed ? [0, 50, 100] : [lo, (lo + hi) / 2, hi]
+  return (
+    <div className="gc-chart">
+      <svg viewBox={`0 0 ${W} ${H}`} className="gc-chart-svg" role="img">
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={PAD} y1={y(t)} x2={W - 6} y2={y(t)} className="gc-chart-grid" />
+            <text x={2} y={y(t) + 4} className="gc-chart-tick">
+              {Math.round(t)}%
+            </text>
+          </g>
+        ))}
+        {lines.map((l) => {
+          if (l.ys.length < 2) return null
+          const step = (W - PAD - 8) / (l.ys.length - 1)
+          const d = l.ys.map((v, i) => `${i ? 'L' : 'M'}${(PAD + i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+          return (
+            <path
+              key={l.label}
+              d={d}
+              fill="none"
+              className={`sg-line${l.dashed ? ' is-dashed' : ''}`}
+            />
+          )
+        })}
+      </svg>
+      <p className="gc-chart-note">{caption}</p>
+    </div>
+  )
+}
+
+/** Polymarket's moneyline over the last three days, as a chance. */
+function PriceHistory({ g, f }: { g: SportGamePage; f: OddsFormat }) {
+  const pts = (h: PricePoint[]) => h.map((x) => x.p * 100)
+  const away = pts(g.history.away)
+  const home = pts(g.history.home)
+  if (away.length < 2 && home.length < 2) return null
+  const last = (h: PricePoint[]) => (h.length ? h[h.length - 1].p : null)
+  return (
+    <section className="gc-section">
+      <h2 className="gc-h2">Price · last 3 days</h2>
+      <LineChart
+        lines={[
+          { label: g.away.short, ys: away },
+          { label: g.home.short, ys: home, dashed: true },
+        ]}
+        caption={
+          <>
+            <VenueLogo venue="polymarket" size={12} /> Polymarket&apos;s price, read as a chance.
+            <span className="sg-key">
+              <i className="sg-key-solid" /> {g.away.short} {odds(last(g.history.away), f)}
+            </span>
+            <span className="sg-key">
+              <i className="sg-key-dash" /> {g.home.short} {odds(last(g.history.home), f)}
+            </span>
+          </>
+        }
+      />
+    </section>
+  )
+}
+
+/** Once the game is on: ESPN's win chance through it, and every score. */
+function GameTab({ g }: { g: SportGamePage }) {
+  if (g.state === 'pre') {
+    return (
+      <p className="gc-quiet sg-mkts-lede">
+        The game starts {kickoffText(new Date(g.start))}. The score by period, every score and the
+        win chance through the game appear here once it does.
+      </p>
+    )
+  }
+  return (
+    <>
+      {g.winProb.length > 1 && (
+        <section className="gc-section">
+          <h2 className="gc-h2">Win chance through the game</h2>
+          <LineChart
+            fixed
+            lines={[{ label: g.home.short, ys: g.winProb }]}
+            caption={<>ESPN&apos;s chance that {g.home.short} win, play by play.</>}
+          />
+        </section>
+      )}
+      {g.scoring.length > 0 ? (
+        <section className="gc-section">
+          <h2 className="gc-h2">Every score</h2>
+          <ul className="sg-plays">
+            {g.scoring.map((p, i) => (
+              <li key={i}>
+                <span className="sg-play-when np-num">
+                  {p.period}
+                  {p.clock ? ` ${p.clock}` : ''}
+                </span>
+                <span className="sg-play-team">{p.team}</span>
+                <span className="sg-play-text">{p.text}</span>
+                <span className="sg-play-score np-num">
+                  {p.away ?? ''}–{p.home ?? ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        g.winProb.length <= 1 && <p className="gc-quiet">ESPN has no play-by-play for this game yet.</p>
+      )}
+    </>
   )
 }
 
@@ -408,6 +576,7 @@ export function SportGameView({ sport, id }: { sport: SportKey; id: string }) {
                   onClick={() => pick(k)}
                 >
                   {label}
+                  {k === 'game' && g.state === 'in' && <i className="gcx-tab-dot" aria-label="live" />}
                   {k === 'markets' && g.markets.length > 0 && (
                     <span className="sg-count np-num">
                       {g.markets.reduce((s, x) => s + x.markets.length, 0)}
@@ -419,7 +588,11 @@ export function SportGameView({ sport, id }: { sport: SportKey; id: string }) {
 
             {tab === 'overview' && (
               <>
+                {g.state !== 'post' && (
+                  <BriefCard slug={`${sport}-${id}`} src={`/api/sports/${sport}/${id}/brief`} us />
+                )}
                 <Moneyline g={g} f={f} />
+                <PriceHistory g={g} f={f} />
                 <Elsewhere g={g} f={f} />
                 <TwoColumns title="Last five" g={g} render={(k) => <FormList games={g.recent[k]} />} />
                 {(g.injuries.home.length > 0 || g.injuries.away.length > 0) && (
@@ -451,6 +624,8 @@ export function SportGameView({ sport, id }: { sport: SportKey; id: string }) {
               </>
             )}
 
+            {tab === 'game' && <GameTab g={g} />}
+
             {tab === 'markets' &&
               (g.markets.length ? (
                 <>
@@ -470,6 +645,35 @@ export function SportGameView({ sport, id }: { sport: SportKey; id: string }) {
 
             {tab === 'stats' && (
               <>
+                {g.standings.map((grp) => (
+                  <section key={grp.title} className="gc-section">
+                    <h2 className="gc-h2">{grp.title || 'Standings'}</h2>
+                    <div className="gcx-scroll">
+                      <table className="sg-table">
+                        <thead>
+                          <tr>
+                            <th />
+                            {grp.cols.map((c) => (
+                              <th key={c}>{c}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {grp.rows.map((r) => (
+                            <tr key={r.team} className={r.side ? 'is-mark' : ''}>
+                              <td>{r.team}</td>
+                              {r.cells.map((c, i) => (
+                                <td key={i} className="np-num">
+                                  {c}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                ))}
                 {g.stats.length > 0 && (
                   <section className="gc-section">
                     <h2 className="gc-h2">{g.state === 'pre' ? 'Season so far' : 'This game'}</h2>
@@ -509,7 +713,7 @@ export function SportGameView({ sport, id }: { sport: SportKey; id: string }) {
                     )}
                   />
                 )}
-                {!g.stats.length && !g.leaders.home.length && !g.leaders.away.length && (
+                {!g.stats.length && !g.standings.length && !g.leaders.home.length && !g.leaders.away.length && (
                   <p className="gc-quiet">ESPN has no numbers for this game yet.</p>
                 )}
               </>

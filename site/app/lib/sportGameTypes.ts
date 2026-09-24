@@ -58,6 +58,28 @@ export interface PmMarketGroup {
   markets: PmMarketRow[]
 }
 
+export interface StandingsGroup {
+  title: string
+  cols: string[]
+  rows: { team: string; side: 'home' | 'away' | null; cells: string[] }[]
+}
+
+export interface ScoringPlay {
+  /** "Q2", "Top 3rd", "P1" — the sport's own name for the moment. */
+  period: string
+  clock: string | null
+  team: string | null
+  text: string
+  away: number | null
+  home: number | null
+}
+
+/** A price over time: seconds since epoch, probability. */
+export interface PricePoint {
+  t: number
+  p: number
+}
+
 export interface SportGamePage {
   sport: SportKey
   id: string
@@ -88,6 +110,18 @@ export interface SportGamePage {
   stats: StatLine[]
   /** Every other Polymarket market on this game. */
   markets: PmMarketGroup[]
+  /** Record against the spread, where ESPN has one ("3-1-0"). */
+  ats: { home: string | null; away: string | null }
+  /** "WSH wins series 2-1" — baseball, basketball and hockey. */
+  series: string | null
+  /** The division or conference each team plays in. */
+  standings: StandingsGroup[]
+  /** Once the game has started: every score, in order. */
+  scoring: ScoringPlay[]
+  /** ESPN's home win chance through the game, in percent. Empty before it. */
+  winProb: number[]
+  /** Polymarket's moneyline over the last three days, both sides. */
+  history: { home: PricePoint[]; away: PricePoint[] }
   pmUrl: string | null
   kalshiUrl: string | null
   generatedAt: string

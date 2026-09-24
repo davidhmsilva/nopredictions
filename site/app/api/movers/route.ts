@@ -1,21 +1,41 @@
-/** The dropping-odds board.
+/** The dropping-odds board, every sport.
  *
- *  Shares the board cache with /api/scout and /api/pulse, so a visit here pays
- *  for no sweep of its own — and the movement itself is already in those bytes
+ *  Shares the board caches with /api/scout and /api/sports, so a visit here
+ *  pays for no sweep of its own — and the movement itself is already in those bytes
  *  (Gamma's `oneDayPriceChange`), so there is no second source to reach for.
  */
 
 import { NextResponse } from 'next/server'
 import { getBoard } from '../../lib/scoutCache'
-import { moverBoard, moversMeta, withSparklines } from '../../lib/movers'
+import { getSportBoard } from '../../lib/sports'
+import { SPORT_KEYS } from '../../lib/sportsMeta'
+import {
+  moverBoard,
+  moversMeta,
+  soccerCandidates,
+  sportCandidates,
+  withSparklines,
+  type MoverCandidate,
+} from '../../lib/movers'
 
 export const revalidate = 0
 export const dynamic = 'force-dynamic'
+// Seven boards when every cache is cold.
+export const maxDuration = 30
 
 export async function GET() {
   try {
-    const board = await getBoard()
-    const { funded, thin } = moverBoard(board.fixtures)
+    // Every board the site has. A sport that fails to load costs that sport's
+    // movers, not the page.
+    const [board, ...sports] = await Promise.all([
+      getBoard(),
+      ...SPORT_KEYS.map((k) => getSportBoard(k).catch(() => null)),
+    ])
+    const candidates: MoverCandidate[] = [
+      ...soccerCandidates(board.fixtures),
+      ...sports.flatMap((b, i) => (b ? sportCandidates(SPORT_KEYS[i], b) : [])),
+    ]
+    const { funded, thin } = moverBoard(candidates)
     // Both boards in one call, so the two lists share the cache entry rather
     // than racing each other for the same tokens.
     const withPaths = await withSparklines([...funded, ...thin])
@@ -23,7 +43,7 @@ export async function GET() {
       ok: true,
       funded: withPaths.slice(0, funded.length),
       thin: withPaths.slice(funded.length),
-      meta: moversMeta(board.fixtures, funded.length + thin.length),
+      meta: moversMeta(candidates, funded.length + thin.length),
       generatedAt: board.generatedAt,
     })
   } catch (e) {

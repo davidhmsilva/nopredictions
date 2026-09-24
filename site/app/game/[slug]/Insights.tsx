@@ -15,14 +15,16 @@ import { priceText, timeText, useOddsFormat } from '../../lib/display'
 
 // ── the brief ────────────────────────────────────────────────────────────────
 
-export function BriefCard({ slug }: { slug: string }) {
+/** `src` points it at another brief (the US Game Center's); `us` words the
+ *  by-line for a sport that has no line-ups to wait for. */
+export function BriefCard({ slug, src, us }: { slug: string; src?: string; us?: boolean }) {
   const [brief, setBrief] = useState<Brief | null>(null)
   const [reason, setReason] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let live = true
-    fetch(`/api/game/brief?slug=${encodeURIComponent(slug)}`)
+    fetch(src ?? `/api/game/brief?slug=${encodeURIComponent(slug)}`)
       .then((r) => r.json())
       .then((b) => {
         if (!live) return
@@ -34,7 +36,7 @@ export function BriefCard({ slug }: { slug: string }) {
     return () => {
       live = false
     }
-  }, [slug])
+  }, [slug, src])
 
   if (!loading && !brief && !reason) return null
 
@@ -44,7 +46,17 @@ export function BriefCard({ slug }: { slug: string }) {
         <span className="gcx-brief-tag">Brief</span>
         <span className="gcx-brief-by">
           {brief
-            ? `Written by AI from the numbers on this page · ${timeText(new Date(brief.writtenAt))} · ${brief.inPlay ? 'after kick-off, so no prices — how the sides arrived' : brief.lineups ? 'line-ups in' : 'before line-ups'}`
+            ? `Written by AI from the numbers on this page · ${timeText(new Date(brief.writtenAt))} · ${
+                us
+                  ? brief.inPlay
+                    ? 'after the start, so no prices — how the sides arrived'
+                    : 'before the start'
+                  : brief.inPlay
+                    ? 'after kick-off, so no prices — how the sides arrived'
+                    : brief.lineups
+                      ? 'line-ups in'
+                      : 'before line-ups'
+              }`
             : 'Written by AI from the numbers on this page'}
         </span>
       </div>

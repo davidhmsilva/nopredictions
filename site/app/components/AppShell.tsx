@@ -58,9 +58,10 @@ function NavSearch({
   const router = useRouter()
   const [q, setQ] = useState('')
 
-  /** A pasted Polymarket link goes straight to that fixture; anything else is a
-   *  team search on the board. Those are the only two things anyone types here,
-   *  and guessing wrong just lands them on the board with the text in the box. */
+  /** A pasted Polymarket soccer link goes straight to that fixture; anything
+   *  else — a team in any sport, or a link to a US game — is a search on the
+   *  home board, which holds every sport and matches full names, short names,
+   *  abbreviations and each game's exchange links. */
   function submit(e: FormEvent) {
     e.preventDefault()
     const v = q.trim()
@@ -68,7 +69,13 @@ function NavSearch({
     const slug = v.match(
       /polymarket\.com\/(?:[a-z]{2}\/)?(?:event|sports\/[^/]+)\/([^/?#]+)/
     )?.[1]
-    router.push(slug ? `/game/${slug}` : `/soccer?q=${encodeURIComponent(v)}`)
+    // US games on Polymarket are slugged by league ("nfl-nyg-la-…"); the
+    // soccer Game Center cannot open those, the board search can.
+    const usSlug = slug && /^(nfl|cfb|mlb|nba|nhl|wnba)-/.test(slug)
+    const term = usSlug ? (slug as string) : v
+    router.push(slug && !usSlug ? `/game/${slug}` : `/?q=${encodeURIComponent(term)}`)
+    // Already on the home page, a push to "/?q=" does not remount it; tell it.
+    if (!(slug && !usSlug)) window.dispatchEvent(new CustomEvent('np-search', { detail: term }))
     onDone?.()
   }
 
@@ -78,7 +85,7 @@ function NavSearch({
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search a soccer team, or paste a Polymarket link…"
+        placeholder="Search a team, or paste a Polymarket link…"
         aria-label="Search fixtures"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus={autoFocus}
