@@ -1,0 +1,12 @@
+# soccer_live_recorder.py --once — every minute
+[Unit]
+Description=NOPREDICTIONS timer soccer-live
+
+[Timer]
+OnCalendar=*:*:00
+Persistent=true
+AccuracySec=1s
+Unit=np-job@soccer-live.service
+
+[Install]
+WantedBy=timers.target

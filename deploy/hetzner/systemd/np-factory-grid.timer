@@ -1,0 +1,12 @@
+# factory grid --refresh --register — was --daily 06:00 on a UTC+2 Mac = 04:00 UTC
+[Unit]
+Description=NOPREDICTIONS timer factory-grid
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+AccuracySec=1s
+Unit=np-job@factory-grid.service
+
+[Install]
+WantedBy=timers.target

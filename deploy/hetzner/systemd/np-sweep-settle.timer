@@ -1,0 +1,12 @@
+# settled_sweep_observer.py --settle — was cron_guard --gap 25
+[Unit]
+Description=NOPREDICTIONS timer sweep-settle
+
+[Timer]
+OnCalendar=*:15/30
+Persistent=true
+AccuracySec=1s
+Unit=np-job@sweep-settle.service
+
+[Install]
+WantedBy=timers.target

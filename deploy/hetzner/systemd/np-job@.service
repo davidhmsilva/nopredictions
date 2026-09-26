@@ -1,0 +1,17 @@
+# One run of a periodic NOPREDICTIONS job. Started by its np-<job>.timer; never
+# started twice at once, so a slow run delays the next tick instead of stacking.
+[Unit]
+Description=NOPREDICTIONS job %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=np
+Group=np
+ExecStart=/opt/nopredictions/deploy/hetzner/np-job.sh %i
+# The recorders and factory run every minute: they get less CPU than the daemons,
+# which are the ones watching a live match.
+Nice=5
+# Longest honest job is stage-a (~2 min) and factory-grid; 2h is a hang, not work.
+TimeoutStartSec=2h

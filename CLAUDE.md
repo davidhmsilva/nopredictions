@@ -61,6 +61,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── .env                           ← DB connection string + API keys (gitignored)
 │   └── tests/
 │       └── test_stage_a_end_to_end.py
+├── deploy/hetzner/                    ← VPS: systemd units + np-job.sh + MIGRATION.md ✅ NEW
 ├── db/
 │   ├── 001_schema.sql                 ← deployed ✅
 │   ├── 002_seeds.sql                  ← deployed ✅
@@ -1615,6 +1616,17 @@ the first Git build ran at the repo root, found no `package.json` and failed
 (`missing_pages_app`). A failed deploy never replaces the live one.
 `cd site && vercel --prod --yes` still works for a manual deploy.
 Web Analytics is on too: `<Analytics />` in `app/layout.tsx`.
+
+## Off the Mac — a Hetzner VPS under systemd (2026-09-26, prepared, not cut over)
+
+`deploy/hetzner/`: `np-job.sh` holds every command the Mac crontab and launchd
+ran (same flags, `AF_COUNTER_NAME`s and logs); `systemd/` has two templates
+(`np-daemon@` for pressure + settled-sweep, `np-job@` oneshot) and 13 timers.
+`cron_guard.sh` is not used there: `Persistent=true` covers missed runs and a
+oneshot cannot overlap itself. Daily times are written in UTC (stage-a 05:00,
+factory grid 04:00 — the Mac's 07:00/06:00 at UTC+2). Steps, the cut-over order
+and rollback: `deploy/hetzner/MIGRATION.md`. ⚠️ Never both machines at once, and
+the server's `.env` omits `POLYMARKET_PRIVATE_KEY`.
 
 ## The anon key could TRUNCATE the research — closed 2026-09-08
 
