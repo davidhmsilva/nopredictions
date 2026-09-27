@@ -54,6 +54,8 @@ case "$job" in
       >> stage_a_cron.log 2>&1 ;;
   nfl-agent)
     exec python nfl_agent.py --once >> nfl_agent.log 2>&1 ;;
+  unl-agent)
+    exec python unl_agent.py --once >> unl_agent.log 2>&1 ;;
   nfl-live)
     exec python nfl_live_recorder.py --once >> nfl_live_recorder.log 2>&1 ;;
   factory-run)

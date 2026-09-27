@@ -1,6 +1,6 @@
 # Migração Mac → Hetzner
 
-Objetivo: tudo o que hoje corre no Mac (2 daemons no launchd + 13 linhas de cron)
+Objetivo: tudo o que hoje corre no Mac (2 daemons no launchd + 14 linhas de cron)
 passa a correr num VPS sempre ligado. O site continua no Vercel e a base de dados
 no Supabase; só muda a máquina que corre os agentes e os gravadores.
 
@@ -20,6 +20,7 @@ dos passos abaixo existe por causa disto.
 | `np-sweep-settle.timer` | `settled_sweep_observer.py --settle`, :15 e :45 | cron_guard --gap 25 |
 | `np-stage-a.timer` | Football-Data, 05:00 UTC | --daily 07:00 (hora do Mac, UTC+2) |
 | `np-nfl-agent.timer` | `nfl_agent.py --once`, 5 em 5 min | */5 |
+| `np-unl-agent.timer` | `unl_agent.py --once` (Nations League), 5 em 5 min | */5 |
 | `np-nfl-live.timer` | `nfl_live_recorder.py --once`, cada minuto | * |
 | `np-factory-run.timer` | `factory_cli.py run`, cada minuto | * |
 | `np-factory-settle.timer` | `factory_cli.py settle`, 10 em 10 min | */10 |
@@ -180,7 +181,7 @@ systemctl enable --now $(cd /etc/systemd/system && ls np-*.timer)
 ## 7. Verificar (primeira hora)
 
 ```bash
-systemctl list-timers 'np-*'                 # 13 timers com próxima execução
+systemctl list-timers 'np-*'                 # 14 timers com próxima execução
 systemctl status 'np-daemon@*'               # os 2 daemons active (running)
 systemctl --failed                           # vazio
 tail -f /opt/nopredictions/agent/pressure_agent.log

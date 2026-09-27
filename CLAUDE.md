@@ -1623,7 +1623,7 @@ Web Analytics is on too: `<Analytics />` in `app/layout.tsx`.
 
 `deploy/hetzner/`: `np-job.sh` holds every command the Mac crontab and launchd
 ran (same flags, `AF_COUNTER_NAME`s and logs); `systemd/` has two templates
-(`np-daemon@` for pressure + settled-sweep, `np-job@` oneshot) and 13 timers.
+(`np-daemon@` for pressure + settled-sweep, `np-job@` oneshot) and 14 timers.
 `cron_guard.sh` is not used there: `Persistent=true` covers missed runs and a
 oneshot cannot overlap itself. Daily times are written in UTC (stage-a 05:00,
 factory grid 04:00 — the Mac's 07:00/06:00 at UTC+2). Steps, the cut-over order
