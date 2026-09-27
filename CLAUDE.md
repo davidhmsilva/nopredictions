@@ -75,6 +75,8 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── dc_scanner.py                  ← Strategy 4: DC Model Pre-Match scanner ✅
 │   ├── elo_model.py                   ← Strategy 3: ELO+Poisson model ✅
 │   ├── nba_scanner.py                 ← Strategy 5: NBA Elo Pre-Match scanner ✅
+│   ├── unl_agent.py                   ← Nations League Every Game (paper) ✅ NEW
+│   ├── soccer_line_model.py           ← Dixon-Coles fitted to sharp 1X2 + total ✅ NEW
 │   ├── espn_stats.py                  ← free live stats, no key — fallback ✅ NEW
 │   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
@@ -2211,6 +2213,52 @@ every market of every live game from Gamma, the CLOB book of the six main
 families via one `POST /books`, and ESPN's scoreboard with per-play win
 probability (`situation.lastPlay.probability`). Files, not the DB (quota):
 `agent/data/nfl_live/YYYY-MM-DD.jsonl.gz`, one gzip member per minute.
+
+## Nations League Every Game — the NFL agent on soccer (paper, 2026-09-27)
+
+By the user's decision: every UEFA Nations League match Polymarket lists gets
+exactly one bet, of the agent's choosing. Same structure as
+[NFL Every Game](#nfl-every-game--one-bet-on-every-nfl-game-paper-2026-09-13):
+EDGE (EV ≥ 1.5% exact / 3% model, from 24h out, fresh sharp snapshot) and FORCED
+(inside 40 min with no bet, the best EV on the board), 1u flat, never pooled.
+Strategy **"Nations League Every Game"** (created on the first real run),
+hypothesis `H-UNL-SHARP`, table `unl_candidates` (db/058, applied 2026-09-27).
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python unl_agent.py --once --dry-run   # the board, nothing written, no credits spent
+python unl_agent.py --once             # what cron runs: bet, read closes, settle
+python unl_agent.py --report
+python -m pytest tests/test_unl_agent.py -q
+# crontab:
+*/5 * * * * cd $WORKDIR/agent && $PYTHON unl_agent.py --once >> $WORKDIR/agent/unl_agent.log 2>&1
+```
+
+- **Candidates:** the three 1X2 questions (Yes AND No on each), every goals
+  line, every half-line handicap, BTTS — from the main event and its
+  `"- More Markets"` sibling only, filtered on `sportsMarketType`.
+- **Fair value:** de-vigged Pinnacle 1X2 / main total / main handicap through
+  The Odds API (`soccer_uefa_nations_league`, 3 credits a snapshot, the SAME key
+  as the NFL agent, same rationing). Alternates come from `soccer_line_model.py`:
+  Dixon-Coles Poisson with λ_h, λ_a, ρ solved per match to reproduce the 1X2 AND
+  the main total exactly (pure Python, no scipy). Asian quarter totals (2.25)
+  never anchor it — their price is not P(over). Haircuts: totals 0.75pp +
+  0.75/goal (cap 2.5), handicaps 1.0 + 1.0/goal (cap 3), BTTS 1.5; nothing past
+  2 goals from the sharp line.
+- **Names:** national teams fold through `unl_agent.canon` (Türkiye/Turkey,
+  Czechia/Czech Republic…) and match only on equal keys. Home/away comes from
+  the odds feed; PM's title order is a label, never a side.
+- **Settlement:** the CLOB winner flag; provisional grading from ESPN
+  `uefa.nations`, `STATUS_FINAL`/`STATUS_FULL_TIME` only. `self_settling`, so
+  `resolver.py` skips it. The report quotes `pm_clv` (price against price),
+  not the NFL agent's model-vs-ask `clv`.
+- ⚠️ Without `THE_ODDS_API_KEY` credits it can still bet every match, FORCED
+  at PM's own mid — which by construction has negative EV at the ask.
+- ⚠️ The Nations League tag on Gamma was not verified live when this was
+  written (the build container could not reach Polymarket). `is_unl` accepts
+  any tag/series/slug containing "nations league" and refuses CONCACAF; the
+  first `--dry-run` log line prints how many soccer events it scanned and how
+  many it kept — read it.
 
 ## Strategy factory — thousands of specs, out of sample, paper bots (2026-09-13)
 
