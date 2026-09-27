@@ -20,7 +20,7 @@ signal. Treat any positive result as variance until proven otherwise.
 1. **Formulate a testable hypothesis** (not a vibe). State:
    - the **claim** (e.g. "PM over-prices home favourites in the 70'–85' window");
    - a **mechanism** (why would this inefficiency exist and persist?);
-   - a **falsifiable prediction** with a number (e.g. "fading them yields >+3% CLV vs Pinnacle close over N≥200");
+   - a **falsifiable prediction** with a number (e.g. "fading them yields >+3% CLV vs Pinnacle close, with N sized so the CI resolves ±3pp");
    - the **decision rule** that would act on it.
    Reject the obvious unless the data confirms it (CLAUDE.md rule #6).
 
@@ -32,12 +32,12 @@ signal. Treat any positive result as variance until proven otherwise.
    - Split by time; fit/choose on the past, evaluate on the held-out future.
    - For model changes (e.g. DC params, l2_reg), retrain on data up to T, score
      matches after T against actual outcomes AND closing lines, roll forward.
-   - **CLV is the primary metric**, not yield. Positive yield + flat CLV = luck.
+   - **CLV is a fast estimator, not the judge (rule 5).** Against a SHARP close (Pinnacle pre-match), positive yield + zero/negative CLV is *probably* variance at small n. Where there is no sharp close (in-play, post-whistle, PM's own thin close, structural edges like rebates or settlement rules) CLV does not apply and net yield with a CI is the only evidence. Entry and close on the same side of the book.
 
 4. **Quantify honestly** (statistical rigor):
    - Report a **confidence interval**, not a point estimate. Bootstrap for skewed
      bet P&L.
-   - **Minimum 200 selections** before any conclusion. Below that, "insufficient data".
+   - **Size the sample to the claim (rule 4).** n ≈ (1.96·sd/effect)². At ~2.0 odds a ±2pp yield needs ~10,000 bets and 200 resolve only ±14pp; CLV needs tens. Below the n the claim needs, the verdict is "insufficient", whatever the sign.
    - Subgroup claims need CIs + a "how many outcome-flips reverse this?" check.
      Slicing N bets into K buckets and pointing at extremes is p-hacking.
    - Check **calibration**: if the model says 0.51 and reality is 0.29, the "edge"
@@ -55,8 +55,9 @@ signal. Treat any positive result as variance until proven otherwise.
    evidence (CI, CLV, n).
 
 ## Promotion bar
-A hypothesis becomes a live strategy only with **consistently positive CLV over
-200+ out-of-sample selections**. Nothing currently clears it. Until then, paper only.
+A hypothesis becomes a live strategy only when the metric that applies to it
+(CLV against a sharp close, else net yield) has an out-of-sample CI clear of zero
+at a sample sized for the effect (rule 4). Nothing currently clears it. Until then, paper only.
 
 ## Connects to
 `np-edge-eval` (the metrics), `np-edge-scan` (sharp validation), `np-risk` (sizing

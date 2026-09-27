@@ -33,8 +33,8 @@ report losses plainly, never dress circular model-CLV up as real CLV.
    - Lead with the real, signed number — including when it's negative.
    - Keep live (real money) and paper separate; don't blend them into a flattering total.
    - Real Pinnacle CLV only. State that it covers ~20% of trades.
-   - No "edge confirmed" claims — edge is unproven until positive CLV over 200+
-     selections. Frame as a live experiment, not a tipster record.
+   - No "edge confirmed" claims — edge is unproven until the metric that applies
+     (CLV vs a sharp close, else net yield) has a CI clear of zero at an adequate n. Frame as a live experiment, not a tipster record.
 
 ## Optional richer artefacts
 - For a polished spreadsheet (charts/pivots) use the `xlsx` skill on the digest data.

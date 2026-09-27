@@ -1345,7 +1345,8 @@ form above. Replace `notYet` in `AppShell.tsx` and nothing else changes.
 
 ⚠️ **The Lab's verdict is computed from yield and p-value alone.** "Draws are
 underpriced in Serie B" returns EDGE FOUND on +4.66% yield with CLV −0.07%,
-which rule 5 of this file calls luck. The results panel now says so when the
+which rule 5 of this file reads as probably variance (the Lab's CLV is
+against the Pinnacle close, so rule 5 applies there). The results panel now says so when the
 two arms disagree; the verdict logic itself is untouched.
 
 ## The evening the key ran out — ESPN as a second source (2026-09-06)
@@ -2125,8 +2126,19 @@ carry no haircut and so were never inflated, it is **−0.31%** with line moveme
 
 ⚠️ `--report`'s own caption says this number "says whether EDGE bets beat the
 line (tens of bets suffice)". It cannot: it does not measure the line. Fixing it
-means reading PM's own closing ask for the same token (`pm_clv` already does) and
-applying the haircut to `fair_close`; until then **quote `pm_clv`, never `clv`.**
+means reading PM's own closing ask for the same token and applying the haircut
+to `fair_close`; until then **quote `pm_clv`, never `clv`.**
+
+⚠️ **`pm_clv` was biased too, fixed 2026-09-27.** It was the close **mid** over
+the entry **ask**, so a price that never moved read −half a spread (≈ −1% at
+these prices). The "PM's own price moved against them, 4/23" row above is that
+artefact, not a move. From now on the close is the CLOB **ask** (`pm_clv_source
+= 'clob_ask_vs_ask'`); the 29 earlier rows were restated as close mid / entry
+mid from the chosen `nfl_candidates` row (`'mid_vs_mid_repair'`), before-state
+in `reports/nfl_pm_clv_repair_2026-09-27.json`. Restated: **19 of 29 never
+moved at all**, 8 moved our way, 2 against; mean **+1.0%** (FORCED +0.17%,
+EDGE 3/3 positive, +8.2%). So FORCED's CLV is flat, not negative, and on a
+book this thin that says little either way. `--report` now prints `pm_clv`.
 
 **What the board did answer.** `nfl_candidates` is the well-powered arm this file
 predicted would settle it in days, and a week in it has: **16,635 rows · 2,340
@@ -2584,9 +2596,26 @@ We have both Pinnacle opening and closing odds, so CLV is measurable now:
 
 - **Entry price** = Pinnacle opening odds (PSH/PSD/PSA, stored as "Pinnacle (legacy)")
 - **Benchmark** = Pinnacle closing odds (PSCH/PSCD/PSCA, stored as "Pinnacle (closing)")
-- **CLV** = (entry odds / closing odds) − 1
-- Consistently positive CLV on a defined set of events = real edge
-- Positive ROI with negative CLV = luck. Always measure both.
+- **CLV** = (entry odds / de-vigged closing odds) − 1
+
+**What CLV is, and what it is not (revised 2026-09-27).** CLV is an
+*estimator* of edge, not a definition of it. It rests on one assumption: the
+closing price is the best available estimate of the true probability. Where
+that holds, expected ROI ≈ CLV − costs, and CLV converges in tens of bets
+where realised ROI needs thousands, so with a small sample it is the better
+number to read. With a large enough sample realised ROI, net of costs, is the
+ground truth, and CLV is only the shortcut to it.
+
+The assumption holds for Pinnacle pre-match on liquid leagues, and it is
+well supported there, not proven. It fails, and CLV says nothing, when:
+
+| case | why | here |
+|---|---|---|
+| the close is not sharp | CLV against a thin close measures that book, not the truth | Polymarket's own close; our data puts PM's ask ~4pp above fair |
+| there is no close | an in-play or post-whistle entry has no closing line | s16/s17/s18, the settled-market sweep |
+| the edge is structural | maker rebates, liquidity rewards, settlement rules, fees pay without the price moving | the NFL "who pays" map |
+| the close is biased | favourite-longshot, public money in less efficient books | PM, Kalshi |
+| entry and close are measured on different sides of the book | ask at entry vs mid at close is negative by half the spread before anything happens | the NFL `pm_clv` until 2026-09-27 |
 
 ---
 
@@ -2594,24 +2623,46 @@ We have both Pinnacle opening and closing odds, so CLV is measurable now:
 
 | Metric | Why it matters |
 |---|---|
-| **CLV (Closing Line Value)** | Gold standard. Beat the closing line = real edge. |
+| **CLV against a sharp close** | Fastest estimator of pre-match edge, *where the close is sharp*. Entry and close on the same side of the book. |
 | **Pinnacle closing as benchmark** | Sharpest available closing line in our dataset — primary fair-value oracle. |
 | **Betfair Exchange closing as benchmark** | Cross-check against the second-sharpest market (~13k matches). |
 | **Polymarket spread vs Betfair/Pinnacle implied** | Direct edge signal — where Polymarket diverges from sharp consensus. |
-| **Yield %** | Profit / total staked. More stable than ROI on small samples. |
-| **p-value vs ROI=0** | Require p < 0.05 before promoting. |
-| **Sample size** | Minimum 200 selections before any conclusion. |
+| **Yield %, net of fees, with a CI** | The ground truth once the sample can resolve the effect. Never quote it without its interval. |
+| **p-value / q-value** | p < 0.05 for ONE pre-registered test; with many specs tested, control the false-discovery rate (BH q, as the factory does). |
+| **Sample size** | Sized per metric by a power calculation (see rule 4), never a fixed count. |
 
 ---
 
 ## Methodological rules (non-negotiable)
 
-1. **No lookahead bias.** Every feature used must have been available before kickoff.
-2. **Train/test split.** Walk-forward validation. Never evaluate on discovery data.
-3. **Reject silent p-hacking.** Every hypothesis tested goes into `research_hypotheses`.
-4. **Minimum 200 selections** before any conclusion.
-5. **CLV is king.** Positive ROI with negative CLV = luck. Always measure both.
-6. **The agent must be creative.** Reject obvious hypotheses unless data confirms them.
+These are rules of evidence. Each one says what it rests on, so a rule that
+stops being true can be seen to stop.
+
+1. **No lookahead bias.** Every feature must have been available at the moment
+   of entry: kick-off for pre-match, the poll's own minute in-play. *(Logic: a
+   backtest that breaks this is invalid.)*
+2. **Train/test split.** Walk-forward validation. Never evaluate on discovery
+   data. *(Logic.)*
+3. **Reject silent p-hacking.** Every hypothesis tested goes into
+   `research_hypotheses`, so the number of tests is known and can be corrected
+   for. *(Logic.)*
+4. **Size the sample to the claim, per metric.** The n needed is
+   (1.96 · sd / effect)² for a 95% interval of ± the effect. At ~2.0 odds the
+   per-bet sd is ~1, so a ±2pp yield needs **~10,000 bets** and 200 bets resolve
+   only ±14pp; CLV's sd is a few pp, so **tens of closes** resolve it. Below the
+   n a claim needs, the verdict is "insufficient", whatever the sign.
+   *(Arithmetic. The old fixed "200 selections" was too many for CLV and far
+   too few for yield.)*
+5. **CLV against a sharp close is the fast estimator; realised yield is the
+   judge.** With a small sample, positive yield with CLV ≤ 0 against a sharp
+   close is *probably* variance, and is reported that way, not as a finding.
+   Where there is no sharp close (in-play, post-whistle, structural edges),
+   CLV does not apply and net yield with an interval sized by rule 4 is the
+   only evidence. Always measure entry and close on the same side of the book.
+   *(Rests on the close being efficient — see the CLV framework above.)*
+6. **Be creative.** Obvious hypotheses are usually priced in; test them anyway
+   if the data is cheap, and expect them to fail. *(Intent, not a rule of
+   evidence.)*
 
 ---
 

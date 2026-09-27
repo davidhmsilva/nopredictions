@@ -126,10 +126,10 @@ const DATA_FACTS: { v: string; k: string }[] = [
 ]
 
 const OUTPUT_FACTS: { k: string; v: string }[] = [
-  { k: 'Selections', v: 'How many bets your theory would actually have made. Under 200 and there is no verdict.' },
+  { k: 'Selections', v: 'How many bets your theory would actually have made. Under 200 there is no verdict, and small edges need thousands.' },
   { k: 'Yield ± 95% CI', v: 'Profit per unit staked, with the interval. The interval is the part that decides it.' },
   { k: 'p-value', v: 'The odds a result this good came from luck alone.' },
-  { k: 'CLV', v: 'Whether the price moved your way after you bet. Positive yield without it is usually luck.' },
+  { k: 'CLV', v: 'Whether Pinnacle\'s price moved your way between open and close. It settles faster than yield; positive yield without it is probably a kind sample.' },
   { k: 'Equity curve', v: 'The run of it — including the drawdown you would have had to sit through.' },
 ]
 
@@ -489,8 +489,9 @@ export default function LabPage() {
                   </div>
                 </div>
 
-                {/* Rule 5 of this project's methodology: positive yield with
-                    non-positive CLV is luck until proven otherwise. The verdict
+                {/* Rule 5 of this project's methodology: against a sharp close
+                    (the Lab's is Pinnacle's), positive yield with non-positive
+                    CLV is probably variance until a larger sample says otherwise. The verdict
                     above is computed from yield and p-value alone, so when the
                     two arms disagree the page has to say so rather than let
                     "EDGE FOUND" stand on its own. */}
@@ -500,8 +501,9 @@ export default function LabPage() {
                     price, but its CLV is{' '}
                     <span className="np-num">{s.clvPct.toFixed(2)}%</span> — the odds did not
                     move from open to close, so nothing says the market was wrong here rather
-                    than the sample being kind. Positive yield with non-positive CLV is the
-                    signature of luck, and it is the first thing to check out of sample.
+                    than the sample being kind. Against a sharp close, positive yield with
+                    non-positive CLV usually means variance, not edge. Check it out of sample
+                    before trusting the yield.
                   </div>
                 )}
 

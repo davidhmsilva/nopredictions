@@ -8,7 +8,7 @@ description: Bankroll and position-sizing discipline for NOPREDICTIONS — Kelly
 A complete trader sizes positions and bounds exposure; we currently bet 1u flat
 with per-order caps and no portfolio view. This skill adds principled sizing —
 but stays deliberately conservative, because **Kelly assumes you know the true
-edge and we don't** (no consistent +CLV over 200+ selections). Over-betting a
+edge and we don't** (no metric with a CI clear of zero at an adequate sample). Over-betting a
 mis-estimated edge is the fastest path to ruin.
 
 ## Workflow
@@ -42,5 +42,5 @@ mis-estimated edge is the fastest path to ruin.
 
 ## Connects to
 - Sharp validation before sizing up → `np-edge-scan`.
-- Whether the edge is even real → `np-edge-eval` (CLV is king).
+- Whether the edge is even real → `np-edge-eval` (rules 4 and 5).
 - Reviewing what's about to be staked → `np-live-review`.

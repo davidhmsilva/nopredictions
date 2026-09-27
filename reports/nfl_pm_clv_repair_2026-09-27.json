@@ -1,0 +1,6 @@
+{
+  "why": "pm_clv was close MID / entry ASK - 1: negative by half the spread before any move. Restated as close mid / entry mid - 1; entry bid/ask from the chosen nfl_candidates row. pm_closing_price (the close mid) is unchanged.",
+  "source_tag": "mid_vs_mid_repair",
+  "before": {"6025":-0.01064,"6026":0.01042,"6027":-0.03261,"6029":-0.02174,"6030":-0.00538,"6031":-0.01111,"6032":-0.03333,"6042":-0.02326,"6043":-0.01429,"6044":-0.00714,"6045":-0.00704,"6054":0.01667,"6063":-0.01149,"6074":0.04167,"6119":0.05102,"6129":0.05357,"6135":-0.00769,"6136":-0.01667,"6137":-0.00658,"6138":0.0,"6139":-0.00725,"6140":-0.00641,"6141":0.0,"6150":-0.0102,"6151":0.01429,"6152":-0.00562,"6157":-0.01471,"6159":-0.00568,"6160":-0.01042},
+  "summary_after": {"all_n": 29, "all_mean": 0.0100, "zero": 19, "positive": 8, "negative": 2, "forced_mean": 0.0017, "edge_n": 3, "edge_mean": 0.0819}
+}

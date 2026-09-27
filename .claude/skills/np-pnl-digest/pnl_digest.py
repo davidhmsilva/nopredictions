@@ -69,7 +69,8 @@ for r in cur.fetchall():
     mark = "✅" if r['result']=='won' else "❌"
     print(f"- {mark} {float(r['pnl']):+.2f}u — {(r['title'] or '?')[:50]} [{r['outcome']}] @{float(r['entry_odds'] or 0):.2f}")
 
-print("\n> CLV is king: real Pinnacle CLV shown only where a sharp closing line exists "
-      "(~20% of trades). Positive yield without positive CLV is luck. Edge is unproven "
-      "until CLV is consistently positive over 200+ selections.")
+print("\n> Real Pinnacle CLV shown only where a sharp closing line exists (~20% of trades). "
+      "Against a sharp close, positive yield without positive CLV is probably variance; "
+      "elsewhere net yield with its CI is the only evidence. Edge is unproven until the "
+      "metric that applies has a CI clear of zero at a sample sized for the effect.")
 c.close()

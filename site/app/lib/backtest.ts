@@ -267,7 +267,7 @@ export function verdict(s: BacktestStats): { code: VerdictCode; label: string; d
     return {
       code: 'INSUFFICIENT_SAMPLE',
       label: 'INSUFFICIENT SAMPLE',
-      detail: `Only ${s.n} selections — we require at least 200 before drawing any conclusion. Numbers below are descriptive only.`,
+      detail: `Only ${s.n} selections. Below 200 the interval is too wide to say anything — even 200 bets at even money only resolve about ±14pp. Numbers below are descriptive only.`,
     }
   }
   if (s.pValue != null && s.pValue < 0.05 && s.yieldPct > 0) {
@@ -288,8 +288,8 @@ export function verdict(s: BacktestStats): { code: VerdictCode; label: string; d
   }
   return {
     code: 'NO_EDGE',
-    label: 'NO EDGE — HYPOTHESIS REJECTED',
+    label: 'NO EDGE DETECTED',
     detail:
-      'The result is indistinguishable from the bookmaker margin. The market already prices this in.',
+      'The yield cannot be told apart from zero at this sample. That is not proof the market prices it in: the interval below is the range of edges this sample cannot rule out.',
   }
 }

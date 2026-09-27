@@ -719,7 +719,7 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
 
     written = last_snapshot_written(conn) if not dry_run else {}
     todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake)
-    closes: list[tuple] = []        # (trade_id, fair, mid, book)
+    closes: list[tuple] = []        # (trade_id, fair, close_ask, book, entry_ask)
     for g in games:
         mins = (g.kickoff - now).total_seconds() / 60
         req = required_age_min(mins)
@@ -731,7 +731,13 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
                 hit = [c for c in candidates(g, sh) if c.token_id == b["pm_token_id"]]
                 if hit and hit[0].source != "pm_mid":
                     c = hit[0]
-                    closes.append((b["id"], c.fair_raw, 0.5 * (c.bid + c.ask), sh.book, float(b["entry_price"])))
+                    # pm_clv compares ask with ask. The entry was the CLOB ask, so the
+                    # close must be the CLOB ask too: a mid close sits half a spread
+                    # below the entry before the price has moved at all, and Gamma's
+                    # quote lags the book. No CLOB read, no pm_clv this cycle.
+                    bk = fetch_book(c.token_id)
+                    if bk and bk["ask"] is not None:
+                        closes.append((b["id"], c.fair_raw, bk["ask"], sh.book, float(b["entry_price"])))
             continue
         if req is None:
             continue
@@ -790,13 +796,14 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             write_candidates(conn, g, sh, cands, now, chosen, tid)
         elif chosen:
             write_candidates(conn, g, sh, [chosen], now, chosen, tid)
-    for tid, fair, mid, book, entry in closes:
+    for tid, fair, close_ask, book, entry in closes:
         with conn.cursor() as cur:
             cur.execute("""UPDATE paper_trades SET closing_price = %s, clv = %s, clv_source = %s,
-                                  pm_closing_price = %s, pm_closing_at = now(), pm_clv = %s
+                                  pm_closing_price = %s, pm_closing_at = now(), pm_clv = %s,
+                                  pm_clv_source = 'clob_ask_vs_ask'
                             WHERE id = %s AND closing_price IS NULL""",
                         (round(fair, 5), round(fair / entry - 1, 5), f"{book}_close_nfl",
-                         round(mid, 4), round(mid / entry - 1, 5), tid))
+                         round(close_ask, 4), round(close_ask / entry - 1, 5), tid))
         log.info(f"  close pt#{tid}: sharp fair {fair:.3f} vs entry {entry:.3f} → CLV {fair / entry - 1:+.2%}")
     log.info(f"placed {placed} · closes {len(closes)}")
 
@@ -996,7 +1003,7 @@ def report() -> None:
         print("no NFL trades yet")
         return
     print(f"{'':8}{'n':>4}{'settled':>9}{'won':>5}{'stake':>8}{'net P&L':>9}{'yield':>8}"
-          f"{'avg EV':>8}{'avg CLV':>9}")
+          f"{'avg EV':>8}{'PM CLV':>9}")
     for kind in ("edge", "forced", None):
         sub = [r for r in rows if kind is None or r["kind"] == kind]
         if not sub:
@@ -1007,16 +1014,18 @@ def report() -> None:
         fee = sum(float(r["stake_units"]) * FEE_RATE * (1 - float(r["entry_price"])) for r in st)
         pnl = sum(float(r["payout_units"] or 0) - float(r["stake_units"]) for r in st) - fee
         evs = [r["ev"] for r in sub if r["ev"] is not None]
-        clvs = [float(r["clv"]) for r in sub if r["clv"] is not None]
+        clvs = [float(r["pm_clv"]) for r in sub if r["pm_clv"] is not None]
         print(f"{(kind or 'ALL'):<8}{len(sub):>4}{len(st):>9}{sum(r['result'] == 'won' for r in st):>5}"
               f"{stake:>8.1f}{pnl:>+9.2f}{(100 * pnl / stake if stake else 0):>+7.1f}%"
               f"{(sum(evs) / len(evs) if evs else 0):>+7.2f}%"
               f"{(100 * sum(clvs) / len(clvs) if clvs else float('nan')):>+8.2f}%")
-    print("\nCLV vs the sharp close says whether EDGE bets beat the line (tens of bets suffice); "
-          "a P&L CI at ~2.0 odds needs thousands. FORCED measures the cost of TAKING, not a price.")
+    print("\nPM CLV = PM's own closing price / entry, same side of the book. It is how PM moved, "
+          "not the truth: PM's close is thin. `clv` (model fair / ask) is the entry edge restated, "
+          "not CLV, and is not shown. A P&L CI at ~2.0 odds needs thousands of bets. "
+          "FORCED measures the cost of TAKING, not a price.")
     print("\nlast 20:")
     for r in rows[-20:]:
-        clv_txt = "" if r["clv"] is None else "CLV {:+.2%}".format(float(r["clv"]))
+        clv_txt = "" if r["pm_clv"] is None else "PM CLV {:+.2%}".format(float(r["pm_clv"]))
         ev = r["ev"] if r["ev"] is not None else 0.0
         print(f"  pt#{r['id']:<6} {r['placed_at']:%m-%d %H:%M} {r['kind']:<6} {r['src'] or '':<11} "
               f"EV {ev:+5.2f}%  {float(r['stake_units']):.2f}u @ "

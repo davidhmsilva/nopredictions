@@ -6,7 +6,7 @@ description: Run the no-lookahead walk-forward backtest of the DC model against 
 # Walk-Forward Backtest
 
 The honest answer to "does the model have edge?" — measured the way the project's
-own rules demand (rule #2 walk-forward, rule #5 CLV-is-king), over ~56k bets.
+own rules demand (rule #2 walk-forward, rule #5 CLV against a sharp close), over ~56k bets.
 
 ## What it does
 For each period it retrains DC **only on matches before that period** (trailing
@@ -30,8 +30,10 @@ disagreements are model error, not edge, and the bigger the disagreement the wor
 the CLV. Any new variant must beat THIS baseline to be worth anything.
 
 ## How to read a result (honesty rules)
-- **CLV is the verdict, not yield.** Positive yield with flat/negative CLV = luck.
-  Edge is real only if CLV is significantly positive (CI excludes 0).
+- **Here CLV is the right first read** (rule 5): this backtest's close is Pinnacle's,
+  which is sharp, and CLV resolves in far fewer bets than yield. Positive yield with
+  flat/negative CLV is probably variance. Over 56k bets the yield CI is tight too,
+  so both are evidence; report both.
 - A negative-CLV result means the model is anti-informative vs the sharp — don't
   bet that signal; if anything it argues for fading it (test that explicitly).
 - This benchmark (Pinnacle 1X2 opening) is the hardest in the world. A model can

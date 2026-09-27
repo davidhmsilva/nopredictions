@@ -65,7 +65,7 @@ def main():
     elif edge_pp > 20:
         print("⚠️  Edge >20pp almost always means model error, not edge (see live audit). "
               "Demand a sharp line to validate before sizing up.")
-    print("Note: edge here is UNPROVEN (no consistent +CLV over 200+ selections). Until it is, "
+    print("Note: edge here is UNPROVEN (no metric with a CI clear of zero at an adequate sample). Until it is, "
           "prefer flat/quarter-Kelly over full Kelly — over-betting a wrong edge is ruin.")
 
 if __name__ == "__main__":
