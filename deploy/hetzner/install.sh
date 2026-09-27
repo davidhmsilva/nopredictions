@@ -5,6 +5,7 @@
 # same tables and spend the same api-football key (see MIGRATION.md, step 6).
 #
 #   sudo bash install.sh [git-branch]
+#   REQ=/root/requirements-mac.txt sudo -E bash install.sh …   # a pip freeze copied from the Mac
 set -euo pipefail
 
 BRANCH="${1:-main}"
@@ -38,7 +39,7 @@ echo "== python $PY_VERSION venv at ingest/.venv (via uv)"
 sudo -u np bash -lc 'command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh'
 UV=/home/np/.local/bin/uv
 sudo -u np "$UV" venv --python "$PY_VERSION" "$DIR/ingest/.venv"
-REQ="$DIR/deploy/hetzner/requirements-mac.txt"
+REQ="${REQ:-$DIR/deploy/hetzner/requirements-mac.txt}"
 if [ -f "$REQ" ]; then
   echo "   using the Mac's own pip freeze"
   sudo -u np "$UV" pip install --python "$DIR/ingest/.venv/bin/python" -r "$REQ"
