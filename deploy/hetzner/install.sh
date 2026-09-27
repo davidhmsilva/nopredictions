@@ -31,18 +31,28 @@ echo "== code -> $DIR ($BRANCH)"
 if [ ! -d "$DIR/.git" ]; then
   git clone --branch "$BRANCH" "$REPO" "$DIR"
 else
-  git -C "$DIR" fetch origin "$BRANCH" && git -C "$DIR" checkout "$BRANCH" && git -C "$DIR" pull --ff-only
+  # as np: the checkout is np's, and git refuses a root user in another's repo
+  sudo -u np git -C "$DIR" fetch origin "$BRANCH"
+  sudo -u np git -C "$DIR" checkout "$BRANCH"
+  sudo -u np git -C "$DIR" pull --ff-only origin "$BRANCH"
 fi
 chown -R np:np "$DIR"
+# uv reads a uv.toml from the working directory; root's home is not np's to read.
+cd "$DIR"
 
 echo "== python $PY_VERSION venv at ingest/.venv (via uv)"
 sudo -u np bash -lc 'command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh'
 UV=/home/np/.local/bin/uv
-sudo -u np "$UV" venv --python "$PY_VERSION" "$DIR/ingest/.venv"
+sudo -u np "$UV" venv --clear --python "$PY_VERSION" "$DIR/ingest/.venv"
 REQ="${REQ:-$DIR/deploy/hetzner/requirements-mac.txt}"
 if [ -f "$REQ" ]; then
-  echo "   using the Mac's own pip freeze"
-  sudo -u np "$UV" pip install --python "$DIR/ingest/.venv/bin/python" -r "$REQ"
+  echo "   using the Mac's own pip freeze ($REQ)"
+  # A macOS freeze carries packages that do not exist on Linux (pyobjc, appnope)
+  # and local-path installs (`@ file://`) that point at the Mac's disk.
+  LINUX_REQ=/tmp/np-requirements-linux.txt
+  grep -viE '^(pyobjc|appnope|-e )|@ file://' "$REQ" > "$LINUX_REQ"
+  chmod 644 "$LINUX_REQ"
+  sudo -u np "$UV" pip install --python "$DIR/ingest/.venv/bin/python" -r "$LINUX_REQ"
 else
   echo "   ⚠️ no requirements-mac.txt — installing a best-effort list; run the tests"
   sudo -u np "$UV" pip install --python "$DIR/ingest/.venv/bin/python" \
