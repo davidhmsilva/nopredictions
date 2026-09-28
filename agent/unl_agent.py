@@ -390,6 +390,13 @@ class Sharp:
     total: tuple | None        # (point, (prop_o, pow_o), (prop_u, pow_u))   pinnacle only
     model_ok: bool
     snapshot_at: datetime
+    total_line: float | None = None   # the book's main total, ANY line (2.25 incl.) — what anchored the goals
+
+    @property
+    def goals_ok(self) -> bool:
+        """The goal count is anchored to a quoted total, not guessed from the 1X2.
+        Without it nothing but the 1X2 may be priced off the model."""
+        return self.model_ok and self.total_line is not None
 
     def is_home(self, team: str) -> bool:
         return team == self.home
@@ -441,14 +448,20 @@ def sharp_for(game: Game, cache: dict) -> Sharp | None:
     snap = cache["fetched_at_dt"]
 
     def build(book, view):
-        # an Asian quarter/whole total (2.25, 3.0) pushes part of the stake, so its
-        # de-vigged price is not P(over): it neither anchors the model nor prices exactly
-        tot = view["total"] if view["total"] and is_half(view["total"][0]) else None
+        # Any total anchors the model — an Asian one (2.25, 3.0) through its
+        # zero-EV condition (soccer_line_model.fit). Only a half line is P(over)
+        # itself, so only a half line can price a token EXACTLY. ⚠️ Before
+        # 2026-09-28 an Asian total was dropped entirely and the goal count was
+        # guessed from the 1X2: Türkiye–Italy, Belgium–France and Norway–Portugal
+        # Unders were bought as 5-8% "edges" that were that guess.
+        anyt = view["total"]
         a = sm.fit(_mid(view["x12"][fh]), _mid(view["x12"][fa]),
-                   tot[0] if tot else None, _mid(tot[1]) if tot else None)
+                   anyt[0] if anyt else None, _mid(anyt[1]) if anyt else None)
+        tot = anyt if anyt and is_half(anyt[0]) else None
         x12 = {rename[k]: v for k, v in view["x12"].items()}
         spread = {rename[k]: v for k, v in view["spread"].items()}
-        return Sharp(book, home, away, a, x12, spread, tot, a.resid_pp <= MAX_RESID_PP, snap)
+        return Sharp(book, home, away, a, x12, spread, tot, a.resid_pp <= MAX_RESID_PP, snap,
+                     anyt[0] if anyt else None)
 
     if "pinnacle" in books:
         v = _book_view(books["pinnacle"], fh, fa)
@@ -461,7 +474,7 @@ def sharp_for(game: Game, cache: dict) -> Sharp | None:
     x12 = {k: (median(v["x12"][k][0] for v in views), median(v["x12"][k][1] for v in views))
            for k in (fh, DRAW, fa)}
     # the modal main total, and the median over-price among books quoting it
-    lines = [v["total"][0] for v in views if v["total"] and is_half(v["total"][0])]
+    lines = [v["total"][0] for v in views if v["total"]]
     tot = None
     if lines:
         L = max(set(lines), key=lines.count)
@@ -521,8 +534,8 @@ def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
     to hold when a bet is forced."""
     out: list[Cand] = []
     g = sh.anchor.grid() if sh else None
-    ok = bool(sh and sh.model_ok)
-    main_total = sh.total[0] if sh and sh.total else None
+    ok = bool(sh and sh.goals_ok)           # goal-count prices need an anchored total
+    main_total = sh.total_line if sh else None
     seen: set[str] = set()
     for m in game.markets:
         fam = str(m.get("sportsMarketType") or "").lower()
@@ -731,7 +744,7 @@ def write_candidates(conn, game: Game, sh: Sharp | None, cands: list[Cand], now:
              c.liquidity, round(c.fair, 5), round(c.fair_raw, 5), c.source,
              sh.book if sh else None, _r(a.lh if a else None, 3), _r(a.la if a else None, 3),
              _r(a.rho if a else None, 3), _r(a.resid_pp if a else None, 3),
-             sh.total[0] if sh and sh.total else None,
+             sh.total_line if sh else None,
              round(taker_fee_pp(c.ask), 3), round(c.ev, 3),
              sh.snapshot_at if sh else None, c is chosen, trade_id if c is chosen else None)
             for c in cands]
@@ -760,7 +773,7 @@ def write_trade(conn, sid: int, game: Game, sh: Sharp | None, c: Cand, kind: str
            "fee_pp": round(taker_fee_pp(c.ask), 3), "dist_goals": c.dist,
            "lambda_home": _r(a.lh if a else None, 3), "lambda_away": _r(a.la if a else None, 3),
            "rho": _r(a.rho if a else None, 3), "resid_pp": _r(a.resid_pp if a else None, 3),
-           "sharp_total": sh.total[0] if sh and sh.total else None,
+           "sharp_total": sh.total_line if sh else None,
            "snapshot_at": sh.snapshot_at.isoformat() if sh else None,
            "minutes_to_ko": round(mins, 1), "obs_version": OBS_VERSION}
     fair_txt = (f"fair {c.fair:.3f} ({1 / c.fair:.2f}) from {c.source}"
@@ -886,7 +899,7 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
         sane = [c for c in ver if c.ev <= IMPLAUSIBLE_EV_PCT]
         best = max(sane, key=lambda c: c.ev) if sane else None
         tag = (f"{sh.book} λ {sh.anchor.lh:.2f}-{sh.anchor.la:.2f} ρ {sh.anchor.rho:+.2f} "
-               f"resid {sh.anchor.resid_pp:.2f}pp{'' if sh.model_ok else ' MODEL-OFF'}"
+               f"T {sh.total_line} resid {sh.anchor.resid_pp:.2f}pp{'' if sh.model_ok else ' MODEL-OFF'}{'' if sh.total_line is not None else ' NO-TOTAL'}"
                if sh else "no sharp")
         if best is None:
             log.info(f"  {g.title:<32} {mins:6.0f}m  nothing verified on the CLOB · {tag}")

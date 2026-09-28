@@ -14,7 +14,15 @@ unknowns, so a well-posed book is reproduced exactly; whatever residual is left
 is recorded, and a match whose markets cannot all be reproduced is one where
 alternates should not be priced off this model.
 
-With no total quoted, ρ is held at RHO_DEFAULT and only the two λ are fitted.
+An Asian total (2.25, 2.75, 3.0) anchors it too: its de-vigged price is a
+fair ODDS with pushes and half-stakes, not P(over), so the fit asks for zero
+expected value at that price instead. ⚠️ Until 2026-09-28 such a total was
+dropped, the goal count came from the 1X2 alone, and every totals / BTTS /
+handicap price read off it was wrong by several points — which the agent
+bought as edge (see CLAUDE.md, Nations League).
+
+With no total quoted at all, ρ is held at RHO_DEFAULT and only the two λ are
+fitted — and the agent refuses to price anything but the 1X2 off that.
 
 Pure Python on purpose: 11×11 score grid, Nelder-Mead on three parameters —
 no scipy, so it runs in the cron interpreter and in any test container.
@@ -84,6 +92,18 @@ def cover_prob(g, line: float, team_is_home: bool) -> float:
     return s
 
 
+def asian_over_ev(g, line: float, odds: float) -> float:
+    """Expected profit per unit on the OVER of an Asian total at decimal `odds`.
+    Half line: win/lose. Whole line: a push returns the stake. Quarter line
+    (2.25, 2.75): half the stake on each neighbouring half/whole line."""
+    frac = round((line * 4) % 4)
+    if frac in (1, 3):                                   # quarter: split the stake
+        return 0.5 * asian_over_ev(g, line - 0.25, odds) + 0.5 * asian_over_ev(g, line + 0.25, odds)
+    win = sum(p for i, row in enumerate(g) for j, p in enumerate(row) if i + j > line)
+    lose = sum(p for i, row in enumerate(g) for j, p in enumerate(row) if i + j < line)
+    return win * (odds - 1) - lose
+
+
 def btts_prob(g) -> float:
     return sum(p for i, row in enumerate(g) for j, p in enumerate(row) if i > 0 and j > 0)
 
@@ -141,6 +161,7 @@ def fit(p_home: float, p_away: float, total_line: float | None = None,
         p_over: float | None = None) -> Anchor:
     """λ_h, λ_a (and ρ when a total is given) reproducing the de-vigged book."""
     has_total = total_line is not None and p_over is not None
+    half_total = has_total and abs(abs(total_line) % 1 - 0.5) < 1e-9
     targets = [p_home, p_away] + ([p_over] if has_total else [])
 
     def model(x):
@@ -149,8 +170,14 @@ def fit(p_home: float, p_away: float, total_line: float | None = None,
         rho = _clip(x[2], RHO_LO, RHO_HI) if has_total else RHO_DEFAULT
         g = grid(lh, la, rho)
         h, _d, a = outcome_probs(g)
-        out = [h, a] + ([over_prob(g, total_line)] if has_total else [])
-        return lh, la, rho, out
+        if not has_total:
+            return lh, la, rho, [h, a]
+        if half_total:
+            return lh, la, rho, [h, a, over_prob(g, total_line)]
+        # an Asian total: the de-vigged price is fair ODDS, not P(over). The
+        # model is right when that price has zero expected value; the EV is put
+        # on a probability scale (× p_over) so the three residuals are comparable
+        return lh, la, rho, [h, a, p_over + p_over * asian_over_ev(g, total_line, 1.0 / p_over)]
 
     def loss(x):
         *_, out = model(x)
