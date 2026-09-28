@@ -130,6 +130,8 @@ riding the AI + prediction-markets wave simultaneously.
     │   ├── lib/supabaseAuth.ts        ← server half (imports next/headers)
     │   ├── lib/useSession.ts · lib/useWatchlist.ts
     │   ├── game/[slug]/page.tsx       ← GAME CENTER — tabs: Overview · Stats · Match · Markets
+    │   ├── team/[slug]/ · teams/      ← TEAM PAGES — /team/<id>-<name>, and the index ✅ NEW
+    │   ├── lib/teampage.ts · teamSlug.ts ← club data (form, table vs price, next games) · URLs
     │   ├── game/[slug]/{Insights,StatsTab,MatchTab}.tsx · fmt.ts
     │   ├── api/game/context · api/game/brief   ← team form + ESPN + pressure · the AI brief
     │   ├── lib/teamform.ts            ← our DB → form, streaks with rarity, H2H, vs closing price
@@ -1939,6 +1941,43 @@ A decision for the operator, flagged when it shipped.
 **Two `next dev` in one folder**: `next.config.mjs` reads `NEXT_DIST_DIR`
 (unset in production) so a second session can preview on its own build dir —
 `np-site-gc` in `.claude/launch.json`, port 3107, `.next-gc/`.
+
+## Team pages — the Sofascore habit, with the price (2026-09-28)
+
+`/team/<teams.id>-<name>` for every club in our database, and `/teams`, an index
+by league (clubs with 3+ domestic league matches in the last 120 days). Linked
+from the Game Center's Stats tab (both team names and every opponent) and from
+each other (table rows, recent matches); every club is in the sitemap. A wrong
+or missing name part redirects to the current slug.
+
+| panel | source | what makes it ours |
+|---|---|---|
+| Next with a market | Scout board cache | fixtures resolved with `resolveTeams` (both sides together), 1X2 in the reader's odds format, both venues |
+| Against the closing price | `matches` + `match_odds` | points vs the points the closing 1X2 expected (Σ 3·P(win)+P(draw)), wins and overs vs priced-in |
+| Runs | `teamform.streaksOf` | league base rates, rarity shown, "17 patterns checked" printed |
+| Numbers | `teamform.stats` | Last 5 · Last 10 · Home 10 · Away 10 · Season in one grid |
+| League table | the season's results | **Priced** and **±** columns: points against what the prices expected |
+
+```
+site/app/lib/teampage.ts    teamPage(id) cached 3h · buildTable / assemble are pure
+site/app/lib/teamSlug.ts    teamHref(id, name), client-safe
+site/app/team/[slug]/       page.tsx (server, metadata, SportsTeam JSON-LD) · TeamView.tsx
+```
+
+⚠️ **The table is Stage A's.** It is computed from `matches`, so it is only as
+fresh as the last Football-Data CSV (the page prints the latest result date),
+with no points deductions and no conference split.
+
+🐛 **Three La Liga fixtures are in `matches` twice** (17-20 Aug 2026, match ids
+301761/314839, 305170/307839, 305171/307840): the same game under two spellings
+of one club ("Ath Madrid"/"Atl. Madrid", "La Coruna"/"Dep. A Coruna",
+"Vallecano"/"Rayo Vallecano"). They are the only such pairs in the database.
+`teamform.dedupeGames` (a team cannot play twice at one kick-off) and the
+table builder both keep the lower-id row, so the Game Center and the team pages
+no longer count them twice. **The rows themselves were not deleted.**
+
+Also fixed: `.gcx-table th` out-ranked `.gc-r`, so every numeric table header
+(the Game Center's standings included) sat left of its column.
 
 ## Live stats coverage — measured 2026-08-19
 

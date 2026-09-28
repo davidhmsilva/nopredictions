@@ -4558,6 +4558,9 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 }
 .gcx-table td { padding: 7px 6px; border-bottom: 1px solid rgba(36,41,50,.6); color: var(--white); white-space: nowrap; }
 .gcx-table tr:last-child td { border-bottom: 0; }
+/* `.gcx-table th` above out-ranks `.gc-r` on its own, which left every numeric
+   header sitting left of its column. */
+.gcx-table th.gc-r { text-align: right; }
 
 /* streaks */
 .gcx-streaks { list-style: none; display: grid; gap: 6px; }
@@ -5283,3 +5286,45 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .legal .legal-nav a { text-decoration: none; color: var(--grey); }
 .legal .legal-nav a:hover { color: var(--white); }
 .legal .legal-nav a.is-on { color: var(--bg); }
+
+/* ── Team pages (/team/<id>-<name>, /teams) ─────────────────────────────────
+   Built almost entirely from the Game Center's own layers (gc-*, gcx-*); what
+   is here is only what a single club needs that a fixture did not. */
+.tm-crumb { font-size: 11.5px; color: var(--grey2); margin-bottom: 10px; }
+.tm-crumb a { color: var(--grey); }
+.tm-crumb a:hover { color: var(--white); }
+.tm-hero { margin-bottom: 24px; }
+.tm-hero h1 { font-size: 26px; font-weight: 700; color: var(--white); letter-spacing: -.01em; line-height: 1.2; }
+.tm-hero .gcx-hero-sub { flex-wrap: wrap; font-size: 12px; margin-top: 8px; }
+.tm-hero .gc-quiet { margin-top: 6px; }
+.tm-link { color: inherit; text-decoration: none; }
+.tm-link:hover { color: var(--white); text-decoration: underline; text-underline-offset: 2px; }
+.tm-live { color: var(--green); font-weight: 700; }
+
+.tm-next { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.tm-next-row {
+  display: grid; grid-template-columns: 190px 1fr auto auto; gap: 12px; align-items: center;
+  padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r-sm);
+  color: var(--white); text-decoration: none; font-size: 12.5px;
+}
+.tm-next-row:hover { border-color: var(--border2); }
+.tm-next-when { color: var(--grey); font-size: 11.5px; }
+.tm-next-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-next-title em { font-style: normal; font-size: 11px; }
+.tm-next-px { display: inline-flex; gap: 12px; color: var(--grey); font-size: 11.5px; white-space: nowrap; }
+.tm-next-px b { color: var(--white); font-weight: 600; }
+.tm-next-venues { display: inline-flex; gap: 4px; }
+
+.tm-mkt .gcx-mkt-line { grid-template-columns: 90px 28px 1fr auto; }
+.tm-splits td:first-child { color: var(--grey); }
+.tm-splits th i { font-style: normal; font-weight: 500; }
+
+.tm-index { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 28px; }
+.tm-index-league ul { list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--grey); }
+
+@media (max-width: 720px) {
+  .tm-next-row { grid-template-columns: 1fr auto; gap: 6px 10px; }
+  .tm-next-when { grid-column: 1 / -1; }
+  .tm-next-px { grid-column: 1 / -1; flex-wrap: wrap; }
+  .tm-hero h1 { font-size: 22px; }
+}

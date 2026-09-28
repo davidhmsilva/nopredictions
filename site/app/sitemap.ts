@@ -4,6 +4,8 @@ import { getBoard } from './lib/scoutCache'
 import { getSportBoard } from './lib/sports'
 import { SPORT_KEYS } from './lib/sportsMeta'
 import { within } from './lib/deadline'
+import { listTeams } from './lib/teampage'
+import { teamHref } from './lib/teamSlug'
 
 /** Every page worth finding: the boards, every game on them right now, the
  *  articles, and the tools. Games come and go daily, so the list is rebuilt
@@ -29,6 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     page('/soccer', 'hourly', 0.9),
     ...SPORT_KEYS.map((k) => page(`/${k}`, 'hourly', 0.9)),
     page('/dropping-odds', 'hourly', 0.8),
+    page('/teams', 'weekly', 0.7),
     page('/insights', 'weekly', 0.6),
     ...articleSlugs().map((s) => page(`/insights/${s}`, 'monthly', 0.5)),
     page('/lab', 'monthly', 0.6),
@@ -38,7 +41,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     page('/refunds', 'yearly', 0.1),
   ]
 
-  const [soccer, ...sports] = await Promise.all([
+  const [teams, soccer, ...sports] = await Promise.all([
+    within(listTeams().catch(() => null), 20_000),
     within(getBoard(), 20_000),
     ...SPORT_KEYS.map((k) => within(getSportBoard(k), 20_000)),
   ])
@@ -52,5 +56,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ),
   ]
 
-  return [...fixed, ...games]
+  const clubs: MetadataRoute.Sitemap = (teams ?? []).map((t) => page(teamHref(t.id, t.name), 'daily', 0.6))
+
+  return [...fixed, ...games, ...clubs]
 }
