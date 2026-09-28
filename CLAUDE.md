@@ -2252,6 +2252,17 @@ python -m pytest tests/test_unl_agent.py -q
   `uefa.nations`, `STATUS_FINAL`/`STATUS_FULL_TIME` only. `self_settling`, so
   `resolver.py` skips it. The report quotes `pm_clv` (price against price),
   not the NFL agent's model-vs-ask `clv`.
+- 🐛 **Asian totals were dropped — fixed 2026-09-28.** When Pinnacle's main
+  total was 2.25 / 2.75 / 3.0, the model got no total at all and guessed the
+  goal count from the 1X2. Every totals, BTTS and handicap price read off that
+  guess was wrong by several points, and the agent bought it as edge: pt#6188
+  Türkiye–Italy Under 2.5 (+7.6%), pt#6194 Belgium–France Under 2.5 (+5.1%),
+  plus the FORCED pt#6185 Norway–Portugal Under 2.5 and pt#6186 Germany–Greece
+  BTTS No (all `sharp_total_line` NULL). Now an Asian total anchors the fit
+  through its zero-EV condition (`soccer_line_model.asian_over_ev`), only a
+  half line prices a token exactly, and with no total at all only the 1X2 may
+  be priced (`Sharp.goals_ok`). ⚠️ Those four trades stay in the record, but
+  their EV and their EDGE label came from the bug — never read a yield off them.
 - ⚠️ Without `THE_ODDS_API_KEY` credits it can still bet every match, FORCED
   at PM's own mid — which by construction has negative EV at the ask.
 - ⚠️ The Nations League tag on Gamma was not verified live when this was
