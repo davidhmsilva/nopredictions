@@ -87,6 +87,7 @@ stuck_trades_*.csv
 ingest/_deleted_*.csv
 
 .next-gc/
+.next-lab/
 # strategy factory: pickled tapes (rebuilt from the DB) and cron locks
 agent/factory/cache/
 agent/.factory_*.lock

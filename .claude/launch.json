@@ -21,6 +21,16 @@
         "cd site && NEXT_DIST_DIR=.next-gc npx next dev -p 3107"
       ],
       "port": 3107
+    },
+    {
+      "name": "np-site-lab",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd site && NEXT_DIST_DIR=.next-lab npx next dev -p ${PORT:-3121}"
+      ],
+      "port": 3121,
+      "autoPort": true
     }
   ]
 }

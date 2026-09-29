@@ -5,6 +5,12 @@ import { getSql } from '../../lib/db'
 import { currentUser } from '../../lib/supabaseAuth'
 import { claimUse, refundUse, refusalMessage } from '../../lib/plan'
 import {
+  LAB_FOOTBALL_MATCHES,
+  LAB_FOOTBALL_SEASON_MAX,
+  LAB_FOOTBALL_SEASON_MIN,
+  labCount,
+} from '../../lib/labData'
+import {
   LEAGUES,
   LEAGUE_CODES,
   NBA_CAVEATS,
@@ -14,6 +20,7 @@ import {
   isNbaMarket,
   toSqlSpec,
   computeStats,
+  computeVenueStats,
   verdict,
   type RawBacktest,
   type Spec,
@@ -32,8 +39,8 @@ const SYSTEM_PROMPT = `You translate a bettor's plain-English sports theory into
 # Datasets — TWO sports are available
 
 ## A. FOOTBALL (soccer)
-- ~101,000 finished club matches, seasons 2012-13 through 2025-26.
-- Every match has the Pinnacle CLOSING price (the entry price) and most have the Pinnacle OPENING price (used for closing-line-value).
+- ~${labCount(Math.round(LAB_FOOTBALL_MATCHES / 1000) * 1000)} finished club matches, seasons ${LAB_FOOTBALL_SEASON_MIN}-${String(LAB_FOOTBALL_SEASON_MIN + 1).slice(2)} through ${LAB_FOOTBALL_SEASON_MAX}-${String(LAB_FOOTBALL_SEASON_MAX + 1).slice(2)} (the current season).
+- The entry price is the sharp CLOSING price: Pinnacle's where available; from the 2025-26 season our source stopped publishing Pinnacle, and those matches carry the Betfair Exchange close net of a 5% commission. Most matches also carry an earlier price from the same source (used for closing-line-value).
 - Leagues available (use these exact codes in spec.leagues):
 ${LEAGUE_LINES}
 - Markets: "1x2" (home / draw / away, 90-minute result) and "ou25" (over / under 2.5 goals; ~48k matches have this price).
@@ -49,6 +56,9 @@ ${LEAGUE_LINES}
 
 Stakes are flat 1 unit per selection in both datasets.
 
+## C. EXCHANGE PRICES (football only, automatic)
+Every football test ALSO reports the same selections priced at Polymarket (games since August 2024) and Kalshi (since May 2025), wherever those exchanges listed the match — no spec field is needed for it. So a theory that mentions Polymarket or Kalshi is testable: translate the theory itself as usual and add a caveat that the exchange comparison covers only the games those exchanges listed.
+
 # Spec fields
 - market + side: what is being backed on every qualifying match.
 - leagues: array of football codes above; empty array [] = all leagues. ALWAYS [] for NBA markets.
@@ -59,7 +69,7 @@ Stakes are flat 1 unit per selection in both datasets.
 
   Both sports:
   - "odds": decimal odds on the backed side at the close (e.g. favorites below 1.50 → {"field":"odds","op":"lte","value":1.5}). For nba_spread / nba_total the price is a fixed 1.909, so this filter is pointless there.
-  - "season": season start year. Football 2012..2025; NBA ${NBA_SEASON_MIN}..${NBA_SEASON_MAX} ("since 2018" → gte 2018).
+  - "season": season start year. Football ${LAB_FOOTBALL_SEASON_MIN}..${LAB_FOOTBALL_SEASON_MAX}; NBA ${NBA_SEASON_MIN}..${NBA_SEASON_MAX} ("since 2018" → gte 2018).
   - "home_rest_days" / "away_rest_days": days since that team's previous recorded game. Football: short rest ≈ lte 4, long rest ≈ gte 10. NBA: a back-to-back is exactly 1, so "on a back-to-back" → lte 1.
 
   Football only:
@@ -78,7 +88,8 @@ Only add filters the user actually implied — do not invent extra conditions.
 - Other sports (NFL, MLB, NHL, tennis, college...).
 - Football: Asian handicap, BTTS, correct score, corners, cards, half-time markets, cup ties, European competitions (Champions League etc.), derbies/rivalries, xG conditions, league-table position.
 - NBA: player props, quarter/half markets, series prices, and ANYTHING about a season after ${NBA_SEASON_MAX}-22.
-- Both: player-level anything (injuries, lineups, trades, coaches), referees, weather, in-play/live conditions, and Polymarket prices.
+- Both: player-level anything (injuries, lineups, trades, coaches), referees, weather, and in-play/live conditions.
+- Exchange prices are pre-match closing prices only, for 1X2 and over/under 2.5 — not in-play prices, other exchange markets, or the NBA.
 - If the theory is vague but clearly testable in spirit, translate it to the nearest concrete spec and note the approximation in "caveats" instead of refusing.
 - If a theory is about a real NBA market but names a season we do not cover, DO NOT refuse outright — set supported=true, run it over ${NBA_SEASON_MIN}-15..${NBA_SEASON_MAX}-22, and say so plainly in "caveats".
 
@@ -121,7 +132,9 @@ function sanitizeSpec(spec: Spec): { spec: Spec; warnings: string[] } {
     warnings.push('favorite/underdog filter only applies to home/away sides — ignored.')
   }
 
-  const [lo, hi] = nba ? [NBA_SEASON_MIN, NBA_SEASON_MAX] : [2012, 2025]
+  const [lo, hi] = nba
+    ? [NBA_SEASON_MIN, NBA_SEASON_MAX]
+    : [LAB_FOOTBALL_SEASON_MIN, LAB_FOOTBALL_SEASON_MAX]
   if (s.season_start != null) {
     if (s.season_start > hi) {
       warnings.push(
@@ -225,6 +238,11 @@ export async function POST(request: Request) {
   // 3 · Stats + honest verdict
   const stats = computeStats(raw)
   const v = verdict(stats)
+  // The verdict stays the sharp close's (Pinnacle, Betfair where Pinnacle is
+  // gone): the exchange arms cover 2024-08 onward only, and a verdict from a
+  // few hundred recent games would outrank one from thousands. They are
+  // reported beside it, on their own games.
+  const venues = nba ? [] : computeVenueStats(raw)
 
   const caveats = [
     ...parsed.caveats,
@@ -232,7 +250,9 @@ export async function POST(request: Request) {
     ...(nba
       ? NBA_CAVEATS
       : [
-          'Entry price = Pinnacle closing odds, flat 1u stakes. Beating the close is the hardest version of this test.',
+          stats.nBetfair > 0
+            ? `Entry price = the sharp close, flat 1u stakes. ${labCount(stats.nBetfair)} of these ${labCount(stats.n)} bets${stats.firstBetfair ? ` (from ${stats.firstBetfair.slice(0, 7)})` : ''} are priced at the Betfair Exchange close net of a 5% commission, because Football-Data stopped publishing Pinnacle during 2025-26; the rest at Pinnacle's.`
+            : 'Entry price = Pinnacle closing odds, flat 1u stakes. Beating the close is the hardest version of this test.',
         ]),
     'Rest days / form only count games in our dataset (league games — cups are not included).',
   ]
@@ -247,6 +267,7 @@ export async function POST(request: Request) {
     stats,
     seasons: raw.seasons,
     monthly: raw.monthly,
+    venues,
     caveats,
     entitlement: use,
   })

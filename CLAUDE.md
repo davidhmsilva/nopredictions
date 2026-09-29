@@ -56,11 +56,14 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── stage_e_inplay_monitor.py      ← In-play live score monitor ✅
 │   ├── stage_g_international.py       ← International results (WC, Euro, qualifs) ✅
 │   ├── stage_i_kalshi.py              ← Kalshi market ingestion (read-only) ✅
+│   ├── stage_j_venue_history.py       ← settled PM + Kalshi markets, priced ✅ NEW
+│   ├── venue_team_aliases.json        ← club spellings stage J learned from the clock
 │   ├── requirements.txt
 │   ├── .env.example
 │   ├── .env                           ← DB connection string + API keys (gitignored)
 │   └── tests/
-│       └── test_stage_a_end_to_end.py
+│       ├── test_stage_a_end_to_end.py
+│       └── test_stage_j_venue_history.py
 ├── db/
 │   ├── 001_schema.sql                 ← deployed ✅
 │   ├── 002_seeds.sql                  ← deployed ✅
@@ -182,6 +185,10 @@ Schema is live. Key tables:
 | `strategies` | Active trading strategies (Sharp Consensus, Poisson, ELO, DC, NBA Elo, Sim Pre-Match, Sim In-Play) |
 | `paper_trades` | Every position the agent takes on Polymarket ✅ ACTIVE |
 | `pm_markets` | Polymarket market metadata + snapshots |
+| `venue_market_history` | Every settled PM + Kalshi football market, priced before kick-off (Stage J, db/059) |
+| `bt_features` | Flattened football matches, **Pinnacle close only** (ends 2026-01-14) — the factory's; refresh `SELECT refresh_bt_features()` |
+| `bt_lab_matches` | What the Lab reads (db/063): bt_features' columns + `close_source`, Betfair (net 5%) where Pinnacle is gone (db/062) — refreshed by Stage A |
+| `bt_venue_prices` | The Lab's exchange price per match and side (db/060) — `SELECT refresh_bt_venue_prices()` after Stage J |
 | `agent_runs` | Log of agent invocations ✅ ACTIVE |
 | `data_ingestion_log` | What was ingested, when, from where |
 
@@ -200,6 +207,41 @@ Connection string is in `ingest/.env` as `DATABASE_URL`.
 - **Betfair Exchange closing** (BFEX, ~13k records)
 - Both Pinnacle opening + closing are present → CLV can be measured without Stage C
 - Idempotent. CSVs cached to `.cache/fd/`
+
+⛔ **Football-Data stopped publishing Pinnacle — found 2026-09-29.** In 2025-26
+the PS*/PSC* columns go empty mid-season (825 of 1,812 matches had a Pinnacle
+close from 2025-11-01 to 01-14; **0 after 2026-01-15**), and the 2026-27 files
+do not have the columns at all. What remains: Bet365, Betway, market average /
+max, and **Betfair Exchange opening + closing** (1X2, O/U 2.5, AH — 4,541 of
+4,982 matches since January). Consequences:
+- `bt_features` requires a Pinnacle close, so **the Lab's dataset ends at
+  2026-01-14** however often it is refreshed (`refresh_bt_features()` returns
+  the same 101,469 rows).
+- The Pinnacle open→close CLV framework below has no new matches.
+- The Lab's exchange arm (Stage J) could only compare against Pinnacle on games
+  up to that date: 1,343 Polymarket and 1,200 Kalshi matches.
+
+✅ **Decided 2026-09-29: the Betfair Exchange close is the fallback.** Stage A
+now also stores Betfair's closing O/U 2.5 (`BFEC>2.5`, on `BFEX`) and its
+earlier Friday/Tuesday snapshot (`BFEH/D/A`, `BFE>2.5`) under the formerly
+unused `BF` code — the pair PSC / PS are for Pinnacle. The Lab reads its own
+table, **`bt_lab_matches`** (db/062; `run_backtest` reads it from db/063): Pinnacle's close where it exists,
+Betfair's **net of a 5% commission on winnings** where it does not
+(`net = 1 + (odds − 1) × 0.95`), one source per match, `close_source` on every
+row. `bt_features` is untouched — the strategy factory reads it as "the RAW
+Pinnacle close" and must not get a second source silently. Every Stage A run
+now ends with `SELECT refresh_bt_lab()` (skip with `--no-lab-refresh`); that
+refresh was the step nobody ran for `bt_features`.
+
+**Calibrated on 2024-25, the one season with both books (7,680 matches):** the
+de-vigged probabilities agree to +0.21pp (home) / −0.04pp (draw), 0.72pp mean
+absolute. The cost of a bet against Pinnacle's fair price is 3.78% at
+Pinnacle's close (its overround is 3.9% here, not the 2.5% of the big leagues)
+and 3.54 / 4.23 / 2.36% (home / draw / away) at Betfair net of 5%. Realised
+yields on the same games: home −3.45 vs −3.13%, draw −3.90 vs −4.33%, away
+−6.99 vs −5.90%. The swap keeps the Lab's economics within ~0.5pp on average;
+Betfair is a little dearer on draws and cheaper on away sides.
+⚠️ Stage A's times are UK local, stored as UTC — see Stage J below.
 
 **To re-run or update:**
 ```bash
@@ -315,6 +357,131 @@ python stage_i_kalshi.py --series KXEPLGAME             # one competition
 - ⛔ **Geo:** Portugal appears on the restricted list in secondary sources.
   Unverified against the Member Agreement. Data ingestion is unaffected;
   real-money execution from PT may simply not be possible.
+
+### Stage J — settled PM + Kalshi markets, priced ✅ (2026-09-29)
+
+Every settled football market both venues ever listed, one row per binary
+market in `venue_market_history` (db/059): the price at 24h / 6h / 1h before
+kick-off and at the close, what takers actually paid, the fee it carried, how
+it resolved, and the `matches` row it belongs to. It exists so the Lab can
+answer the question a prediction-market user brings — *would this have made
+money at the exchange's price?* — and not only *did it beat Pinnacle?*
+
+| | Polymarket | Kalshi |
+|---|---|---|
+| from | 2024-08-24 (EPL only until 2025-09) | 2025-04 |
+| markets | 222,338 (1X2 60k · totals 83k · spreads 63k · BTTS 16k) | 109,062 (1X2 50k · totals 51k · BTTS 8k) |
+| fixtures | ~20,200 | ~16,700 |
+| linked to `matches` | 6,941 | 5,710 |
+
+```bash
+cd ingest && source .venv/bin/activate
+python stage_j_venue_history.py --pm-catalog --start 2024-08-01   # ~5 min, 1,600 Gamma requests
+python stage_j_venue_history.py --kalshi-catalog                  # ~5 min
+python stage_j_venue_history.py --link
+python stage_j_venue_history.py --learn-aliases && python stage_j_venue_history.py --relink
+python stage_j_venue_history.py --prices --linked-only            # what the Lab reads first
+python stage_j_venue_history.py --prices                          # everything else
+python stage_j_venue_history.py --report                          # coverage + the join checked
+python stage_j_venue_history.py --recent-days 5                   # daily: every step, last 5 days of PM
+python -m pytest tests/test_stage_j_venue_history.py -q
+```
+
+**What each price IS** — read this before quoting a yield off it:
+- `mid_*` on Polymarket is CLOB `/prices-history`, and that is the book
+  **MID**: 60 of 60 recorded bid/ask pairs agreed to 0.005, a 0.03/0.96
+  placeholder book included (reported as 0.495). Nobody paid a mid.
+- `buy0_*` / `buy1_*` (Polymarket) are the last **taker buys** of each side
+  before kick-off, from data-api `/trades?end=` — a price somebody paid, before
+  the fee. With both sides recent, `buy0 + buy1 − 1` is the spread.
+- `bid_close` / `ask_close` (Kalshi) are the real book from the minute candle
+  ending at kick-off. Kalshi's 24h / 6h mids are left NULL: one extra call per
+  market at ~4 req/s was not worth it.
+- `fee_rate` is the market's own schedule, `rate × p × (1−p)` per share.
+  Polymarket sports had **no fee until ~2026-03**, then 0.0175/0.03 (v1/v2),
+  0.05 since (v3). Kalshi 0.07.
+- Everything is in outcome 0's terms; outcome 1 is the complement (`1 − mid`,
+  ask = `1 − bid`).
+
+🔑 **`/prices-history` does return minute data for resolved markets** — with
+explicit `startTs`/`endTs`. `interval=max` returns nothing for them, which is
+where the old "≥12h granularity only" belief came from. Three months after
+resolution, `fidelity=1` still answers.
+
+🔑 **The join is checked against the money.** On linked markets, what the venue
+PAID agrees with our own result on **99.95%** of Polymarket 1X2 (19,713 /
+19,723), 99.99% of totals, 100% of BTTS; Kalshi 99.91% / 99.98% / 100%. A
+wrong match or a flipped side cannot hide there — it disagrees on about half
+of everything it touches. `--report` prints it every run. The few that
+disagree are knockout internationals decided in extra time (Nigeria v Gabon,
+Egypt v Benin, DR Congo v Jamaica…): our international results record the
+**final score after extra time**, the venues settle at 90 minutes. Any 90-minute
+market read against `matches` for a cup tie or an international has that bug.
+Inside the Lab's 22 leagues the agreement is 100%.
+
+⚠️ **`matches.kickoff_utc` is Football-Data's UK LOCAL time, stored as UTC.** It
+is one hour late all British summer (Liverpool v Bournemouth 2025-08-15:
+stored 20:00, kicked off 19:00 UTC). Read as an instant it puts a "close"
+an hour into the match. Stage J re-reads it as Europe/London, only for the 22
+Stage A leagues (the Americas and internationals carry default times); on
+5,012 fixtures the listed start then agrees at p1 / p50 / p99 = −1 / 0 / 0 min.
+**Anything else using `matches.kickoff_utc` as an instant has the same bug.**
+
+⚠️ **A venue's listed start is not updated when a match moves.** Celta v Real
+Madrid (2026-03) was listed for the 7th and played on the 6th — a close read at
+the listing is the RESULT, priced 0.0005; Osasuna v Mallorca was listed 17h
+before it was played. `settle_kickoff()` therefore reads, in order: our
+London-read time; the listed time, if the end of the match allows it; an
+estimate from a TIGHT end; nothing. Kalshi's 1X2 closes 115 / 124 / 185 min
+after the real start (p1 / p50 / p99), so its estimate sits 190 min before the
+close — hours stale rather than in play. Polymarket's `finishedTimestamp` is
+NOT tight (p90 321 min, p99 485 — often stamped hours late) and only ever
+rules a start out. 164 of its fixtures carry a finish equal to the listed start,
+a placeholder. `kickoff_source` says which rule placed every row.
+
+Traps, each of which produced a plausible table:
+- Gamma refuses `offset` past ~2,000 and a busy Saturday has more closed soccer
+  events than that; some windows 522 at `limit=100` and answer at 20. The sweep
+  splits the window instead of giving up on it.
+- 2024-25 markets carry no `sportsMarketType` and no `teams` — the family is
+  read off the question ("Will X beat Y?", "Will X win on <date>?").
+- **Gamma has no volume on most markets of 2026-03** (Napoli v Torino
+  included). Read as "never traded" that threw a month away; Polymarket volume
+  is now NULL = unknown, and only Kalshi's is trusted to skip a market.
+- Kalshi's recent market titles are "Fulham wins", not "Fulham vs Manchester
+  United Winner?" — the fixture comes from the EVENT title.
+- Kalshi high goal lines (over 6.5+) are created in play and have no pre-match
+  candle (`no_history`, legitimately).
+- **Football-Data spells clubs its own way** (Espanol, M'gladbach, Buyuksehyr,
+  Goztep, Peterboro). `--learn-aliases` recovers them from the clock: one side
+  certain, our row within 15 min, the same club at least 3 times and never a
+  different one → `venue_team_aliases.json` (43 entries, evidence counts inside).
+  **Women's fixtures are excluded outright** — two wrong aliases
+  ("Birmingham City WFC" → Coventry, "Crystal Palace" → Man United) came from
+  women's games sharing the men's kick-off, and `WFC` is not a squad marker
+  `fixture_match` knows. A name that IS another club of the same league is
+  never learned.
+
+**What the Lab does with it (db/060, db/062, db/063).** `bt_venue_prices` holds one row per
+match / venue / side for 1X2 and O/U 2.5: `p_mid` (closing mid) and `p_exec`
+(Kalshi's ask at the close on a real book; Polymarket's last taker buy in the
+hour before kick-off), the fee, and what the venue PAID. `run_backtest` now
+returns `venues.{polymarket,kalshi}` over the same selection: yield at the
+price paid (fee in), at the mid (a ceiling), and **those same games at the
+sharp close** (Pinnacle, or Betfair net of commission where Pinnacle is gone) —
+never the yield over all seasons, which is a different sample. The verdict
+stays the sharp close's; `n_betfair` says how many selections were priced at
+Betfair and the page says so whenever it is not zero. Prices more than 20pp from Pinnacle's
+implied are dropped as broken books (0 of 5,335 so far). Measured on the
+overlap: Polymarket's closing mid sits **+0.03pp** from de-vigged Pinnacle
+(median |gap| 0.55pp), what takers paid **+0.75pp**; Kalshi mid +0.17pp, ask
++0.99pp. The same finding as [[finding-pm-mid-is-pinnacle]]: the cost is the
+spread.
+⚠️ The Lab panel was type-checked and its API numbers checked in SQL, but not
+seen rendered with a signed-in session (a test needs an account).
+🐛 Fixed on the way: 3 over/under closes of **0** in `bt_features` divided the
+CLV by zero, so any O/U test selecting them failed as "Backtest engine error"
+(over 2.5 at odds ≤ 1.80 did). Odds ≤ 1 are now missing, not prices.
 
 ### Betfair historical opening prices — PARKED
 Not strictly required — Pinnacle opening odds serve as the entry price proxy and
