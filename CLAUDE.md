@@ -2059,6 +2059,13 @@ historical endpoint (paid plans, from June 2020), Betfair Historical Data
 Portugal), or OddsPortal (from ~2004, but its terms forbid scraping). **A
 decision for the operator; asked 2026-09-29.**
 
+Seeded by hand on 2026-09-29 with 27 and 28 September (126 rows, no
+`fav_record`) so the page had data before the first cron; the first backfill
+run fills their favourite records (`rowsMissingFav`). A cancelled fixture
+(`period = CAN`) has no outcome whatever its markets paid. Dates on this page
+are spelled from a table, not `toLocaleDateString`: Node writes "Sep" where
+Chrome writes "Sept", which broke hydration.
+
 ## Live stats coverage — measured 2026-08-19
 
 "More leagues" turned out not to be a stats problem. Over three days of
