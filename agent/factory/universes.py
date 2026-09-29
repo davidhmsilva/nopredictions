@@ -58,6 +58,7 @@ class Universe:
     min_n_train: int = 40
     min_n_test: int = 15
     load: Optional[Callable] = None
+    fee_rate: float = 0.05            # taker fee rate·p·(1−p) per share; 0 where the price already carries the margin
 
     @property
     def markets(self) -> tuple:
@@ -258,6 +259,84 @@ def load_soccer_prematch_open(conn, mode="backtest", **_) -> pd.DataFrame:
     return _soccer_prematch(conn, "open") if mode == "backtest" else pd.DataFrame()
 
 
+# ── pre-match: status and opponent (who a team IS, who it plays) ─────────────
+
+STATUS_FEATURES = ("league_code", "tier", "season_start", "prob", "odds",
+                   "home_status", "away_status", "home_rank3", "away_rank3",
+                   "home_cur_pos", "away_cur_pos", "bet_status", "opp_status", "status_gap",
+                   "bet_rank3", "opp_rank3", "bet_cur_pos", "opp_cur_pos", "rounds_left", "played")
+
+
+def _soccer_status(conn, price: str) -> pd.DataFrame:
+    """Pre-match 1X2 / O/U 2.5 at the close with status_features joined.
+
+    price='pinnacle': the RAW Pinnacle close, no fee — what a bettor actually got
+                      at Pinnacle, margin included.
+    price='pm':       de-vigged close + PM half-spread; the engine adds PM's fee.
+    """
+    from . import status_features
+    b = pd.read_sql_query("""
+        SELECT match_id, league_code, tier, season_start, kickoff_utc, total_goals, result,
+               ph_close, pd_close, pa_close, over25_close, under25_close
+          FROM bt_features""", conn)
+    f = status_features.build(conn)
+    b = b.merge(f.drop(columns=["league_id", "season_start", "home_team_id", "away_team_id"]),
+                on="match_id", how="left")
+    ph, pdr, pa = _devig(b["ph_close"], b["pd_close"], b["pa_close"])
+    po, pu = _devig(b["over25_close"], b["under25_close"])
+    tgoals = _flt(b["total_goals"])
+    res = b["result"].astype(str).str.strip()
+    ko = pd.to_datetime(b["kickoff_utc"], utc=True)
+    hs, as_ = _flt(b["home_status"]), _flt(b["away_status"])
+    hr, ar = _flt(b["home_rank3"]), _flt(b["away_rank3"])
+    hc, ac = _flt(b["home_cur_pos"]), _flt(b["away_cur_pos"])
+    nan = pd.Series(np.nan, index=b.index)
+    played = np.maximum(_flt(b["home_played"]), _flt(b["away_played"]))
+    parts = []
+    for market, side, prob, raw, won, bet, opp in (
+            ("1x2", "home", ph, b["ph_close"], res == "H", (hs, hr, hc), (as_, ar, ac)),
+            ("1x2", "draw", pdr, b["pd_close"], res == "D", None, None),
+            ("1x2", "away", pa, b["pa_close"], res == "A", (as_, ar, ac), (hs, hr, hc)),
+            ("ou25", "over", po, b["over25_close"], tgoals >= 3, None, None),
+            ("ou25", "under", pu, b["under25_close"], tgoals <= 2, None, None)):
+        bs, br, bc = bet if bet else (nan, nan, nan)
+        os_, or_, oc = opp if opp else (nan, nan, nan)
+        d = pd.DataFrame({
+            "source_row_id": b["match_id"], "ts": ko, "league_code": b["league_code"],
+            "tier": _flt(b["tier"]), "season_start": _flt(b["season_start"]),
+            "market": market, "side": side, "prob": prob,
+            "home_status": hs, "away_status": as_, "home_rank3": hr, "away_rank3": ar,
+            "home_cur_pos": hc, "away_cur_pos": ac,
+            "bet_status": bs, "opp_status": os_, "status_gap": os_ - bs,
+            "bet_rank3": br, "opp_rank3": or_, "bet_cur_pos": bc, "opp_cur_pos": oc,
+            "rounds_left": _flt(b["rounds_left"]), "played": played,
+            "won": won.astype(float).where(tgoals.notna() if market == "ou25" else res.isin(["H", "D", "A"])),
+        })
+        if price == "pinnacle":
+            d["ask"] = 1.0 / _flt(raw)
+            d["bid"] = d["ask"]
+        else:
+            d["ask"] = prob + SOCCER_HALF_SPREAD
+            d["bid"] = prob - SOCCER_HALF_SPREAD
+        d["fixture"] = "m:" + b["match_id"].astype(str) + ":" + market
+        d["label"] = f"{market} {side}"
+        parts.append(d)
+    df = pd.concat(parts, ignore_index=True)
+    df["depth"] = PROXY_DEPTH
+    df["minute"] = np.nan
+    df["token_id"] = None
+    df["condition_id"] = None
+    return _finish(df)
+
+
+def load_soccer_status_pinnacle(conn, mode="backtest", **_) -> pd.DataFrame:
+    return _soccer_status(conn, "pinnacle") if mode == "backtest" else pd.DataFrame()
+
+
+def load_soccer_status_pm(conn, mode="backtest", **_) -> pd.DataFrame:
+    return _soccer_status(conn, "pm") if mode == "backtest" else pd.DataFrame()
+
+
 def _am2dec(s: pd.Series, default: Optional[float]) -> np.ndarray:
     x = pd.to_numeric(s, errors="coerce")
     if default is not None:
@@ -368,6 +447,19 @@ UNIVERSES: dict[str, Universe] = {u.name: u for u in [
          "rest_diff", "tg5_sum", "odds"),
         market_sides={"1x2": ("home", "draw", "away"), "ou25": ("over", "under")},
         split="2022-07-01", min_n_train=200, min_n_test=80, load=load_soccer_prematch_open),
+    Universe(
+        "soccer_status_pinnacle",
+        "Pre-match 1X2 / O/U 2.5 by team status and opponent, at the RAW Pinnacle close (margin in, no fee).",
+        "pinnacle_raw", None, False, STATUS_FEATURES,
+        market_sides={"1x2": ("home", "draw", "away"), "ou25": ("over", "under")},
+        split="2022-07-01", min_n_train=100, min_n_test=40, load=load_soccer_status_pinnacle,
+        fee_rate=0.0),
+    Universe(
+        "soccer_status_pm",
+        "Same rules, priced as Polymarket: de-vigged Pinnacle close + half-spread + 5% taker fee.",
+        "pinnacle_proxy", None, False, STATUS_FEATURES,
+        market_sides={"1x2": ("home", "draw", "away"), "ou25": ("over", "under")},
+        split="2022-07-01", min_n_train=100, min_n_test=40, load=load_soccer_status_pm),
     Universe(
         "nfl_prematch",
         "NFL moneyline / closing spread / closing total, 2012-2025. Price = de-vigged consensus close + half-spread.",

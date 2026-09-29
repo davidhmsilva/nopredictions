@@ -185,25 +185,67 @@ export function briefFacts(
   }
 }
 
+// The shape asked for in plain words, generated from the schema so the two
+// cannot drift apart.
+const SHAPE = `Reply with ONLY a JSON object, no prose and no code fence, matching this JSON Schema:\n${JSON.stringify(
+  z.toJSONSchema(BriefSchema)
+)}`
+
+/** A JSON object out of a text reply, or null. Tolerates a code fence. */
+function parseReply(text: string): z.infer<typeof BriefSchema> | null {
+  const a = text.indexOf('{')
+  const b = text.lastIndexOf('}')
+  if (a < 0 || b <= a) return null
+  try {
+    const r = BriefSchema.safeParse(JSON.parse(text.slice(a, b + 1)))
+    return r.success ? r.data : null
+  } catch {
+    return null
+  }
+}
+
 async function write(facts: unknown, lineups: boolean, inPlay: boolean, system: string = SYSTEM): Promise<Brief> {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not set')
-  const client = new Anthropic()
-  const msg = await client.beta.messages.parse({
+  // Retries are ours to spend: the SDK's default backoff on a 503 ran the
+  // route past its 60s limit, and the reader got a platform error page.
+  const client = new Anthropic({ maxRetries: 1, timeout: 40_000 })
+  const base = {
     model: MODEL,
     max_tokens: 8000,
     // Opus 5 can decline; the fallback re-runs the same request on Opus 4.8
     // inside the same call rather than leaving the panel empty.
     betas: ['server-side-fallback-2026-06-01'],
     fallbacks: [{ model: 'claude-opus-4-8' }],
-    output_config: { effort: 'low', format: betaZodOutputFormat(BriefSchema) },
-    system,
-    messages: [{ role: 'user', content: JSON.stringify(facts) }],
+    messages: [{ role: 'user' as const, content: JSON.stringify(facts) }],
+  }
+
+  // Plain JSON first, validated against the schema here. Structured outputs
+  // need Anthropic's grammar compiler, which on 2026-09-29 answered every
+  // request with 503 "Grammar compilation is temporarily unavailable" after
+  // ~19s — while plain requests answered in ~3s. The brief must not depend on
+  // it; it is kept only as the second attempt for a reply that does not parse.
+  const msg = await client.beta.messages.create({
+    ...base,
+    output_config: { effort: 'low' },
+    system: `${system}\n\n${SHAPE}`,
   })
   if (msg.stop_reason === 'refusal') throw new Error('brief declined')
-  if (!msg.parsed_output) throw new Error('empty brief')
-  const out = msg.parsed_output
+  const text = msg.content.map((c) => (c.type === 'text' ? c.text : '')).join('')
+  let out = parseReply(text)
+  let model = msg.model
+  if (!out) {
+    const again = await client.beta.messages.parse({
+      ...base,
+      output_config: { effort: 'low', format: betaZodOutputFormat(BriefSchema) },
+      system,
+    })
+    if (again.stop_reason === 'refusal') throw new Error('brief declined')
+    out = again.parsed_output ?? null
+    model = again.model
+  }
+  if (!out) throw new Error('empty brief')
   // The schema asks for 3-5; the cap is enforced here rather than trusted.
-  return { ...out, points: out.points.slice(0, 5), writtenAt: new Date().toISOString(), model: msg.model, lineups, inPlay }
+  return { ...out, points: out.points.slice(0, 5), writtenAt: new Date().toISOString(), model, lineups, inPlay }
 }
 
 /** Keyed on the PHASE, so a brief written with prices before kick-off is never

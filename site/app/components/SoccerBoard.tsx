@@ -33,8 +33,8 @@ export function SoccerBoard({ initial = null }: { initial?: ScoutFixture[] | nul
     <div className="sc-head">
       <h1 className="sc-h1">Soccer odds</h1>
       <p className="sc-h1-sub">
-        Every soccer game on Polymarket and Kalshi, biggest first. When one app pays more, its
-        price is outlined with its logo. Tap any game for the full match page.
+        Every soccer game on Polymarket and Kalshi, biggest first, with the better price on
+        each. Tap any game to see which app pays it, and the full match page.
       </p>
     </div>
   )

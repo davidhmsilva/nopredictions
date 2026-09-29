@@ -127,14 +127,52 @@ def test_unmatched_team_returns_no_sharp():
     assert ua.sharp_for(_game(), _cache(_odds_event(home="Portugal"))) is None
 
 
-def test_quarter_total_does_not_anchor():
-    ev = _odds_event()
+def _set_total(ev, point, over, under):
     for m in ev["bookmakers"][0]["markets"]:
         if m["key"] == "totals":
-            for o in m["outcomes"]:
-                o["point"] = 2.25
+            m["outcomes"] = [{"name": "Over", "price": over, "point": point},
+                             {"name": "Under", "price": under, "point": point}]
+    return ev
+
+
+def test_asian_total_anchors_but_never_prices_exactly():
+    sh = ua.sharp_for(_game(), _cache(_set_total(_odds_event(), 2.75, 2.0, 1.90)))
+    assert sh.total is None and sh.total_line == 2.75 and sh.goals_ok
+    assert sh.anchor.rho_fitted and sh.anchor.resid_pp < 0.05
+    by = {c.label: c for c in ua.candidates(_game(), sh)}
+    assert by["Over 2.5"].source == "sharp_model"
+
+
+def test_asian_total_moves_the_goal_count():
+    """The 2026-09-28 bug: a 2.75/3.0 total was dropped and the goals came from
+    the 1X2 alone. The same 1X2 with a higher Asian total must price Over 2.5 higher."""
+    lo = ua.sharp_for(_game(), _cache(_set_total(_odds_event(), 2.25, 1.95, 1.95)))
+    hi = ua.sharp_for(_game(), _cache(_set_total(_odds_event(), 3.0, 1.95, 1.95)))
+    o_lo = sm.over_prob(lo.anchor.grid(), 2.5)
+    o_hi = sm.over_prob(hi.anchor.grid(), 2.5)
+    assert o_hi > o_lo + 0.08
+    assert 0.40 < o_lo < 0.52 and 0.55 < o_hi < 0.68
+
+
+def test_no_total_prices_only_the_1x2():
+    ev = _odds_event()
+    ev["bookmakers"][0]["markets"] = [m for m in ev["bookmakers"][0]["markets"] if m["key"] != "totals"]
     sh = ua.sharp_for(_game(), _cache(ev))
-    assert sh.total is None and not sh.anchor.rho_fitted
+    assert not sh.goals_ok
+    cs = ua.candidates(_game(), sh)
+    assert all(c.source != "sharp_model" for c in cs)
+    assert any(c.source == "sharp_exact" and c.family == "moneyline" for c in cs)
+
+
+def test_asian_ev():
+    g = sm.fit(0.45, 0.28, 2.5, 0.5).grid()
+    # a whole line pushes: at fair odds the EV is zero by construction of those odds
+    win = sum(p for i, r in enumerate(g) for j, p in enumerate(r) if i + j > 3)
+    lose = sum(p for i, r in enumerate(g) for j, p in enumerate(r) if i + j < 3)
+    assert sm.asian_over_ev(g, 3.0, 1 + lose / win) == pytest.approx(0, abs=1e-12)
+    # a quarter line is the average of its two halves
+    assert sm.asian_over_ev(g, 2.75, 2.0) == pytest.approx(
+        0.5 * sm.asian_over_ev(g, 2.5, 2.0) + 0.5 * sm.asian_over_ev(g, 3.0, 2.0))
 
 
 def test_candidates_price_every_family_on_the_right_side():

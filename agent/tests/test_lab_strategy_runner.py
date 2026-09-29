@@ -145,3 +145,19 @@ def test_only_the_full_match_events_of_a_fixture_are_read():
 def test_titles_and_kickoff():
     assert lr.teams_from_title("FC Porto vs. FC Alverca - More Markets") == ("FC Porto", "FC Alverca")
     assert lr.kickoff_of({"startTime": "2026-09-12T14:00:00Z"}) == datetime(2026, 9, 12, 14, tzinfo=timezone.utc)
+
+
+def test_team_lists_keep_a_two_club_name_out():
+    big = ["Benfica", "FC Porto", "Sporting CP"]
+    spec = {"market": "1x2", "side": "home", "leagues": ["POR-PL"],
+            "home_team_in": big, "home_team_not_in": ["SC Braga"],
+            "away_team_not_in": big + ["SC Braga"]}
+    assert lr.needs_sides(spec)
+    assert lr.team_lists_fail(spec, "Sporting CP", "CD Tondela") is None
+    assert lr.team_lists_fail(spec, "Sport Lisboa e Benfica", "FC Arouca") is None
+    # "Sporting Braga" scores 1.0 against "Sporting CP": only the exclusion stops it
+    assert lr.team_lists_fail(spec, "Sporting Braga", "CD Tondela") == "home team excluded"
+    assert lr.team_lists_fail(spec, "FC Porto", "SC Braga") == "away team excluded"
+    assert lr.team_lists_fail(spec, "FC Porto", "Sporting CP") == "away team excluded"
+    assert lr.team_lists_fail(spec, "Casa Pia AC", "FC Porto") == "home team not in list"
+    assert lr.team_lists_fail(spec, None, None) == "home team not in list"

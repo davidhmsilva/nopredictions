@@ -7,7 +7,7 @@
 
 import { dayTimeText, priceText, timeText, useMounted, type OddsFormat } from '../lib/display'
 import type { BoardRow } from '../lib/boardRow'
-import { VENUE_NAME, gradeOf, type BestPick, type OutcomeKey, type VenueBook } from '../lib/venues'
+import type { BestPick } from '../lib/venues'
 
 // ── writing numbers ──────────────────────────────────────────────────────────
 
@@ -86,34 +86,4 @@ export function LiveState({ r }: { r: BoardRow }) {
   // The start time is written in the reader's zone and relative to their
   // clock, neither of which a server render knows.
   return <span className="sc-in np-num">{mounted ? clock(r.kickoff) : ''}</span>
-}
-
-// ── one price, across both exchanges ─────────────────────────────────────────
-
-/** The hover text on a price: what each app charges, and which pays more. */
-export function pickTitle(
-  pick: BestPick,
-  venues: VenueBook[],
-  key: OutcomeKey,
-  f: OddsFormat
-): string {
-  const lines = venues.map((b) => {
-    const q = b.quotes[key]
-    if (!q || q.ask == null) return `${VENUE_NAME[b.venue]}: not offered`
-    // Graded on THIS leg — the same gate the pick itself uses.
-    const grade = gradeOf([q])
-    return (
-      `${VENUE_NAME[b.venue]}: ${priceText(q.ask, f)}` +
-      (grade === 'none' ? ' (no real market behind it, so it cannot count)' : '')
-    )
-  })
-  const more = paysMorePct(pick)
-  if (pick.venue && more != null) {
-    lines.push(`Pays ${more.toFixed(1)}% more on ${VENUE_NAME[pick.venue]}, after both apps' fees.`)
-  } else if (pick.quoted === 1) {
-    lines.push('Only one app offers this right now.')
-  } else if (pick.quoted > 1) {
-    lines.push('Same price on both apps, after fees.')
-  }
-  return lines.join('\n')
 }

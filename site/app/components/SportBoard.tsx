@@ -3,7 +3,8 @@
 /** One US sport's board — the same page the soccer board uses.
  *
  *  Every game either exchange lists, placed on ESPN's schedule, with both
- *  moneylines and the cheaper venue marked after each one's taker fee.
+ *  moneylines and the better price after each one's taker fee (which app pays
+ *  it is shown inside the game, not here).
  *
  *  🔑 ESPN is the spine, not a venue: it is what both exchanges settle
  *     against, it knows which side is at home, and it carries the live score.
@@ -69,8 +70,8 @@ export function SportBoard({ sport, initial = null }: { sport: SportKey; initial
     <div className="sc-head">
       <h1 className="sc-h1">{meta.label} odds</h1>
       <p className="sc-h1-sub">
-        Every {meta.label} game on Polymarket and Kalshi, side by side. When one app pays more,
-        its price is outlined with its logo.
+        Every {meta.label} game on Polymarket and Kalshi, side by side, with the better price
+        on each. Open a game to see which app pays it.
       </p>
     </div>
   )

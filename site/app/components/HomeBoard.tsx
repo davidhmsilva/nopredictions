@@ -103,8 +103,8 @@ export function HomeBoard({ initial = null }: { initial?: BoardRow[] | null }) {
       <p className="sc-eyebrow">NOPREDICTIONS · Prediction-market research</p>
       <h1 className="sc-h1">See if the price is wrong — before you trade it</h1>
       <p className="sc-h1-sub">
-        Polymarket and Kalshi side by side, with the cheaper exchange marked on every price. No
-        tips — the numbers, and you decide.
+        Polymarket and Kalshi side by side, the better price on every game. No tips — the
+        numbers, and you decide.
       </p>
     </div>
   )
