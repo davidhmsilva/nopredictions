@@ -5283,3 +5283,32 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .legal .legal-nav a { text-decoration: none; color: var(--grey); }
 .legal .legal-nav a:hover { color: var(--white); }
 .legal .legal-nav a.is-on { color: var(--bg); }
+
+/* ── Lab: the questions step, and a live rule's result ─────────────────── */
+.lq-panel { padding-bottom: 14px; }
+.lq-q { border: 0; margin: 0 0 20px; padding: 0; min-width: 0; }
+.lq-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 10px; margin-bottom: 10px; padding: 0; }
+.lq-chip {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--grey2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px;
+}
+.lq-question { color: var(--white); font-size: 14.5px; font-weight: 600; line-height: 1.4; }
+.lq-options { display: grid; gap: 8px; }
+.lq-opt {
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg);
+  padding: 10px 12px; transition: border-color .12s, background .12s;
+}
+.lq-opt:hover { border-color: var(--border2); background: var(--bg3); }
+.lq-opt.is-on { border-color: var(--green); }
+.lq-opt input[type='radio'] { margin-top: 3px; accent-color: var(--green); flex: none; }
+.lq-opt-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.lq-opt-text strong { color: var(--white); font-size: 13.5px; font-weight: 620; }
+.lq-opt-text > span { color: var(--grey); font-size: 12.5px; line-height: 1.5; }
+.lq-rec {
+  font-style: normal; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--green); margin-left: 8px;
+}
+.lq-other-input { margin-top: 4px; width: 100%; font-size: 13px; padding: 7px 10px; }
+.lq-rule { margin: 4px 0 16px 18px; }
+.lq-rule li { color: var(--grey); font-size: 13px; line-height: 1.7; }

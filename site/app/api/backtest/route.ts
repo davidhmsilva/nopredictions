@@ -154,9 +154,10 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid request body.' }, { status: 400 })
   }
-  if (!hypothesis || hypothesis.length > 500) {
+  // 1200, not 500: the Lab's questions step appends the user's answers.
+  if (!hypothesis || hypothesis.length > 1200) {
     return NextResponse.json(
-      { ok: false, error: 'Hypothesis must be 1-500 characters.' },
+      { ok: false, error: 'Hypothesis must be 1-1200 characters.' },
       { status: 400 },
     )
   }

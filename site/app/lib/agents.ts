@@ -32,6 +32,7 @@ import {
   type Spec,
 } from './backtest'
 import { accountOf, type Plan } from './plan'
+import { cleanInplay, isInplaySpec, type InplaySpec } from './inplaySpec'
 
 export type RunStatus = 'draft' | 'running' | 'paused'
 
@@ -56,7 +57,8 @@ export interface AgentSummary {
   source: 'agent' | 'lab'
   theory: string | null
   interpretation: string | null
-  spec: Spec | null
+  /** A pre-match filter, or a live rule (kind='inplay', lib/inplaySpec). */
+  spec: Spec | InplaySpec | null
   backtest: SavedBacktest | null
   run_status: RunStatus
   run_blocker: string | null
@@ -171,7 +173,10 @@ const LIVE_UNSUPPORTED = [
 
 /** Why this spec cannot run live, or null when it can. Said to the user as
  *  written, so it explains rather than refuses. */
-export function runBlocker(spec: Spec): string | null {
+export function runBlocker(spec: Spec | InplaySpec): string | null {
+  // A live rule was checked field by field when it was saved (cleanInplay);
+  // there is nothing about it the runner cannot compute.
+  if (isInplaySpec(spec)) return null
   if (isNbaMarket(spec.market)) {
     return 'NBA theories are backtest-only: the NBA data ends in 2021-22 and there are no NBA boards this agent trades.'
   }
@@ -341,7 +346,15 @@ export async function saveLabAgent(
   userId: string,
   input: { hypothesis: string; interpretation: string; spec: unknown },
 ): Promise<Result<{ id: number }>> {
-  const spec = cleanSpec(input.spec)
+  // A live rule has no history to replay: it is checked, not backtested.
+  let spec: Spec | InplaySpec | null
+  if (isInplaySpec(input.spec)) {
+    const c = cleanInplay(input.spec, LEAGUE_CODES)
+    if (!c.spec) return { ok: false, status: 400, error: c.error ?? 'That is not a rule the Lab produced.' }
+    spec = c.spec
+  } else {
+    spec = cleanSpec(input.spec)
+  }
   if (!spec) return { ok: false, status: 400, error: 'That is not a spec the Lab produced.' }
 
   const limits = await limitsFor(userId)
@@ -354,11 +367,14 @@ export async function saveLabAgent(
   }
 
   const sql = getSql()
-  const rows = isNbaMarket(spec.market)
-    ? await sql`select run_backtest_nba(${sql.json(spec as never)}) as r`
-    : await sql`select run_backtest(${sql.json(spec as never)}) as r`
-  const stats = computeStats(rows[0].r as RawBacktest)
-  const backtest: SavedBacktest = { stats, verdict: verdict(stats), ran_at: new Date().toISOString() }
+  let backtest: SavedBacktest | null = null
+  if (!isInplaySpec(spec)) {
+    const rows = isNbaMarket(spec.market)
+      ? await sql`select run_backtest_nba(${sql.json(spec as never)}) as r`
+      : await sql`select run_backtest(${sql.json(spec as never)}) as r`
+    const stats = computeStats(rows[0].r as RawBacktest)
+    backtest = { stats, verdict: verdict(stats), ran_at: new Date().toISOString() }
+  }
 
   const theory = input.hypothesis.trim().slice(0, 500)
   const interpretation = input.interpretation.trim().slice(0, 500)
@@ -369,8 +385,9 @@ export async function saveLabAgent(
        run_status, run_blocker, promoted_at, rules)
     values
       (${name}, 'lab', ${userId}, ${theory}, ${interpretation},
-       ${sql.json(spec as never)}, ${sql.json(backtest as never)},
-       'draft', ${runBlocker(spec)}, now(), ${sql.json({ kind: 'lab' } as never)})
+       ${sql.json(spec as never)}, ${backtest ? sql.json(backtest as never) : null},
+       'draft', ${runBlocker(spec)}, now(),
+       ${sql.json({ kind: 'lab', live: isInplaySpec(spec) } as never)})
     returning id
   `
   return { ok: true, id: row.id }
@@ -382,7 +399,7 @@ export async function updateAgent(
   patch: { run_status?: RunStatus; is_public?: boolean; name?: string },
 ): Promise<Result> {
   const sql = getSql()
-  const [s] = await sql<{ source: string; spec: Spec | null; run_status: RunStatus }[]>`
+  const [s] = await sql<{ source: string; spec: Spec | InplaySpec | null; run_status: RunStatus }[]>`
     select source, spec, run_status
       from public.strategies
      where id = ${id} and owner_id = ${userId} and retired_at is null

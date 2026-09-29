@@ -268,8 +268,11 @@ def _fetch_events() -> list[dict]:
             continue
 
         base = _SUFFIX_RE.sub("", title).strip()
-        fx = fixtures.setdefault(base, {"title": base, "kickoff": ko, "markets": []})
+        fx = fixtures.setdefault(base, {"title": base, "kickoff": ko, "markets": [], "tags": []})
         fx["markets"].extend(ev.get("markets") or [])
+        # Kept for the Lab's live rules, which filter on the competition
+        # (lab_strategy_runner.competition_code reads these tags).
+        fx["tags"].extend(t for t in (ev.get("tags") or []) if t not in fx["tags"])
 
     # A silent zero is how this observer lost 9 days: Gamma changed the shape of
     # `sport` and every fixture fell through the classifier while the log kept
