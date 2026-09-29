@@ -1596,6 +1596,7 @@ def report(conn) -> None:
 def run(once: bool, dry_run: bool, interval: int) -> None:
     # Local imports: both arms import this module at their top level.
     import fav_pressure_agent as fav
+    import fav_swing_agent as swing
     import ht_pressure_agent as ht
 
     table = lgt.load(lgt.WIDE_TABLE_PATH)
@@ -1614,10 +1615,12 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     strategy_id = None if dry_run else _strategy_id(conn)
     ht_strategy_id = None if dry_run else ht.strategy_id(conn)
     fav_strategy_id = None if dry_run else fav.strategy_id(conn)
+    swing_strategy_id = None if dry_run else swing.strategy_id(conn)
     tracker = LiveMatchTracker()
     pre_cache: dict[str, float] = {}
     ht_state = ht.HTState()
     fav_state = fav.FavState()
+    swing_state = swing.SwingState()
     pm_fixtures: list[dict] = []
     last_markets = 0.0
     dead_polls = 0
@@ -1727,6 +1730,17 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                     f"[{(r['pressure_source'] or 'opening')[:3]}]  #{r['paper_trade_id']}"
                 )
 
+        # Favourite Swing: holds positions across polls (fav_swing_positions), so
+        # it runs even on a cycle whose other writes were dropped.
+        swing_counts = {}
+        if conn is not None or dry_run:
+            try:
+                swing_counts = swing.cycle(conn, swing_strategy_id, signals, pm_fixtures,
+                                           swing_state, dry_run=dry_run)
+            except _DB_DROPPED as exc:
+                log.warning(f"db dropped mid-write [SWING] ({exc.__class__.__name__})")
+                db_dropped = True
+
         priced = [r for r in rows if r["fair_base"] is not None]
         for r in rows:
             if r["entered"]:
@@ -1741,6 +1755,8 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
         log.info(f"live={len(rows):3d} priced={len(priced):3d} entered={opened:2d} "
                  f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} "
                  f"| FAV rows={len(fav_rows):3d} entered={fav_opened:2d} "
+                 f"| SWING in={swing_counts.get('entered', 0)} held={swing_counts.get('open', 0)}"
+                 f"+{swing_counts.get('goal', 0)} sold={swing_counts.get('sold', 0)} "
                  f"| {time.time() - t0:.1f}s")
 
         if db_dropped:
@@ -1777,6 +1793,7 @@ def main() -> None:
     if args.settle or args.report:
         # Local imports: both arms import this module at their top level.
         import fav_pressure_agent as fav
+        import fav_swing_agent as swing
         import ht_pressure_agent as ht
         conn = _conn()
         try:
@@ -1785,10 +1802,12 @@ def main() -> None:
                 log.info(f"settled {settle(conn)} observations")
                 log.info(f"settled {ht.settle(conn)} first-half observations")
                 log.info(f"settled {fav.settle(conn)} favourite observations")
+                log.info(f"settled {swing.settle(conn)} favourite-swing positions held to the end")
             if args.report:
                 report(conn)
                 ht.report(conn)
                 fav.report(conn)
+                swing.report(conn)
         finally:
             conn.close()
         return
