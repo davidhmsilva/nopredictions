@@ -2465,6 +2465,26 @@ button { font-family: var(--font); }
 }
 
 /* ── responsive ──────────────────────────────────────────────────────────── */
+/* Between the phone layout and a full desktop the bar holds a logo, five
+   tabs, the search box and three account controls. Measured before this rule:
+   the content needed 916px, so from 761 to ~935px "Sign up" was cut off the
+   right edge (to ~845px even before the Teams tab). Tighter tabs and a
+   narrower box buy ~120px; Pricing goes last, below 900px, because it is also
+   in the upgrade prompts and the phone menu. */
+@media (min-width: 761px) and (max-width: 1000px) {
+  .np-nav-inner { gap: 14px; }
+  .np-brand-sub { display: none; }
+  .np-tab { padding: 8px 9px; }
+  .np-search { min-width: 104px; }
+  .np-nav-right { gap: 6px; }
+}
+@media (min-width: 761px) and (max-width: 900px) {
+  .np-nav-pricing { display: none !important; }
+}
+@media (min-width: 761px) and (max-width: 820px) {
+  .np-nav-inner { padding: 0 14px; gap: 10px; }
+  .np-tab { padding: 8px 7px; font-size: 13px; }
+}
 @media (max-width: 760px) {
   :root { --nav-h: 55px; }
   .np-nav-inner { height: 54px; gap: 12px; padding: 0 14px; }
@@ -2475,7 +2495,8 @@ button { font-family: var(--font); }
 
   .np-mobile-tabs {
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 60;
-    display: grid; grid-template-columns: repeat(4, 1fr);
+    /* One column per tab, however many there are. */
+    display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
     background: rgba(11, 13, 16, .96);
     backdrop-filter: saturate(140%) blur(12px);
     border-top: 1px solid var(--border);
@@ -2725,10 +2746,31 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 /* ── nav search ── */
 .np-search {
+  position: relative;
   display: flex; align-items: center; gap: 7px;
   background: var(--bg2); border: 1px solid var(--border2); border-radius: 999px;
   padding: 0 13px; height: 34px; flex: 0 1 250px; min-width: 130px;
   transition: border-color .12s;
+}
+/* Club suggestions under the box. Wider than the box itself on a desktop,
+   because "Borussia Mönchengladbach · Bundesliga" does not fit in 250px. */
+.np-search-list {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 80;
+  width: max(100%, 320px); max-width: calc(100vw - 28px);
+  list-style: none; margin: 0; padding: 6px;
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: var(--r-sm); box-shadow: var(--shadow);
+}
+.np-search-list li[role='option'] {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer;
+}
+.np-search-list li.is-hi { background: var(--bg-hover); }
+.np-search-name { color: var(--white); font-size: 13px; font-weight: 550; }
+.np-search-league { color: var(--grey2); font-size: 11px; white-space: nowrap; }
+.np-search-foot {
+  padding: 7px 10px 3px; margin-top: 2px; border-top: 1px solid var(--border);
+  color: var(--grey2); font-size: 10.5px;
 }
 .np-search:focus-within { border-color: var(--grey2); }
 .np-search-icn { color: var(--grey2); font-size: 14px; line-height: 1; }
@@ -3283,7 +3325,9 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
     background: var(--bg); border-bottom: 1px solid var(--border);
     padding: 10px 14px;
   }
-  .np-mobile-search .np-search { width: 100%; min-width: 0; flex: 1 1 auto; }
+  .np-mobile-search .np-search { display: flex; width: 100%; min-width: 0; flex: 1 1 auto; }
+  /* There is no Enter key to explain on a phone. */
+  .np-search-foot { display: none; }
 }
 
 .np-sheet-scrim {

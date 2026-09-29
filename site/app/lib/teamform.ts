@@ -12,6 +12,7 @@
 import { unstable_cache } from 'next/cache'
 import { getSql } from './db'
 import { teamScore } from './gamecenter'
+import { displayName } from './teamDisplay'
 import PM_ALIASES from './pm_team_aliases.json'
 import TABLE from './priced_like.json'
 
@@ -265,7 +266,7 @@ export function toGame(r: Row, teamId: number): TeamGame {
   return {
     date: new Date(r.kickoff_utc).toISOString(),
     venue: home ? 'H' : 'A',
-    opponent: home ? r.an : r.hn,
+    opponent: home ? displayName(r.away_team_id, r.an) : displayName(r.home_team_id, r.hn),
     opponentId: Number(home ? r.away_team_id : r.home_team_id),
     league: r.league,
     gf,
@@ -357,10 +358,12 @@ async function h2hOf(a: number, b: number): Promise<H2HGame[]> {
      order by m.kickoff_utc desc
      limit 10
   `
+  // Display names on both sides, because the H2H panel counts wins by
+  // comparing these to TeamForm.name, which is a display name too.
   return rows.map((r) => ({
     date: new Date(r.kickoff_utc).toISOString(),
-    home: r.hn,
-    away: r.an,
+    home: displayName(r.home_team_id, r.hn),
+    away: displayName(r.away_team_id, r.an),
     hs: r.hs,
     as: r.as_,
     hht: r.hht,
@@ -619,7 +622,7 @@ async function buildTeam(team: ResolvedTeam, venue: 'H' | 'A'): Promise<TeamForm
   const since = seasonStart()
   return {
     id: team.id,
-    name: team.name,
+    name: displayName(team.id, team.name),
     league: games[0]?.league ?? team.league,
     venue,
     games: games.slice(0, 20),
@@ -657,6 +660,6 @@ export const teamContext = unstable_cache(
     ])
     return { resolution, home: h, away: a, h2h, checked: PREDICATES.length * 2 * 2 }
   },
-  ['gc-team-context-v2'],
+  ['gc-team-context-v3'],
   { revalidate: 3 * 3600 }
 )

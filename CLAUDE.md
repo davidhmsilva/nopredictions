@@ -1979,6 +1979,39 @@ no longer count them twice. **The rows themselves were not deleted.**
 Also fixed: `.gcx-table th` out-ranked `.gc-r`, so every numeric table header
 (the Game Center's standings included) sat left of its column.
 
+### Display names, the Teams tab and club search (2026-09-29)
+
+🔑 **Our canonical names are Football-Data's abbreviations** ("Sp Lisbon",
+"Ath Madrid", "Nott'm Forest", "M'gladbach", "Sociedad"). They stay the join
+key everywhere; what the site SHOWS now comes from
+`site/app/lib/team_names.json` through `lib/teamDisplay.ts`, written by
+`agent/team_display_names.py` from ESPN's team list, league by league. 395 of
+398 listed clubs are named; the rest keep the canonical. Team page titles,
+slugs (`/team/480-sporting-cp`), tables, opponents, the Game Center's Stats tab
+and H2H all use it. Re-run it when promoted clubs arrive:
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python team_display_names.py --dry-run   # every rename, nothing written
+python team_display_names.py
+```
+
+⚠️ A one-word ESPN short name ("Atlético") scores 1.0 for Athletic Bilbao as
+readily as for Atlético Madrid, and a greedy assignment then gives it to
+whichever club is listed first. Short names are weighted 0.9 and **two clubs
+tied for one ESPN team are both left out**; five hand overrides, each with its
+reason, cover the rest.
+
+- **Teams** is a tab (desktop and the phone bar), between Home and Lab.
+- The nav search suggests clubs as you type: `/api/teams` (the listed clubs
+  plus every spelling we hold: canonical, ESPN, Polymarket, the database's
+  aliases), fetched on the first focus only, matched on whole names and word
+  prefixes, ties broken by division. Enter with no club highlighted keeps the
+  old behaviour (a board search, or a pasted Polymarket link).
+- 🐛 From 761 to ~845px the nav was wider than the window and "Sign up" was cut
+  off; the fifth tab would have pushed that to ~935px. A 761-1000px band now
+  tightens the tabs and the box, and Pricing drops out below 900px.
+
 ## Live stats coverage — measured 2026-08-19
 
 "More leagues" turned out not to be a stats problem. Over three days of

@@ -26,7 +26,31 @@ import {
   type Streak,
   type TeamGame,
 } from './teamform'
+import { displayKeys, displayName } from './teamDisplay'
 import type { ScoutFixture } from './scoutTypes'
+import PM_ALIASES from './pm_team_aliases.json'
+
+/** Polymarket's spellings of each of our clubs, from the models' alias file
+ *  (Polymarket name → canonical). Inverted once: "Sp Lisbon" → "sporting cp",
+ *  "sporting lisbon", … — the names the boards actually print. */
+const PM_BY_CANON = (() => {
+  const m = new Map<string, string[]>()
+  for (const [pm, canon] of Object.entries(PM_ALIASES as Record<string, string>)) {
+    if (canon === '__NOT_IN_MODEL__') continue
+    const list = m.get(canon) ?? []
+    list.push(pm)
+    m.set(canon, list)
+  }
+  return m
+})()
+
+/** Every spelling of a club we know: ours, the database's aliases, ESPN's and
+ *  Polymarket's. For matching and search, never for display. */
+export function spellingsOf(id: number, canonical: string, aliases: string[] = []): string[] {
+  return Array.from(
+    new Set([canonical, ...displayKeys(id), ...aliases, ...(PM_BY_CANON.get(canonical) ?? [])])
+  )
+}
 
 export interface TableRow {
   id: number
@@ -181,7 +205,7 @@ export function buildTable(ms: SeasonMatch[], league: string, country: string | 
       [Number(m.away_team_id), m.an, m.as_, m.hs, p ? 3 * p[2] + p[1] : null],
     ]
     for (const [id, name, f, a, x] of sides) {
-      const r = row(id, name)
+      const r = row(id, displayName(id, name))
       const pts = f > a ? 3 : f === a ? 1 : 0
       r.p++
       r.gf += f
@@ -239,7 +263,7 @@ export const teamPage = unstable_cache(
     const table = season ? await tableOf(season.season_id, season.league, season.country, season.label) : null
     return assemble(t, games, table)
   },
-  ['team-page-v1'],
+  ['team-page-v2'],
   { revalidate: 3 * 3600 }
 )
 
@@ -249,7 +273,7 @@ export function assemble(t: TeamRow, games: TeamGame[], table: LeagueTable | nul
   const league = table?.league ?? games[0]?.league ?? null
   return {
     id: Number(t.id),
-    name: t.canonical_name,
+    name: displayName(t.id, t.canonical_name),
     country: t.country,
     league,
     games: games.slice(0, 30),
@@ -266,7 +290,7 @@ export function assemble(t: TeamRow, games: TeamGame[], table: LeagueTable | nul
     seasonOvers: seasonOvers(games),
     table,
     lastPlayed: games[0]?.date ?? null,
-    names: Array.from(new Set([t.canonical_name, ...(t.aliases ?? [])])),
+    names: spellingsOf(Number(t.id), t.canonical_name, t.aliases ?? []),
     checked: PREDICATE_COUNT(),
   }
 }
@@ -282,13 +306,19 @@ const COMMON = new Set([
   'rb', 'ud', 'sd', 'rc', 'as', 'ss', 'us', 'cs', 'if', 'bk', 'st', 'saint', 'san', 'santa', 'de', 'da', 'do',
 ])
 
-function tokens(s: string): string[] {
+function flat(s: string): string {
   return s
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9 ]/g, ' ')
-    .split(/\s+/)
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function tokens(s: string): string[] {
+  return flat(s)
+    .split(' ')
     .filter((w) => w.length >= 3 && !COMMON.has(w))
 }
 
@@ -311,12 +341,26 @@ export interface UpcomingGame {
  *  both sides together, which is what separates Rangers from QPR. A cheap
  *  token prefilter decides which fixtures are worth resolving at all. */
 export async function upcomingFor(team: TeamPageData, fixtures: ScoutFixture[]): Promise<UpcomingGame[]> {
+  // Two ways in: a whole name we already know ("Sporting CP" is one of our
+  // spellings of "Sp Lisbon", though every word of it is generic or short),
+  // or a distinctive word in common.
+  const whole = new Set(team.names.map(flat))
   const mine = new Set(team.names.flatMap(tokens))
-  if (!mine.size) return []
+  const rank = (f: ScoutFixture) =>
+    whole.has(flat(f.home)) || whole.has(flat(f.away))
+      ? 2
+      : [...tokens(f.home), ...tokens(f.away)].some((w) => mine.has(w))
+        ? 1
+        : 0
+  // Whole-name hits first, so a word shared with a dozen other boards cannot
+  // push the club's own fixture past the cut.
   const maybe = fixtures
     .filter((f) => !f.finished)
-    .filter((f) => [...tokens(f.home), ...tokens(f.away)].some((w) => mine.has(w)))
+    .map((f) => ({ f, r: rank(f) }))
+    .filter((x) => x.r > 0)
+    .sort((a, b) => b.r - a.r)
     .slice(0, 12)
+    .map((x) => x.f)
 
   const out: UpcomingGame[] = []
   for (const f of maybe) {
@@ -344,19 +388,24 @@ export async function upcomingFor(team: TeamPageData, fixtures: ScoutFixture[]):
 
 export interface TeamIndexEntry {
   id: number
+  /** The display name (lib/teamDisplay). */
   name: string
   league: string
   country: string | null
   tier: number | null
+  /** Every other spelling we hold, for the search box. */
+  spellings: string[]
 }
 
 /** Clubs that played a domestic league match in the last 120 days — the
- *  sitemap and the /teams index. Older ones still have a page; they are just
- *  not advertised. */
+ *  sitemap, the /teams index and the search box. Older ones still have a
+ *  page; they are just not advertised. */
 export const listTeams = unstable_cache(
   async (): Promise<TeamIndexEntry[]> => {
     const sql = getSql()
-    const rows = await sql<{ id: number; name: string; league: string; country: string | null; tier: number | null }[]>`
+    const rows = await sql<
+      { id: number; name: string; league: string; country: string | null; tier: number | null; aliases: string[] }[]
+    >`
       with recent as (
         select m.home_team_id tid, s.league_id, m.kickoff_utc from matches m join seasons s on s.id = m.season_id
          where m.kickoff_utc > now() - interval '120 days' and m.home_score is not null
@@ -372,12 +421,31 @@ export const listTeams = unstable_cache(
            and r.tid in (select tid from recent group by tid having count(*) >= 3)
          order by r.tid, r.kickoff_utc desc
       )
-      select t.id, t.canonical_name name, l.name league, l.country, l.tier
+      select t.id, t.canonical_name name, l.name league, l.country, l.tier,
+             coalesce((select array_agg(distinct a.alias) from team_aliases a where a.team_id = t.id), '{}') aliases
         from latest x join teams t on t.id = x.tid join leagues l on l.id = x.league_id
-       order by l.country nulls last, l.tier nulls last, l.name, t.canonical_name
     `
-    return rows.map((r) => ({ ...r, id: Number(r.id) }))
+    return rows
+      .map((r) => {
+        const id = Number(r.id)
+        const name = displayName(id, r.name)
+        return {
+          id,
+          name,
+          league: r.league,
+          country: r.country,
+          tier: r.tier,
+          spellings: spellingsOf(id, r.name, r.aliases ?? []).filter((s) => s !== name),
+        }
+      })
+      .sort(
+        (a, b) =>
+          (a.country ?? '~').localeCompare(b.country ?? '~') ||
+          (a.tier ?? 99) - (b.tier ?? 99) ||
+          a.league.localeCompare(b.league) ||
+          a.name.localeCompare(b.name)
+      )
   },
-  ['team-index-v1'],
+  ['team-index-v2'],
   { revalidate: 12 * 3600 }
 )

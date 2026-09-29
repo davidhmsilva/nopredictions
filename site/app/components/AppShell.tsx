@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
 import {
   IconAccount,
   IconAgent,
@@ -10,16 +10,19 @@ import {
   IconLab,
   IconMenu,
   IconSearch,
+  IconTeams,
   IconWallet,
 } from './icons'
 import { invalidateSession, useSession } from '../lib/useSession'
 import { OddsToggle } from './OddsToggle'
 import { SPORT_KEYS } from '../lib/sportsMeta'
+import { loadTeamIndex, searchTeams, type TeamHit } from '../lib/teamIndex'
+import { teamHref } from '../lib/teamSlug'
 
 /** The tabs, in the order a bettor uses them on a matchday:
- *  where is the edge → can I test my own idea → what is the agent doing →
- *  who else is doing it well. Game Center is deliberately absent: you reach a
- *  fixture by clicking it, never by picking a tab. */
+ *  what is on → the clubs behind it → can I test my own idea → what is the
+ *  agent doing → who else is doing it well. Game Center is deliberately
+ *  absent: you reach a fixture by clicking it, never by picking a tab. */
 export const TABS: {
   href: string
   label: string
@@ -27,6 +30,7 @@ export const TABS: {
   Icon: (p: { className?: string }) => JSX.Element
 }[] = [
   { href: '/',       label: 'Home',   hint: "Today's boards", Icon: IconBoard },
+  { href: '/teams',  label: 'Teams',  hint: 'Every club',     Icon: IconTeams },
   { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
   { href: '/agent',  label: 'Agents', hint: 'Yours',          Icon: IconAgent },
   { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
@@ -43,6 +47,8 @@ function isActive(pathname: string, href: string): boolean {
       SPORT_KEYS.some((k) => pathname === `/${k}` || pathname.startsWith(`/${k}/`))
     )
   }
+  // One club's page lives at /team/…, the index at /teams.
+  if (href === '/teams') return pathname === '/teams' || pathname.startsWith('/team/')
   return pathname === href || pathname.startsWith(href + '/')
 }
 
@@ -57,13 +63,55 @@ function NavSearch({
 } = {}) {
   const router = useRouter()
   const [q, setQ] = useState('')
+  // The club list arrives on the first focus, never with the page: most
+  // visitors never touch the box, and it is the same few kB for all of them.
+  const [teams, setTeams] = useState<TeamHit[] | null>(null)
+  const [open, setOpen] = useState(false)
+  const [hi, setHi] = useState(-1)
+  const hits = useMemo(() => (teams ? searchTeams(teams, q) : []), [teams, q])
+  const showList = open && hits.length > 0
 
-  /** A pasted Polymarket soccer link goes straight to that fixture; anything
-   *  else — a team in any sport, or a link to a US game — is a search on the
-   *  home board, which holds every sport and matches full names, short names,
+  function wake() {
+    setOpen(true)
+    if (!teams) loadTeamIndex().then(setTeams).catch(() => {})
+  }
+
+  function goTeam(t: TeamHit) {
+    router.push(teamHref(t.i, t.n))
+    setQ('')
+    setOpen(false)
+    setHi(-1)
+    onDone?.()
+  }
+
+  function onKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') {
+      setOpen(false)
+      setHi(-1)
+      return
+    }
+    if (!hits.length) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setOpen(true)
+      setHi((h) => (h + 1) % hits.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHi((h) => (h <= 0 ? hits.length - 1 : h - 1))
+    }
+  }
+
+  /** A highlighted club opens its page. Otherwise, as before: a pasted
+   *  Polymarket soccer link goes straight to that fixture; anything else — a
+   *  team in any sport, or a link to a US game — is a search on the home
+   *  board, which holds every sport and matches full names, short names,
    *  abbreviations and each game's exchange links. */
   function submit(e: FormEvent) {
     e.preventDefault()
+    if (showList && hi >= 0 && hits[hi]) {
+      goTeam(hits[hi])
+      return
+    }
     const v = q.trim()
     if (!v) return
     const slug = v.match(
@@ -76,6 +124,8 @@ function NavSearch({
     router.push(slug && !usSlug ? `/game/${slug}` : `/?q=${encodeURIComponent(term)}`)
     // Already on the home page, a push to "/?q=" does not remount it; tell it.
     if (!(slug && !usSlug)) window.dispatchEvent(new CustomEvent('np-search', { detail: term }))
+    setOpen(false)
+    setHi(-1)
     onDone?.()
   }
 
@@ -84,12 +134,50 @@ function NavSearch({
       <span className="np-search-icn" aria-hidden="true">⌕</span>
       <input
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={(e) => {
+          setQ(e.target.value)
+          setOpen(true)
+          setHi(-1)
+        }}
+        onFocus={wake}
+        // A click on a suggestion lands after the blur; the list keeps itself
+        // alive through onMouseDown below rather than through a timer here.
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKey}
         placeholder="Search a team, or paste a Polymarket link…"
-        aria-label="Search fixtures"
+        aria-label="Search teams and fixtures"
+        role="combobox"
+        aria-expanded={showList}
+        aria-controls="np-search-list"
+        aria-autocomplete="list"
+        aria-activedescendant={showList && hi >= 0 ? `np-search-opt-${hi}` : undefined}
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus={autoFocus}
       />
+      {showList && (
+        <ul className="np-search-list" id="np-search-list" role="listbox" aria-label="Teams">
+          {hits.map((t, i) => (
+            <li
+              key={t.i}
+              id={`np-search-opt-${i}`}
+              role="option"
+              aria-selected={i === hi}
+              className={i === hi ? 'is-hi' : ''}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                goTeam(t)
+              }}
+              onMouseEnter={() => setHi(i)}
+            >
+              <span className="np-search-name">{t.n}</span>
+              <span className="np-search-league">{t.l}</span>
+            </li>
+          ))}
+          <li className="np-search-foot" aria-hidden="true">
+            ↵ on a club opens its page · ↵ on the text searches today&apos;s boards
+          </li>
+        </ul>
+      )}
     </form>
   )
 }
@@ -164,7 +252,7 @@ function AccountActions() {
         </>
       ) : (
         <>
-          <Link href="/pricing" className="np-btn-ghost np-wide-only">Pricing</Link>
+          <Link href="/pricing" className="np-btn-ghost np-wide-only np-nav-pricing">Pricing</Link>
           <Link href={loginHref} className="np-btn-ghost np-wide-only">Log in</Link>
           <Link href={signupHref} className="np-btn-signup np-wide-only">Sign up</Link>
         </>
