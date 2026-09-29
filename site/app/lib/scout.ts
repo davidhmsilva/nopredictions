@@ -178,7 +178,7 @@ function tidyLabel(label: string, slug: string): string {
 /** Events carry several tags in no guaranteed order, so the first non-noise one
  *  is not reliably the best one. Prefer a label that reads as written prose over
  *  a bare slug, and the longest of those. */
-function competitionOf(ev: Raw): string | null {
+export function competitionOf(ev: Raw): string | null {
   const candidates: string[] = []
   for (const t of (ev.tags as Raw[]) ?? []) {
     const slug = str(t.slug).toLowerCase()

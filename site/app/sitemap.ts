@@ -32,6 +32,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...SPORT_KEYS.map((k) => page(`/${k}`, 'hourly', 0.9)),
     page('/dropping-odds', 'hourly', 0.8),
     page('/teams', 'weekly', 0.7),
+    // The last week of results: a finished day never changes once filled.
+    ...Array.from({ length: 7 }, (_, i) =>
+      page(`/results/${new Date(Date.now() - (i + 1) * 86_400_000).toISOString().slice(0, 10)}`, 'daily', 0.6)
+    ),
     page('/insights', 'weekly', 0.6),
     ...articleSlugs().map((s) => page(`/insights/${s}`, 'monthly', 0.5)),
     page('/lab', 'monthly', 0.6),

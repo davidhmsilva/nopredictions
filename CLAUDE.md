@@ -2012,6 +2012,53 @@ reason, cover the rest.
   off; the fifth tab would have pushed that to ~935px. A 761-1000px band now
   tightens the tabs and the box, and Pricing drops out below 900px.
 
+## Results against the price — Yesterday · Today · Tomorrow (2026-09-29)
+
+`/results/<day>`: every finished Polymarket soccer fixture of a day, with the
+1X2 price at kick-off, what happened, the day's line ("favourites won 54 of
+97; the prices expected 48.4") and the games the market gave least. The soccer
+board has a Yesterday · Today · Tomorrow · Next 48h strip; Yesterday is this
+page, the others filter the board by the READER's calendar day
+(`lib/localDay.ts`).
+
+| | |
+|---|---|
+| `db/059` `pm_results` | one row per fixture event; RLS on, no policies |
+| `lib/pmResults.ts` | `computeDay` (Gamma + CLOB history), `favRecordFor`, `storeRows`, `readRange`, `calibration` |
+| `/api/cron/pm-results` | Vercel Cron daily 05:17 UTC (the two days before); `?day=`, `?from=&to=` (backfill, returns `next`), `?dry=1` |
+| `/results/[day]` | server page + `ResultsView`; `/results` redirects to yesterday |
+
+Measured on Sunday 2026-09-27 (`?dry=1`, 12s): **95 fixtures, 95 priced, 95
+resolved.** The price is the CLOB's own history at the last point at or before
+kick-off (inside the kick-off minute on 97 of 98 in the prototype; the three
+Yes prices summed to 1.005 at the median), normalised. The outcome is
+Polymarket's RESOLUTION (exactly one Yes paid), never the score. 60 of 98
+events carry PM's own final score; the rest show the outcome only. History
+exists back to at least March 2026 (10/10 fixtures of 2026-03-14 priced), so a
+backfill fills the calibration table at once:
+
+```bash
+curl "https://<deployment>/api/cron/pm-results?from=2026-03-01&to=2026-09-27"   # repeat with from=<next>
+```
+
+**The favourite's record at its price** (`fav_record`, frozen at write time,
+games BEFORE the kick-off only): Polymarket's own earlier fixtures of that
+name at ±7.5pp, and for clubs our closing odds (Pinnacle, else the average).
+🔑 It is shown as a curiosity and the page says so: across **4,455 club
+seasons** a club's wins-minus-priced-wins in one season correlates **0.004**
+with the next, and **0.040 over 646 pairs** as a 60–75% favourite — inside
+chance. A team "that loses as a favourite" is not a thing the closing price
+misses.
+
+⚠️ **National teams have no odds in our database.** 8,394 international
+matches since 2015 (106 of Germany's), zero with odds. Free sources are thin:
+ESPN's pickcenter (DraftKings) only from 2024-09 (10 completed Germany games),
+Polymarket from 2024 (20). A long history needs a new stage: The Odds API's
+historical endpoint (paid plans, from June 2020), Betfair Historical Data
+(free BASIC, from 2015, needs a Betfair account — may not open from
+Portugal), or OddsPortal (from ~2004, but its terms forbid scraping). **A
+decision for the operator; asked 2026-09-29.**
+
 ## Live stats coverage — measured 2026-08-19
 
 "More leagues" turned out not to be a stats problem. Over three days of
