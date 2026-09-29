@@ -22,13 +22,16 @@ export function yesterdayLocal(): string {
   return shiftDay(todayLocal(), -1)
 }
 
-/** "Sun 27 Sep" / "Sun, Sep 27" — a date alone, in the reader's locale. */
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "Sun 27 Sep" / "Sun, Sep 27". Spelled out by hand, not with
+ *  toLocaleDateString: Node's ICU writes "Sep" where Chrome's writes "Sept",
+ *  and a server-rendered label that the browser re-spells is a hydration
+ *  error that throws the whole page into client rendering. */
 export function dayLabel(day: string, us: boolean): string {
   const d = new Date(`${day}T12:00:00Z`)
-  return d.toLocaleDateString(us ? 'en-US' : 'en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  })
+  const w = WEEKDAYS[d.getUTCDay()]
+  const m = MONTHS[d.getUTCMonth()]
+  return us ? `${w}, ${m} ${d.getUTCDate()}` : `${w} ${d.getUTCDate()} ${m}`
 }

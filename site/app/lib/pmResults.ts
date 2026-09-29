@@ -223,7 +223,10 @@ export async function computeDay(day: string, skip: Set<string> = new Set()): Pr
       p = { home: by.home, draw: by.draw, away: by.away }
       at = new Date(Math.min(...got.map((g) => (g as { t: number }).t)) * 1000).toISOString()
     }
-    const winners = legs.filter((l) => l.won === true)
+    // A cancelled fixture has no result, whatever its markets settled to
+    // (China v New Zealand, 2026-09-27: period CAN, one question paid).
+    const cancelled = str(ev.period).toUpperCase() === 'CAN'
+    const winners = cancelled ? [] : legs.filter((l) => l.won === true)
     const live = pmLiveOf(ev)
     return {
       slug,
