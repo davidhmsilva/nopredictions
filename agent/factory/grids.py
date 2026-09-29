@@ -156,6 +156,59 @@ def nfl_prematch() -> list:
     return out
 
 
+STATUS = [("", None), ("elite", 1), ("upper", 2), ("lower", 3), ("newcomer", 4)]
+STATUS_LEAGUES = ["BEL-JPL", "ENG-CH", "ENG-CON", "ENG-L1", "ENG-L2", "ENG-PR", "ESP-L2", "ESP-LL",
+                  "FRA-L1", "FRA-L2", "GER-BL1", "GER-BL2", "GRE-SL", "ITA-SA", "ITA-SB", "NED-ED",
+                  "POR-PL", "SCO-CH", "SCO-L1", "SCO-L2", "SCO-PR", "TUR-SL"]
+PHASES = [("", []), ("early", [["played", "<=", 8]]), ("late", [["rounds_left", "<=", 6]])]
+
+
+def _status_scopes():
+    return ([("", []), ("tier1", [["tier", "==", 1]])]
+            + [(lc, [["league_code", "==", lc]]) for lc in STATUS_LEAGUES])
+
+
+def _status(universe: str) -> list:
+    """Who bets on whom: team status × opponent status × price × league × phase."""
+    out = []
+    tag = universe.split("_")[-1]
+    bands_1x2 = [(None, None), (1.0, 1.35), (1.35, 1.7), (1.7, 2.3), (2.3, 3.5), (3.5, 8.0), (8.0, 50.0)]
+    for side, (bn, bv), (on, ov), (lo, hi), (sn, sw), (pn, pw) in product(
+            ("home", "away"), STATUS, STATUS, bands_1x2, _status_scopes(), PHASES):
+        if bv is None and ov is None and lo is None:
+            continue                        # "bet every home side" is not a status rule
+        where = ([["bet_status", "==", bv]] if bv else []) + ([["opp_status", "==", ov]] if ov else []) + sw + pw
+        price = {} if lo is None else {"odds_min": lo, "odds_max": hi}
+        bits = [tag, side, bn and f"{bn}", on and f"vs {on}", sn, pn, lo and f"@{lo:g}-{hi:g}"]
+        out.append(_spec(f"{universe}_1x2", universe, bits, where, price, market="1x2", side=side))
+    bands_d = [(None, None), (2.5, 3.6), (3.6, 4.5), (4.5, 15.0)]
+    bands_ou = [(None, None), (1.3, 1.8), (1.8, 2.3), (2.3, 4.0)]
+    for (hn, hv), (an, av), (sn, sw), (pn, pw) in product(STATUS, STATUS, _status_scopes(), PHASES):
+        if hv is None and av is None:
+            continue
+        base = ([["home_status", "==", hv]] if hv else []) + ([["away_status", "==", av]] if av else []) + sw + pw
+        who = f"{hn or 'any'} v {an or 'any'}"
+        for lo, hi in bands_d:
+            out.append(_spec(f"{universe}_draw", universe, [tag, "draw", who, sn, pn, lo and f"@{lo:g}-{hi:g}"],
+                             base, {} if lo is None else {"odds_min": lo, "odds_max": hi},
+                             market="1x2", side="draw"))
+        for side in ("over", "under"):
+            for lo, hi in bands_ou:
+                out.append(_spec(f"{universe}_ou25", universe,
+                                 [tag, f"{side} 2.5", who, sn, pn, lo and f"@{lo:g}-{hi:g}"],
+                                 base, {} if lo is None else {"odds_min": lo, "odds_max": hi},
+                                 market="ou25", side=side))
+    return out
+
+
+def soccer_status_pinnacle() -> list:
+    return _status("soccer_status_pinnacle")
+
+
+def soccer_status_pm() -> list:
+    return _status("soccer_status_pm")
+
+
 TEMPLATES = {
     "soccer_inplay_next_goal": next_goal,
     "soccer_inplay_ht_over05": ht_over05,
@@ -164,6 +217,8 @@ TEMPLATES = {
     "soccer_prematch_close": soccer_prematch_close,
     "soccer_prematch_open": soccer_prematch_open,
     "nfl_prematch": nfl_prematch,
+    "soccer_status_pinnacle": soccer_status_pinnacle,
+    "soccer_status_pm": soccer_status_pm,
 }
 
 

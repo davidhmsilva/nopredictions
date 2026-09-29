@@ -18,8 +18,9 @@ What a result means:
 """
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -41,6 +42,7 @@ class Frame:
     train: np.ndarray               # row belongs to a train-period fixture
     cutoff: Optional[pd.Timestamp]
     _tok: Optional[dict] = None
+    _conds: dict = field(default_factory=dict)   # (col, op, val) -> bool mask, shared across a grid
 
     def token_index(self) -> dict:
         """token_id -> (minutes, bids), sorted by minute — the tape a cash-out reads."""
@@ -108,15 +110,23 @@ def _cond(a: np.ndarray, op: str, v) -> np.ndarray:
     raise ValueError(op)
 
 
+def _cached(fr: Frame, col: str, op: str, val) -> np.ndarray:
+    key = (col, op, json.dumps(val, default=str))
+    hit = fr._conds.get(key)
+    if hit is None:
+        hit = fr._conds[key] = _cond(fr.cols[col], op, val)
+    return hit
+
+
 def mask(spec: dict, fr: Frame, require_won: bool = True) -> np.ndarray:
     c = fr.cols
     m = np.ones(len(fr.df), bool)
     if spec.get("market"):
-        m &= pd.Series(c["market"]).eq(spec["market"]).to_numpy()
+        m &= _cached(fr, "market", "==", spec["market"])
     if spec.get("side"):
-        m &= pd.Series(c["side"]).eq(spec["side"]).to_numpy()
+        m &= _cached(fr, "side", "==", spec["side"])
     for col, op, val in spec["where"]:
-        m &= _cond(c[col], op, val)
+        m &= _cached(fr, col, op, val)
     p = spec.get("price") or {}
     odds, ask = _num(c["odds"]), _num(c["ask"])
     with np.errstate(invalid="ignore"):
@@ -143,8 +153,8 @@ def entries(fr: Frame, m: np.ndarray) -> np.ndarray:
     return idx[first]
 
 
-def cost_per_share(ask: np.ndarray) -> np.ndarray:
-    return ask * (1.0 + FEE_RATE * (1.0 - ask))
+def cost_per_share(ask: np.ndarray, fee: float = FEE_RATE) -> np.ndarray:
+    return ask * (1.0 + fee * (1.0 - ask))
 
 
 def returns(fr: Frame, eidx: np.ndarray, exit: dict) -> tuple[np.ndarray, int]:
@@ -153,7 +163,8 @@ def returns(fr: Frame, eidx: np.ndarray, exit: dict) -> tuple[np.ndarray, int]:
     c = fr.cols
     ask = _num(c["ask"])[eidx]
     won = _num(c["won"])[eidx]
-    cost = cost_per_share(ask)
+    fee = fr.U.fee_rate
+    cost = cost_per_share(ask, fee)
     ret = won / cost - 1.0
     fallbacks = 0
     if exit.get("type") == "cash_out" and eidx.size:
@@ -170,7 +181,7 @@ def returns(fr: Frame, eidx: np.ndarray, exit: dict) -> tuple[np.ndarray, int]:
             j = int(np.searchsorted(tm, M))
             if j < len(tm) and tm[j] <= M + 3 and np.isfinite(tb[j]) and tb[j] > 0:
                 b = tb[j]
-                ret[k] = b * (1.0 - FEE_RATE * (1.0 - b)) / cost[k] - 1.0
+                ret[k] = b * (1.0 - fee * (1.0 - b)) / cost[k] - 1.0
             else:
                 # the token left the tape: in 'next goal' that is the goal that
                 # settled it; otherwise a recording gap — hold is the only honest read
@@ -198,7 +209,7 @@ def calibration(fr: Frame, m: np.ndarray) -> dict:
     if idx.size == 0:
         return {"fixtures": 0}
     ask = _num(fr.cols["ask"])[idx]
-    diff = _num(fr.cols["won"])[idx] - cost_per_share(ask)
+    diff = _num(fr.cols["won"])[idx] - cost_per_share(ask, fr.U.fee_rate)
     per = pd.Series(diff).groupby(fr.fix[idx]).mean().to_numpy()
     k = per.size
     mu = float(per.mean())
@@ -218,6 +229,21 @@ def backtest_one(spec: dict, fr: Frame) -> dict:
             "test": summarize(ret[~tr], won[~tr], ask[~tr]), "cal": calibration(fr, m),
             "cash_out_fallbacks": fb,
             "cutoff": fr.cutoff.isoformat() if fr.cutoff is not None else None}
+
+
+def by_season(spec: dict, fr: Frame) -> pd.DataFrame:
+    """One row per season (July-June): entries, P&L and yield — the shape of a
+    rule over time, which is how an edge that USED to pay shows itself."""
+    e = entries(fr, mask(spec, fr))
+    if e.size == 0:
+        return pd.DataFrame(columns=["season", "n", "pnl", "yield"])
+    ret, _ = returns(fr, e, spec.get("exit") or {"type": "hold"})
+    ts = pd.to_datetime(pd.Series(fr.cols["ts"][e]), utc=True)
+    season = (ts.dt.year - (ts.dt.month < 7)).to_numpy()
+    g = pd.DataFrame({"season": season, "r": ret}).groupby("season")["r"]
+    out = pd.DataFrame({"n": g.size(), "pnl": g.sum()}).reset_index()
+    out["yield"] = out["pnl"] / out["n"]
+    return out
 
 
 def bh_qvalues(p: list) -> list:

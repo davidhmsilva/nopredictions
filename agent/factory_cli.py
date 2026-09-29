@@ -24,6 +24,8 @@ import sys
 import time
 from datetime import datetime, timezone
 
+import pandas as pd
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
@@ -101,6 +103,71 @@ def _csv(results) -> str:
     return path
 
 
+ERAS = [(2012, 2015), (2016, 2018), (2019, 2021), (2022, 2025)]
+ERA_KEYS = [f"{a}-{b + 1 - 2000:02d}" for a, b in ERAS]
+
+
+def _eras(seasons) -> dict:
+    out = {}
+    for a, b in ERAS:
+        x = seasons[(seasons["season"] >= a) & (seasons["season"] <= b)]
+        out[f"{a}-{b + 1 - 2000:02d}"] = (int(x["n"].sum()), float(x["pnl"].sum()),
+                                           float(x["pnl"].sum() / x["n"].sum()) if x["n"].sum() else None)
+    return out
+
+
+def _decay(results, frames) -> str:
+    """Rules that paid, and rules that USED to pay and stopped.
+
+    alive  — passed: FDR-significant on 2012-22 and positive on 2022-26
+    died   — FDR-significant on 2012-22 (q <= 0.10) and ≤ 0 on 2022-26
+    faded  — positive in the first two eras, ≤ 0 in the last two (no FDR claim:
+             the shape of a market correcting, reported for research)
+    """
+    rows = []
+    for r in results:
+        if not r["tested"]:
+            continue
+        s, U = r["spec"], frames[r["spec"]["universe"]].U
+        te = r["test"]
+        died = r.get("q", 1) <= engine.FDR_Q and te.get("n", 0) >= U.min_n_test and te.get("yield", 1) <= 0
+        pre = r["train"]
+        if not (r["pass"] or died or (pre.get("yield", 0) > 0.03 and pre.get("p", 1) < 0.01)):
+            continue
+        sea = engine.by_season(s, frames[s["universe"]])
+        er = _eras(sea)
+        ys = [v[2] for v in er.values()]
+        faded = (all(y is not None for y in ys) and ys[0] > 0 and ys[1] > 0 and ys[2] <= 0 and ys[3] <= 0)
+        kind = "alive" if r["pass"] else ("died" if died else ("faded" if faded else None))
+        if not kind:
+            continue
+        full = sea[sea["season"] <= 2024]
+        rows.append({"kind": kind, "universe": s["universe"], "name": s["name"], "q": r.get("q"),
+                     "train_n": pre.get("n"), "train_yield": pre.get("yield"),
+                     "test_n": te.get("n"), "test_yield": te.get("yield"),
+                     "seasons_pos": int((full["pnl"] > 0).sum()), "seasons": int(len(full)),
+                     "units_per_season": float(full["pnl"].mean()) if len(full) else None,
+                     **{f"era_{k}": v[2] for k, v in er.items()},
+                     **{f"n_{k}": v[0] for k, v in er.items()}, "spec": json.dumps(s)})
+    os.makedirs(REPORTS, exist_ok=True)
+    path = os.path.join(REPORTS, f"factory_decay_{datetime.now(timezone.utc):%Y-%m-%d_%H%M}.csv")
+    if rows:
+        with open(path, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+    for kind in ("alive", "died", "faded"):
+        ks = [x for x in rows if x["kind"] == kind]
+        print(f"\n== {kind}: {len(ks)}")
+        key = (lambda x: x["test_yield"] * (x["test_n"] or 0) ** 0.5) if kind == "alive" else \
+              (lambda x: -(x["train_yield"] or 0) * (x["train_n"] or 0) ** 0.5)
+        for x in sorted(ks, key=key, reverse=(kind == "alive"))[:25]:
+            eras = " ".join(f"{(x[f'era_{k}'] or 0) * 100:+5.1f}%" for k in ERA_KEYS)
+            print(f"  {x['name'][:70]:<70} n {x['train_n']}/{x['test_n']} · seasons+ {x['seasons_pos']}/{x['seasons']}"
+                  f" · eras {eras}")
+    return path
+
+
 def cmd_universes(_):
     for U in UNIVERSES.values():
         print(f"\n{U.name}  [{U.price_source}{', LIVE' if U.live else ''}]  split {U.split}  "
@@ -124,6 +191,8 @@ def cmd_grid(args):
     log.info(f"{len(specs):,} specs backtested in {time.time() - t:.0f}s")
     _report(results)
     print(f"\nfull grid → {_csv(results)}")
+    if args.decay:
+        print(f"\ndecay report → {_decay(results, frames)}")
     if args.register:
         print("registered:", registry.upsert_results(conn, results), registry.upsert_explore(conn, results))
 
@@ -192,6 +261,7 @@ def main():
     g.add_argument("--universe", action="append", choices=sorted(UNIVERSES))
     g.add_argument("--register", action="store_true")
     g.add_argument("--refresh", action="store_true")
+    g.add_argument("--decay", action="store_true", help="also report rules that used to pay and stopped")
     b = sub.add_parser("backtest")
     b.add_argument("--spec", required=True)
     lb = sub.add_parser("leaderboard")
