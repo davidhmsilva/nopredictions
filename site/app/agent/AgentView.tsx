@@ -8,6 +8,7 @@ import Link from 'next/link'
 import type { AgentDetail, AgentSummary } from '../lib/agents'
 import { dateText, dayTimeText, oddsText, useOddsFormat } from '../lib/display'
 import { EquityChart, StatusBadge, ago, pct, pickOf, settledOf, sinceText, tone, units } from './parts'
+import { describeInplay, isInplaySpec } from '../lib/inplaySpec'
 
 /** Any verdict needs this many settled bets (CLAUDE.md, rule 4). */
 const VERDICT_N = 200
@@ -142,6 +143,24 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
         <h2 className="gc-h2">Profit and loss</h2>
         <EquityChart curve={curve} />
       </section>
+
+      {isInplaySpec(a.spec) && (() => {
+        const r = describeInplay(a.spec)
+        return (
+          <section className="gc-section">
+            <h2 className="gc-h2">The rule</h2>
+            <p className="gc-quiet">It buys when:</p>
+            <ul className="lq-rule">
+              {r.entry.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+            <p className="gc-quiet">
+              {r.exit} A live rule has no replay over past seasons — the record above is its only test.
+            </p>
+          </section>
+        )
+      })()}
 
       {bt && (
         <section className="gc-section">

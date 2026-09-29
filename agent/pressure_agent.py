@@ -1596,7 +1596,9 @@ def report(conn) -> None:
 def run(once: bool, dry_run: bool, interval: int) -> None:
     # Local imports: both arms import this module at their top level.
     import fav_pressure_agent as fav
+    import fav_swing_agent as swing
     import ht_pressure_agent as ht
+    import lab_inplay_runner as lab_live
 
     table = lgt.load(lgt.WIDE_TABLE_PATH)
     log.info(f"baseline {table['built_at']} — {len(table['cells'])} cells, "
@@ -1614,10 +1616,13 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     strategy_id = None if dry_run else _strategy_id(conn)
     ht_strategy_id = None if dry_run else ht.strategy_id(conn)
     fav_strategy_id = None if dry_run else fav.strategy_id(conn)
+    swing_strategy_id = None if dry_run else swing.strategy_id(conn)
     tracker = LiveMatchTracker()
     pre_cache: dict[str, float] = {}
     ht_state = ht.HTState()
     fav_state = fav.FavState()
+    swing_state = swing.SwingState()
+    lab_live_state = swing.SwingState()
     pm_fixtures: list[dict] = []
     last_markets = 0.0
     dead_polls = 0
@@ -1727,6 +1732,29 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                     f"[{(r['pressure_source'] or 'opening')[:3]}]  #{r['paper_trade_id']}"
                 )
 
+        # Favourite Swing: holds positions across polls (fav_swing_positions), so
+        # it runs even on a cycle whose other writes were dropped.
+        swing_counts = {}
+        if conn is not None or dry_run:
+            try:
+                swing_counts = swing.cycle(conn, swing_strategy_id, signals, pm_fixtures,
+                                           swing_state, dry_run=dry_run)
+            except _DB_DROPPED as exc:
+                log.warning(f"db dropped mid-write [SWING] ({exc.__class__.__name__})")
+                db_dropped = True
+
+        # Users' live Lab rules (db/064): same poll, same stats, no extra calls
+        # to api-football. A rule that errors must not take the arms down.
+        lab_counts = {}
+        if conn is not None and not db_dropped:
+            try:
+                lab_counts = lab_live.cycle(conn, signals, pm_fixtures, lab_live_state, dry_run=dry_run)
+            except _DB_DROPPED as exc:
+                log.warning(f"db dropped mid-write [LAB] ({exc.__class__.__name__})")
+                db_dropped = True
+            except Exception as exc:                          # noqa: BLE001
+                log.exception(f"[LAB] live rules cycle failed: {exc}")
+
         priced = [r for r in rows if r["fair_base"] is not None]
         for r in rows:
             if r["entered"]:
@@ -1741,6 +1769,10 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
         log.info(f"live={len(rows):3d} priced={len(priced):3d} entered={opened:2d} "
                  f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} "
                  f"| FAV rows={len(fav_rows):3d} entered={fav_opened:2d} "
+                 f"| SWING in={swing_counts.get('entered', 0)} held={swing_counts.get('open', 0)}"
+                 f"+{swing_counts.get('goal', 0)} sold={swing_counts.get('sold', 0)} "
+                 f"| LAB rules={lab_counts.get('rules', 0)} in={lab_counts.get('entered', 0)} "
+                 f"held={lab_counts.get('held', 0)} sold={lab_counts.get('sold', 0)} "
                  f"| {time.time() - t0:.1f}s")
 
         if db_dropped:
@@ -1777,7 +1809,9 @@ def main() -> None:
     if args.settle or args.report:
         # Local imports: both arms import this module at their top level.
         import fav_pressure_agent as fav
+        import fav_swing_agent as swing
         import ht_pressure_agent as ht
+        import lab_inplay_runner as lab_live
         conn = _conn()
         try:
             if args.settle:
@@ -1785,10 +1819,13 @@ def main() -> None:
                 log.info(f"settled {settle(conn)} observations")
                 log.info(f"settled {ht.settle(conn)} first-half observations")
                 log.info(f"settled {fav.settle(conn)} favourite observations")
+                log.info(f"settled {swing.settle(conn)} favourite-swing positions held to the end")
+                log.info(f"settled {lab_live.settle(conn)} Lab live-rule positions held to the end")
             if args.report:
                 report(conn)
                 ht.report(conn)
                 fav.report(conn)
+                swing.report(conn)
         finally:
             conn.close()
         return

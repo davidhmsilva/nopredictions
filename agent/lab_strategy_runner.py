@@ -148,9 +148,32 @@ def run_blocker(spec: dict) -> str | None:
     return None
 
 
+TEAM_LISTS = ("home_team_in", "home_team_not_in", "away_team_in", "away_team_not_in")
+
+
 def needs_sides(spec: dict) -> bool:
     return (spec.get("side") in ("home", "away") or bool(spec.get("fav_status"))
-            or bool(spec.get("home_team")) or bool(spec.get("away_team")))
+            or bool(spec.get("home_team")) or bool(spec.get("away_team"))
+            or any(spec.get(k) for k in TEAM_LISTS))
+
+
+def _named(team: str | None, names) -> bool:
+    """Does `team` score as one of `names`? Alias-aware, same bar as a side."""
+    return bool(team) and any(team_score(n, team) >= MIN_SIDE_SCORE for n in names or ())
+
+
+def team_lists_fail(spec: dict, home: str | None, away: str | None) -> str | None:
+    """Operator-written team lists (the Lab UI never produces them). A `_not_in`
+    list is how a name that scores as two clubs is kept out: "Sporting Braga"
+    scores 1.0 against "Sporting CP", so a big-three rule also names Braga as
+    excluded."""
+    for side, team in (("home", home), ("away", away)):
+        inc, exc = spec.get(f"{side}_team_in"), spec.get(f"{side}_team_not_in")
+        if inc and not _named(team, inc):
+            return f"{side} team not in list"
+        if exc and _named(team, exc):
+            return f"{side} team excluded"
+    return None
 
 
 # ── reading a Polymarket event ───────────────────────────────────────────────
@@ -306,6 +329,9 @@ def pick(spec: dict, ev: EventView) -> tuple[dict | None, str, str]:
         return None, "", "home team"
     if spec.get("away_team") and team_score(spec["away_team"], ev.away) < MIN_SIDE_SCORE:
         return None, "", "away team"
+    bad = team_lists_fail(spec, ev.home, ev.away)
+    if bad:
+        return None, "", bad
 
     side = spec.get("side")
     if spec.get("market") == "ou25":
@@ -420,8 +446,12 @@ def running_strategies(conn) -> list[dict]:
     """Running Lab specs. Any that cannot run live is paused here, with the
     reason written where its owner will see it."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # Live rules (spec.kind='inplay') run on the pressure poll, in
+        # lab_inplay_runner.py — this runner would read them as a pre-match
+        # spec with no market and pause them.
         cur.execute("""SELECT id, name, theory, spec FROM strategies
-                        WHERE source = 'lab' AND run_status = 'running' AND retired_at IS NULL""")
+                        WHERE source = 'lab' AND run_status = 'running' AND retired_at IS NULL
+                          AND coalesce(spec->>'kind', '') <> 'inplay'""")
         rows = [dict(r) for r in cur.fetchall()]
     ok = []
     for r in rows:

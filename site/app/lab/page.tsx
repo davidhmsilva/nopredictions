@@ -10,6 +10,9 @@ import { ToolChips, ToolFacts, ToolForm, ToolHead, ToolOutput } from '../compone
 import { useSession } from '../lib/useSession'
 import { oddsText, useOddsFormat } from '../lib/display'
 import { QUOTA_RESET_TEXT } from '../lib/planTerms'
+import { clarify, type LabQuestion } from '../lib/labQuestions'
+import { Clarify } from './Clarify'
+import { InplayResult, type InplayApiResult } from './InplayResult'
 
 // ── types mirrored from the API route ───────────────────────────────────────
 
@@ -71,6 +74,7 @@ const EXAMPLES = [
   'Back over 2.5 goals when both teams have been in high-scoring games',
   'Away underdogs on short rest collapse in the Championship',
   'Teams in terrible form bounce back at home in La Liga',
+  'Back a 1.30-1.50 favourite that is pressing while level, sell after the next goal',
 ]
 
 // ── equity curve ─────────────────────────────────────────────────────────────
@@ -144,7 +148,8 @@ function WhatYouGet() {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
-type Phase = 'idle' | 'running' | 'done'
+type Phase = 'idle' | 'running' | 'asking' | 'done'
+type Mode = 'prematch' | 'inplay' | 'unsupported'
 
 export default function LabPage() {
   const [input, setInput] = useState('')
@@ -154,6 +159,11 @@ export default function LabPage() {
   const [gate, setGate] = useState<'signed_out' | 'quota' | null>(null)
   const [lastHypothesis, setLastHypothesis] = useState('')
   const [saved, setSaved] = useState<{ id?: number; error?: string; busy?: boolean } | null>(null)
+  // The questions step: what was asked, of which theory, and for which kind
+  // of rule. A live rule has its own result, with no backtest in it.
+  const [questions, setQuestions] = useState<LabQuestion[] | null>(null)
+  const [asked, setAsked] = useState<{ theory: string; mode: Mode } | null>(null)
+  const [inplay, setInplay] = useState<InplayApiResult | null>(null)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   // The counter above the box has to move when a run spends one, without a
   // page reload — so the session is re-read after every attempt, refused ones
@@ -165,11 +175,110 @@ export default function LabPage() {
     setTermLines(prev => [...prev, { text, cls }])
   }
 
+  /** Step 1: read the theory and ask what it leaves open. The questions are a
+   *  help, never a gate — any failure here goes straight to the test. */
   async function run(hypothesis: string) {
     if (!hypothesis.trim() || phase === 'running') return
     timers.current.forEach(clearTimeout)
     timers.current = []
     setResult(null)
+    setInplay(null)
+    setGate(null)
+    setSaved(null)
+    setQuestions(null)
+    setPhase('running')
+    setTermLines([
+      { text: `> read "${hypothesis}"`, cls: 'lp-term-cmd' },
+      { text: 'checking what the theory leaves open…', cls: 'lp-term-dim' },
+    ])
+    let mode: Mode = 'prematch'
+    try {
+      const res = await fetch('/api/lab/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hypothesis }),
+      })
+      if (res.status === 401 || res.status === 402) {
+        refresh()
+        setGate(res.status === 401 ? 'signed_out' : 'quota')
+        setTermLines([])
+        setPhase('done')
+        return
+      }
+      const d = await res.json()
+      if (d.ok) {
+        mode = d.mode ?? 'prematch'
+        if (d.questions?.length) {
+          pushLine(
+            `${mode === 'inplay' ? 'live rule' : 'pre-match theory'} · ${d.questions.length} question${d.questions.length === 1 ? '' : 's'} before it runs`,
+            'lp-term-ok',
+          )
+          setAsked({ theory: hypothesis, mode })
+          setQuestions(d.questions)
+          setPhase('asking')
+          return
+        }
+      }
+    } catch {
+      // fall through to the test
+    }
+    await proceed(mode, hypothesis)
+  }
+
+  /** Step 2: the theory, clarified, to the engine that fits it. */
+  async function proceed(mode: Mode, text: string) {
+    setQuestions(null)
+    if (mode === 'inplay') return runInplay(text)
+    return runBacktest(text)
+  }
+
+  async function runInplay(hypothesis: string) {
+    setPhase('running')
+    setLastHypothesis(hypothesis)
+    setTermLines([
+      { text: `> build "${hypothesis}"`, cls: 'lp-term-cmd' },
+      { text: 'translating to a live rule…', cls: 'lp-term-dim' },
+    ])
+    try {
+      const res = await fetch('/api/lab/inplay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hypothesis }),
+      })
+      const data = await res.json()
+      refresh()
+      if (res.status === 401 || res.status === 402) {
+        setGate(res.status === 401 ? 'signed_out' : 'quota')
+        setTermLines([])
+        setPhase('done')
+        return
+      }
+      if (!data.ok) {
+        pushLine(`✗ ERROR — ${data.error ?? 'something went wrong'}`, 'lp-term-warn')
+        setPhase('done')
+        return
+      }
+      if (!data.supported) {
+        pushLine('✗ NOT EXPRESSIBLE AS A LIVE RULE YET', 'lp-term-warn')
+        setResult(data)
+        setPhase('done')
+        return
+      }
+      pushLine('rule      live · Polymarket football · paper, 1u per match', 'lp-term-dim')
+      pushLine('✓ READY TO RUN — the forward record is the test', 'lp-term-ok')
+      setInplay(data)
+      setPhase('done')
+    } catch {
+      pushLine('✗ ERROR — network or server failure', 'lp-term-warn')
+      setPhase('done')
+    }
+  }
+
+  async function runBacktest(hypothesis: string) {
+    timers.current.forEach(clearTimeout)
+    timers.current = []
+    setResult(null)
+    setInplay(null)
     setGate(null)
     setSaved(null)
     setPhase('running')
@@ -245,7 +354,8 @@ export default function LabPage() {
   /** Keep this theory as an agent. The server re-runs the backtest from the
    *  spec rather than trusting the numbers on this page — see lib/agents. */
   async function saveAgent() {
-    if (!result?.spec || saved?.busy) return
+    const spec = inplay?.spec ?? result?.spec
+    if (!spec || saved?.busy) return
     if (!me?.user) {
       window.location.href = '/login?next=%2Flab'
       return
@@ -257,8 +367,8 @@ export default function LabPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           hypothesis: lastHypothesis,
-          interpretation: result.interpretation ?? '',
-          spec: result.spec,
+          interpretation: (inplay ?? result)?.interpretation ?? '',
+          spec,
         }),
       })
       const d = await res.json()
@@ -370,6 +480,19 @@ export default function LabPage() {
           </div>
         ) : (
           <WhatYouGet />
+        )}
+
+        {phase === 'asking' && questions && asked && (
+          <Clarify
+            questions={questions}
+            busy={false}
+            onDone={(c) => proceed(asked.mode, clarify(asked.theory, c))}
+            onSkip={() => proceed(asked.mode, asked.theory)}
+          />
+        )}
+
+        {phase === 'done' && inplay?.ok && inplay.supported && inplay.rule && (
+          <InplayResult result={inplay} saved={saved} onSave={saveAgent} />
         )}
 
         {/* not testable */}

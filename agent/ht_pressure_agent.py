@@ -164,7 +164,7 @@ FIRST15_MIN, FIRST15_MAX = 15, 18
 # Rows are written for the whole first half so the base rate has its own control
 # group — every 0-0 fixture we watched, entered or not. Below 10' there is not
 # enough play to measure anything and the stat feed is mostly still empty.
-OBSERVE_MIN_MINUTE = 10
+OBSERVE_MIN_MINUTE = 15          # was 10, but no signal existed before 15' until 09-29 (live_tracker)
 OBSERVE_MAX_MINUTE = 46
 
 # ── entry gates ──────────────────────────────────────────────────────────────
