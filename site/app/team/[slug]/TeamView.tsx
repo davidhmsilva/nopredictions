@@ -118,8 +118,9 @@ function Market({ t, row }: { t: TeamPageData; row: TableRow | null }) {
       <p className="gc-chart-note">
         What happened set against what the closing prices of the same games expected (Pinnacle,
         else the market average, with the margin removed). Over a handful of games this is mostly
-        variance. A club running hot here has not been shown to keep doing so: recent form added
-        nothing to the closing price when we tested it on 14,365 matches.
+        variance. In the one test we have run, the form features we built added nothing to
+        Pinnacle&apos;s closing price on 14,365 matches — so a hot run here is a description, not yet
+        a reason to think any price is off, and a softer price than Pinnacle&apos;s close may still be.
       </p>
     </section>
   )

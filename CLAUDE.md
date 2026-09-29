@@ -19,13 +19,46 @@ and mathematical models to find mispricings, then logs paper trades publicly at
 We sit at the intersection. The agent doesn't predict — it finds **mispricings**.
 Hence the brand: *no predictions, just edges*.
 
-**Why Polymarket primary, Betfair as benchmark:** Betfair Exchange is the most
-efficient sports market in the world — prices are set by sharp money competing
-against each other, no bookmaker margin. We use Betfair (and Pinnacle closing
-lines) as the **truth oracle for fair value**. If our model says a Polymarket
-price is mispriced *relative to the Betfair / Pinnacle consensus*, that's our
-edge signal. Betfair tells us what the market should be; Polymarket tells us
-where to trade.
+**Why Polymarket primary, Betfair/Pinnacle as benchmark:** Betfair Exchange and
+Pinnacle are the sharpest prices we can read, so they are the **strongest
+benchmark we have — not the truth.** A Polymarket price away from them is one
+edge signal among several. Betfair/Pinnacle tell us what the sharpest money
+thinks; Polymarket tells us where to trade.
+
+## How we think about markets (rewritten 2026-09-29, by the operator's direction)
+
+**Sports markets are beatable, and money is made in them every day.** Bettors and
+syndicates live off beating Pinnacle; Polymarket, thinner and more retail, is
+easier still. Our own data already shows it: wallet GSX- made +$85k in 105 days
+on a book under $29k (`reports/wallet_gsx_2026-09-02.md`); resting at the bid on
+NFL lines Pinnacle prices exactly measured +0.60% CI[+0.45,+0.75]; the same
+football outcome is routinely cheaper on one venue than the other (median 1.3pp
+net, max 5.4pp on 2026-09-20).
+
+So the default stance changes:
+
+1. **Pinnacle is a benchmark, not an oracle.** Its closing line is sharp and
+   still has measurable biases (favourite–longshot, lower leagues, early
+   season, internationals, public-heavy names). Measure it against results too;
+   its blind spots are where syndicates earn.
+2. **A failed test says "this method did not find it" — never "the market is
+   efficient".** Write conclusions about the method, the sample and the
+   population tested, and name the next test. A negative on clubs says nothing
+   about national teams; a negative against Pinnacle's close says nothing about
+   Polymarket's microstructure.
+3. **Start from who pays and why** (the NFL profit map is the template): slow
+   price updates after news and line-ups, niche leagues nobody prices well,
+   public money on big names, settlement windows, cross-venue gaps, being the
+   maker instead of the taker, platform rewards, rule quirks.
+4. **Evidence that someone is making money is the strongest lead there is.**
+   Winning wallets are studied before models are built: what they buy, when,
+   at what price, maker or taker, and which leg carries the profit.
+5. **Rigor stays; it points at finding edges, not at dismissing them.** Out of
+   sample, no lookahead, sample sized to the effect — and when the sample is
+   too small, say "not enough data yet", collect more, and keep the idea alive.
+6. **When the data we need does not exist, say so and propose getting it**
+   (a new source, a paid feed, a recorder) instead of answering a different,
+   easier question.
 
 **Two active strategies:**
 1. **PM-vs-Sharp Consensus (pre-match)** — compare PM prices against vig-removed Pinnacle + Betfair odds. Edge = sharp_prob − pm_price. Trade if edge >= threshold.
@@ -2044,11 +2077,15 @@ curl "https://<deployment>/api/cron/pm-results?from=2026-03-01&to=2026-09-27"   
 **The favourite's record at its price** (`fav_record`, frozen at write time,
 games BEFORE the kick-off only): Polymarket's own earlier fixtures of that
 name at ±7.5pp, and for clubs our closing odds (Pinnacle, else the average).
-🔑 It is shown as a curiosity and the page says so: across **4,455 club
-seasons** a club's wins-minus-priced-wins in one season correlates **0.004**
-with the next, and **0.040 over 646 pairs** as a 60–75% favourite — inside
-chance. A team "that loses as a favourite" is not a thing the closing price
-misses.
+Measured so far, for CLUBS against Pinnacle's close only: a club's
+wins-minus-priced-wins in one season correlates **0.004** with the next over
+**4,455 club seasons**, and **0.040 over 646 pairs** as a 60–75% favourite.
+That rules out one method (season-level residuals of clubs vs the close). It
+says nothing about national teams, about Polymarket's own price (thinner, more
+public money on famous names), or about finer splits — all untested. Open
+hypothesis: **famous national teams are overpriced as favourites on
+Polymarket**; it needs the international odds stage below and the
+`pm_results` backfill.
 
 ⚠️ **National teams have no odds in our database.** 8,394 international
 matches since 2015 (106 of Germany's), zero with odds. Free sources are thin:
@@ -2779,13 +2816,13 @@ We have both Pinnacle opening and closing odds, so CLV is measurable now:
 
 | Metric | Why it matters |
 |---|---|
-| **CLV (Closing Line Value)** | Gold standard. Beat the closing line = real edge. |
-| **Pinnacle closing as benchmark** | Sharpest available closing line in our dataset — primary fair-value oracle. |
+| **CLV (Closing Line Value)** | Strong evidence of a pricing edge. Not the only kind: maker, settlement-window and cross-venue edges do not show up as CLV against Pinnacle. |
+| **Pinnacle closing as benchmark** | Sharpest closing line in our dataset — the strongest benchmark, with its own measurable biases. |
 | **Betfair Exchange closing as benchmark** | Cross-check against the second-sharpest market (~13k matches). |
 | **Polymarket spread vs Betfair/Pinnacle implied** | Direct edge signal — where Polymarket diverges from sharp consensus. |
 | **Yield %** | Profit / total staked. More stable than ROI on small samples. |
 | **p-value vs ROI=0** | Require p < 0.05 before promoting. |
-| **Sample size** | Minimum 200 selections before any conclusion. |
+| **Sample size** | Sized to the effect and the question (see rule 4), not one number for everything. |
 
 ---
 
@@ -2794,9 +2831,19 @@ We have both Pinnacle opening and closing odds, so CLV is measurable now:
 1. **No lookahead bias.** Every feature used must have been available before kickoff.
 2. **Train/test split.** Walk-forward validation. Never evaluate on discovery data.
 3. **Reject silent p-hacking.** Every hypothesis tested goes into `research_hypotheses`.
-4. **Minimum 200 selections** before any conclusion.
-5. **CLV is king.** Positive ROI with negative CLV = luck. Always measure both.
-6. **The agent must be creative.** Reject obvious hypotheses unless data confirms them.
+4. **Size the sample to the question.** Yield at ~2.0 odds needs thousands of bets
+   to see a 2% edge; price-vs-fair and calibration arms need hundreds of
+   observations; CLV needs tens. Below that, the answer is "not enough data
+   yet", never "no edge".
+5. **Measure CLV and ROI both.** Positive ROI with negative CLV against the close is
+   probably luck; but an edge that does not trade on price (maker, settlement,
+   cross-venue) is measured by its own mechanism, not by CLV.
+6. **The agent must be creative.** Look where others do not, and follow the money.
+7. **Negative results are about the method, never the market.** No conclusion may
+   read "the market is efficient"; it says what was tested, on what, and what
+   to test next.
+8. **Missing data is a task, not an answer.** If the question needs data we do
+   not hold, propose the source before answering anything else.
 
 ---
 

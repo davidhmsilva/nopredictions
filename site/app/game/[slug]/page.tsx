@@ -691,13 +691,14 @@ function Disclosure({ data }: { data: GameData }) {
           <li>
             <strong>No model output, deliberately.</strong> On 6 of 6 outcome groups Polymarket&apos;s
             price beat our own model on Brier score, so a &quot;the model likes this&quot; badge would be
-            selling the one thing we measured as not working.
+            selling a model we measured as not good enough yet.
           </li>
           <li>
             <strong>Form is shown, not sold.</strong> Team numbers come from our own database of
-            145,000 matches with half-time scores and closing prices. We tested recent form against
-            the closing price on 14,365 held-out matches and it added nothing — a streak here is a
-            description, and its &quot;1 in N&quot; is worked out at the league&apos;s own rate.
+            145,000 matches with half-time scores and closing prices. Our form features added nothing
+            to Pinnacle&apos;s closing price on 14,365 held-out matches — one method, against the
+            sharpest close — so a streak here is a description, and its &quot;1 in N&quot; is worked
+            out at the league&apos;s own rate.
           </li>
           <li>
             <strong>The brief is written by AI</strong> from the numbers on this page and told to

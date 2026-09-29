@@ -278,8 +278,9 @@ export function ResultsView({
               </div>
               <p className="gc-chart-note">
                 An outcome priced at {surprises[0] ? pct(surprises[0].p) : '15%'} still happens about once in{' '}
-                {surprises[0] ? Math.max(2, Math.round(1 / surprises[0].p)) : 7} games. One of them is not the
-                market being wrong — the table at the foot of the page is how that question is answered.
+                {surprises[0] ? Math.max(2, Math.round(1 / surprises[0].p)) : 7} games, so one result can&apos;t
+                say whether the price was wrong. Hundreds can: the table at the foot of the page counts how
+                often each price band actually came in, and that is where a mispriced band would show.
               </p>
             </section>
           )}
@@ -313,11 +314,13 @@ export function ResultsView({
 
       <section className="gc-section">
         <p className="np-note">
-          <strong>A favourite&apos;s record at its price is shown because it is interesting, not because it
-          predicts anything.</strong> Across 4,455 club seasons in 22 leagues, how far a club beat or missed
-          its closing prices in one season told us nothing about the next (correlation 0.004); as a 60–75%
-          favourite, 0.04 over 646 pairs — inside chance. Records for national teams are thin: until we load
-          historical odds for internationals, only Polymarket&apos;s own games count.
+          <strong>What a favourite&apos;s record at its price has been tested for, and what it hasn&apos;t.</strong>{' '}
+          One test, on clubs: across 4,455 club seasons in 22 leagues, how far a club beat or missed Pinnacle&apos;s
+          closing prices in one season did not carry into the next (correlation 0.004; as a 60–75% favourite,
+          0.04 over 646 pairs). That is one method against the sharpest closing line — not a finding that
+          Polymarket prices favourites right. National teams are untested: we don&apos;t yet hold their
+          historical odds, so their records here count only Polymarket&apos;s own games, and whether famous
+          national sides are overpriced as favourites is an open question we are loading data to answer.
         </p>
       </section>
     </div>
