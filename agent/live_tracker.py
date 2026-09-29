@@ -38,7 +38,12 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../ingest/.env'
 log = logging.getLogger(__name__)
 
 PRESSURE_WINDOW_MIN = 15
-MIN_MINUTE_FOR_SIGNALS = 15
+# 5, not 15, since 2026-09-29: Favourite Swing enters "the moment the favourite
+# presses", on the whole-match reading. Every other arm gates its own minutes,
+# and the two first-half arms' OBSERVE_MIN_MINUTE moved 10 -> 15 at the same
+# time so their tapes stay exactly what they were (they never saw a signal
+# before 15' anyway).
+MIN_MINUTE_FOR_SIGNALS = 5
 # api-football drops a fixture from the live feed briefly at half time on some
 # competitions. Dropping its snapshot history on the first miss would discard
 # the window baseline exactly when the second half starts.
