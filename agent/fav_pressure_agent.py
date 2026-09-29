@@ -120,7 +120,7 @@ REFRESH_MARKETS_S = 300
 # reading is still taken and still recorded; from obs_version 3 it is the
 # CONTROL, not the gate.
 FIRST15_MIN, FIRST15_MAX = 15, 18
-OBSERVE_MIN_MINUTE = 10
+OBSERVE_MIN_MINUTE = 15          # was 10, but no signal existed before 15' until 09-29 (live_tracker)
 OBSERVE_MAX_MINUTE = 46
 ENTRY_MIN_MINUTE = 15
 # RAISED 25 -> 40 on 2026-09-05, with the reading unfrozen. A favourite that only

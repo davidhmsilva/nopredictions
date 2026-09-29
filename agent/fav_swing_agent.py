@@ -7,11 +7,14 @@ THE RULE (the user's, 2026-09-29)
   * A team was 1.30-1.50 to win at kick-off. The price is Polymarket's own
     "Will <team> win?" Yes, RAW (the odds a bettor saw), the last read before
     kick-off.
-  * The match is LEVEL — 0-0, 1-1, … — between ENTRY_MIN_MINUTE and
-    ENTRY_MAX_MINUTE, and that team is pressing: its own danger index >= 19 and
-    >= 20 above the opponent's. Same reading and same gate as s18
-    (ht_pressure_agent.current_pressure: cumulative to 18', the rolling
-    15-minute window after).
+  * The match is LEVEL — 0-0, 1-1, … — and that team is pressing: its own
+    danger index >= 19 and >= 20 above the opponent's (s18's thresholds).
+  * Pressure is read over the WHOLE MATCH so far, like Sofascore's match view:
+    every shot, corner and the possession since kick-off, as a 15-minute rate
+    (ht_pressure_agent.opening_pressure). From obs_version 2 (the user's call,
+    2026-09-29) — v1 read a rolling 15-minute window and waited until 15'.
+    Entry is allowed from the first poll that carries stats: the agent goes in
+    the moment the favourite is pressing, not at a fixed minute.
   * Buy "Will <team> win?" Yes at the CLOB ask, 1u, paper. Once per fixture.
   * ANY goal starts a STABILISE_S clock. Every further score change restarts
     it; a score back at the entry score cancels it (a goal that did not stand —
@@ -45,7 +48,7 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fav_pressure_agent import _WIN_RE, _yes_price, _yes_token, resolve_side   # noqa: E402
-from ht_pressure_agent import current_pressure                                  # noqa: E402
+from ht_pressure_agent import opening_pressure                                  # noqa: E402
 from late_goals_observer import _fetch_book                                     # noqa: E402
 from live_tracker import PressureSignals                                        # noqa: E402
 from pressure_agent import match_pm_fixture                                     # noqa: E402
@@ -53,10 +56,10 @@ from pressure_agent import match_pm_fixture                                     
 log = logging.getLogger("fav_swing")
 
 STRATEGY_NAME = "Favourite Swing — pressure in, goal out"
-OBS_VERSION = 1
+OBS_VERSION = 2                  # v2: whole-match pressure, entry from the first stats (09-29)
 
 KO_ODDS_MIN, KO_ODDS_MAX = 1.30, 1.50
-ENTRY_MIN_MINUTE = 15            # the pressure reading needs 15 minutes of play
+ENTRY_MIN_MINUTE = 5             # "the moment it presses" — but one shot at 2' is a 7x rate, not pressure
 ENTRY_MAX_MINUTE = 75
 MIN_FAV_PRESSURE = 19.0          # s18's gates, unchanged
 MIN_DOMINANCE = 20.0
@@ -168,11 +171,10 @@ def entry_candidates(signals: dict[int, PressureSignals], pm_fixtures: list[dict
         fav = favourite_at_ko(cap, sig.home, sig.away) if cap else None
         if fav is None or not sig.has_stats:
             continue
-        now = current_pressure(sig)
-        if now is None:
-            continue
-        fav_p = now[1] if fav["side"] == "home" else now[2]
-        dog_p = now[2] if fav["side"] == "home" else now[1]
+        _, home_p, away_p = opening_pressure(sig)
+        now = (None, home_p, away_p, "match")
+        fav_p = home_p if fav["side"] == "home" else away_p
+        dog_p = away_p if fav["side"] == "home" else home_p
         if fav_p < MIN_FAV_PRESSURE or fav_p - dog_p < MIN_DOMINANCE:
             continue
         book = _fetch_book({"token_id": fav["token_id"]})
