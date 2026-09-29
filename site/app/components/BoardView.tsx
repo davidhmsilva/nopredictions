@@ -7,11 +7,12 @@
  *    every game, as a table             ← filters, sort and search live here
  *    how the prices are read            ← folded away, one tap to open
  *
- *  🔑 Both exchanges on every row, and the CHEAPER ONE MARKED with its logo.
- *     The mark is made net of each venue's taker fee — Polymarket 0.05·p·(1−p),
- *     Kalshi 0.07·p·(1−p), 40% more — which does not change who wins a price
- *     by a cent or more, but roughly halves what the win is worth and decides
- *     a tie near even money. lib/venues carries the search that settled that.
+ *  🔑 Both exchanges on every row, each price the better of the two net of
+ *     each venue's taker fee — Polymarket 0.05·p·(1−p), Kalshi 0.07·p·(1−p).
+ *     WHICH app pays it is not shown on the board, by the user's decision
+ *     (2026-09-29): no logo on a price, no outline, no hover naming the app.
+ *     That is read inside the game. The logos beside a game say only where
+ *     it is listed.
  *
  *  🔑 It ranks on COMBINED volume. A game with millions through it has a real
  *     two-sided book by construction, which is the honest proxy for "hot".
@@ -22,8 +23,9 @@
  *
  *  The look is deliberately colourless. Book grades used to colour the venue
  *  names green or amber, and the winning price green; to a reader who does
- *  not know what a book grade is that was noise. The two app logos are the
- *  only colour on a board, and live games keep their red dot.
+ *  not know what a book grade is that was noise. The app logos saying where
+ *  a game is listed are the only colour on a board, and live games keep their
+ *  red dot.
  */
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
@@ -34,7 +36,7 @@ import { OddsToggle } from './OddsToggle'
 import { SportBar } from './SportBar'
 import { GameCard } from './GameCard'
 import { VenueLogo } from './VenueLogo'
-import { LiveState, money, odds, pickTitle } from './boardParts'
+import { LiveState, money, odds } from './boardParts'
 import { IconAll, IconClock, IconDrop, IconInsights, IconLive, IconStar, IconVenues } from './icons'
 import { formatName, useMounted, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
 import { columnsFor, hasPrice, volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
@@ -51,14 +53,8 @@ function PriceCell({ row, col, f }: { row: BoardRow; col: BoardColumn; f: OddsFo
     return <td className={`${cls} is-empty`}>—</td>
   }
   return (
-    <td
-      className={`${cls}${pick.venue ? ' is-best' : ''}`}
-      title={pickTitle(pick, row.venues, col.key, f)}
-    >
-      <span className="sc-odd">
-        {pick.venue && <VenueLogo venue={pick.venue} size={13} title="" />}
-        {odds(pick.ask, f)}
-      </span>
+    <td className={cls}>
+      <span className="sc-odd">{odds(pick.ask, f)}</span>
     </td>
   )
 }
@@ -222,14 +218,9 @@ function MobileOdds({ r, f }: { r: BoardRow; f: OddsFormat }) {
         const label =
           r.sport === 'soccer' ? c.label : c.key === 'away' ? r.left : c.key === 'home' ? r.right : c.label
         return (
-          <span
-            key={c.key}
-            className={`sc-modd${pick?.venue ? ' is-best' : ''}`}
-            title={pick ? pickTitle(pick, r.venues, c.key, f) : undefined}
-          >
+          <span key={c.key} className="sc-modd">
             <em>{label}</em>
             <span className="sc-modd-p">
-              {pick?.venue && <VenueLogo venue={pick.venue} size={12} title="" />}
               <b className="np-num">{odds(pick?.ask ?? null, f)}</b>
             </span>
           </span>
@@ -657,8 +648,9 @@ export function HowPricesWork({ children }: { children?: React.ReactNode }) {
             is higher — so we compare what you actually pay, not the headline number.
           </li>
           <li>
-            <b>We mark the one that pays more</b> with its logo and an outline. Within half a cent
-            it&apos;s a tie, and a price with nobody on the other side of it never counts.
+            <b>The board shows the better price.</b> Open a game to see which app pays it. Within
+            half a cent it&apos;s a tie, and a price with nobody on the other side of it never
+            counts.
           </li>
         </ol>
         {children && <div className="bd-how-fine">{children}</div>}
