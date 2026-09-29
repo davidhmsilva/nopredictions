@@ -20,6 +20,7 @@ import { useAllSports, useSoccerRows } from './useBoards'
 import { rankRows, SOCCER_COLUMNS, type BoardRow } from '../lib/boardRow'
 import { SPORT_KEYS } from '../lib/sportsMeta'
 import { useSession } from '../lib/useSession'
+import { LAB_TOTAL_GAMES, labCount } from '../lib/labData'
 
 /** How many games the home page lists before "See all games". */
 const HOME_ROWS = 10
@@ -32,7 +33,7 @@ const MORE = [
     href: '/lab',
     Icon: IconLab,
     title: 'Test a strategy',
-    body: 'Write a theory in plain English and replay it over 111,475 real games against the closing price.',
+    body: `Write a theory in plain English and replay it over ${labCount(LAB_TOTAL_GAMES)} real games against the closing price.`,
     cta: 'Open the Lab',
   },
   {

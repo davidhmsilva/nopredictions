@@ -225,7 +225,7 @@ def run():
     print(f'Schema: {len(schema)} tables parsed')
 
     # Monkey-patch the download
-    sa.download_csv = lambda fd_code, season, cache_dir: make_fake_df()
+    sa.download_csv = lambda fd_code, season, cache_dir, refresh=False: make_fake_df()
     # Reset module-level caches
     sa._TEAM_CACHE.clear()
 

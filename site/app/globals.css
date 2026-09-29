@@ -1904,6 +1904,15 @@ button { font-family: var(--font); }
 .bt-caveats ul { margin: 4px 0 0 16px; }
 .bt-caveats li { color: var(--grey); font-size: 11px; line-height: 1.7; }
 
+/* The same bets at the exchanges (lab/page.tsx VenuePanel). Six columns do not
+   fit a phone, so the table scrolls inside its own box instead of widening
+   the page. */
+.bt-venues { margin: 16px 0; }
+.bt-venues .bt-table { display: block; overflow-x: auto; white-space: nowrap; }
+.bt-venue-sub { color: var(--grey); font-size: 11px; }
+.bt-venue-notes { margin: 10px 0 0 16px; }
+.bt-venue-notes li { color: var(--grey); font-size: 11px; line-height: 1.7; }
+
 .bt-foot {
   /* Now rendered as an .np-note, so it reads as prose rather than as the
      centred 9px legal strip it used to be. */

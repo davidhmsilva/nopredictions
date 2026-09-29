@@ -112,7 +112,15 @@ BOOKMAKER_COLUMNS = {
               'opening_1x2': ('WHH',   'WHD',   'WHA')},
     'VC':    {'closing_1x2': ('VCCH',  'VCCD',  'VCCA'),
               'opening_1x2': ('VCH',   'VCD',   'VCA')},
-    'BFEX':  {'closing_1x2': ('BFECH', 'BFECD', 'BFECA')},
+    # Betfair Exchange. Football-Data stopped carrying Pinnacle in 2025-26
+    # (no PSC* after 2026-01-15, no PS* columns at all from 2026-27), and the
+    # exchange is what remains of a sharp reference, so both its snapshots
+    # are kept: BFEX the close, BF the earlier one -- the same pair PSC / PS
+    # are for Pinnacle, and what the Lab's CLV needs where Pinnacle is gone.
+    'BFEX':  {'closing_1x2':  ('BFECH', 'BFECD', 'BFECA'),
+              'closing_ou25': ('BFEC>2.5', 'BFEC<2.5')},
+    'BF':    {'closing_1x2':  ('BFEH', 'BFED', 'BFEA'),
+              'closing_ou25': ('BFE>2.5', 'BFE<2.5')},
     'MAX':   {'closing_1x2': ('MaxCH', 'MaxCD', 'MaxCA'),
               'closing_ou25': ('MaxC>2.5', 'MaxC<2.5')},
     'AVG':   {'closing_1x2': ('AvgCH', 'AvgCD', 'AvgCA'),
@@ -552,6 +560,8 @@ def main():
                         help='only the season being played now (overrides --seasons)')
     parser.add_argument('--refresh', action='store_true',
                         help='re-download instead of reading the cache (use for a live season)')
+    parser.add_argument('--no-lab-refresh', action='store_true',
+                        help='skip rebuilding bt_lab_matches (db/062) at the end of the run')
     args = parser.parse_args()
     if args.current_season:
         # From July the new season's file is the live one — the same boundary the
@@ -600,8 +610,29 @@ def main():
                     if not args.continue_on_error:
                         raise
         log.info(f'TOTAL: {total} matches ingested')
+        if total and not args.no_lab_refresh:
+            refresh_lab_matches(conn)
     finally:
         conn.close()
+
+
+def refresh_lab_matches(conn) -> None:
+    """Rebuild the Lab's match table (db/062) from what was just ingested.
+
+    bt_features sat at 2026-01-14 for eight months because nothing ran its
+    refresh after this stage; the Lab's own table is refreshed here so a
+    daily run keeps it current. A database without db/062 is not an error.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("SET statement_timeout = '300s'")
+        cur.execute('SELECT refresh_bt_lab()')
+        n = cur.fetchone()[0]
+        conn.commit()
+        log.info(f'bt_lab_matches refreshed: {n} matches')
+    except psycopg2.errors.UndefinedFunction:
+        conn.rollback()
+        log.info('refresh_bt_lab() not installed (db/062), Lab table not refreshed')
 
 
 if __name__ == '__main__':

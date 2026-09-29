@@ -3,7 +3,8 @@
 
 import { z } from 'zod'
 
-// Leagues actually present in bt_features (have Pinnacle closing odds).
+// Leagues in bt_lab_matches (db/062): a Pinnacle close, or Betfair's where
+// Football-Data no longer carries Pinnacle (partly from 2025-10, wholly 2026).
 export const LEAGUES = [
   { code: 'ENG-PR', name: 'Premier League', country: 'England', tier: 1 },
   { code: 'ENG-CH', name: 'Championship', country: 'England', tier: 2 },
@@ -163,6 +164,34 @@ export function toSqlSpec(p: ParsedSpec): Spec {
   return spec
 }
 
+// One venue's arm of run_backtest() (db/060): the same selections, priced at
+// Polymarket or Kalshi. `n`/`pnl` are at a price a taker could have paid,
+// `*_mid` at the closing mid, and `pin_*` are those SAME games at Pinnacle's
+// close -- the venues only go back to 2024-08, so the Pinnacle yield over the
+// whole test is not the thing to compare against.
+export interface RawVenue {
+  listed: number
+  n: number
+  wins: number
+  pnl: number
+  pnl_sq: number
+  avg_odds: number | null
+  pin_pnl: number | null
+  pin_avg_odds: number | null
+  n_mid: number
+  wins_mid: number
+  pnl_mid: number
+  pnl_mid_sq: number
+  avg_odds_mid: number | null
+  pin_pnl_mid: number | null
+  pin_avg_odds_mid: number | null
+  agree: number
+  compared: number
+  dropped: number
+  first_match: string | null
+  last_match: string | null
+}
+
 // Raw payload returned by run_backtest()
 export interface RawBacktest {
   n: number
@@ -176,8 +205,13 @@ export interface RawBacktest {
   clv_avg: number | null
   first_match: string | null
   last_match: string | null
+  // Selections priced at the Betfair Exchange close (net of 5% commission)
+  // because the match has no Pinnacle close. Football only.
+  n_betfair?: number
+  first_betfair?: string | null
   seasons: { season: number; n: number; wins: number; pnl: number }[]
   monthly: { month: string; n: number; pnl: number }[]
+  venues?: Record<string, RawVenue>
 }
 
 function normCdf(x: number): number {
@@ -207,6 +241,8 @@ export interface BacktestStats {
   maxDrawdown: number
   firstMatch: string | null
   lastMatch: string | null
+  nBetfair: number
+  firstBetfair: string | null
 }
 
 export function computeStats(raw: RawBacktest): BacktestStats {
@@ -245,7 +281,85 @@ export function computeStats(raw: RawBacktest): BacktestStats {
     maxDrawdown: maxDD,
     firstMatch: raw.first_match,
     lastMatch: raw.last_match,
+    nBetfair: raw.n_betfair ?? 0,
+    firstBetfair: raw.first_betfair ?? null,
   }
+}
+
+// A yield with its interval, from a sum and a sum of squares.
+function yieldOf(n: number, pnl: number, pnlSq: number) {
+  const mean = n > 0 ? pnl / n : 0
+  const variance = n > 1 ? Math.max(pnlSq / n - mean * mean, 0) : 0
+  const se = n > 1 ? Math.sqrt(variance / n) : 0
+  return {
+    yieldPct: mean * 100,
+    ci95Pct: 1.96 * se * 100,
+    pValue: n > 1 && se > 0 ? 2 * (1 - normCdf(Math.abs(mean / se))) : null,
+  }
+}
+
+export interface VenueArm {
+  n: number
+  wins: number
+  avgOdds: number | null
+  yieldPct: number
+  ci95Pct: number
+  pValue: number | null
+  // the same games at Pinnacle's close
+  pinYieldPct: number | null
+  pinAvgOdds: number | null
+}
+
+export interface VenueStats {
+  venue: 'polymarket' | 'kalshi'
+  name: string
+  listed: number
+  // what a taker paid: Kalshi's ask at the close, Polymarket's last taker buy
+  paid: VenueArm | null
+  // the closing mid: an upper bound, since no taker gets it
+  mid: VenueArm | null
+  agreePct: number | null
+  compared: number
+  dropped: number
+  firstMatch: string | null
+  lastMatch: string | null
+}
+
+const VENUE_NAMES: Record<string, string> = { polymarket: 'Polymarket', kalshi: 'Kalshi' }
+
+function arm(n: number, wins: number, pnl: number, pnlSq: number, avgOdds: number | null,
+             pinPnl: number | null, pinAvgOdds: number | null): VenueArm | null {
+  if (n <= 0) return null
+  return {
+    n,
+    wins,
+    avgOdds,
+    ...yieldOf(n, pnl, pnlSq),
+    pinYieldPct: pinPnl != null ? (pinPnl / n) * 100 : null,
+    pinAvgOdds,
+  }
+}
+
+export function computeVenueStats(raw: RawBacktest): VenueStats[] {
+  const out: VenueStats[] = []
+  for (const key of ['polymarket', 'kalshi'] as const) {
+    const v = raw.venues?.[key]
+    if (!v || v.listed <= 0) continue
+    out.push({
+      venue: key,
+      name: VENUE_NAMES[key],
+      listed: v.listed,
+      paid: arm(v.n, v.wins, v.pnl, v.pnl_sq, v.avg_odds, v.pin_pnl, v.pin_avg_odds),
+      mid: arm(v.n_mid, v.wins_mid, v.pnl_mid, v.pnl_mid_sq, v.avg_odds_mid, v.pin_pnl_mid,
+               v.pin_avg_odds_mid),
+      agreePct: v.compared > 0 ? (v.agree / v.compared) * 100 : null,
+      compared: v.compared,
+      dropped: v.dropped,
+      firstMatch: v.first_match,
+      lastMatch: v.last_match,
+    })
+  }
+  return out
 }
 
 export type VerdictCode =
@@ -275,7 +389,7 @@ export function verdict(s: BacktestStats): { code: VerdictCode; label: string; d
       code: 'EDGE_FOUND',
       label: 'EDGE FOUND — HISTORICALLY PROFITABLE',
       detail:
-        'Positive yield against the Pinnacle closing line, statistically significant at p < 0.05. Caution: a single test can still be luck or selection bias — verify out of sample before trusting it.',
+        'Positive yield against the sharp closing line, statistically significant at p < 0.05. Caution: a single test can still be luck or selection bias — verify out of sample before trusting it.',
     }
   }
   if (s.pValue != null && s.pValue < 0.05 && s.yieldPct < 0) {
