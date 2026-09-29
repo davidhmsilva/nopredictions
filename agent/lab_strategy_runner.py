@@ -446,8 +446,12 @@ def running_strategies(conn) -> list[dict]:
     """Running Lab specs. Any that cannot run live is paused here, with the
     reason written where its owner will see it."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # Live rules (spec.kind='inplay') run on the pressure poll, in
+        # lab_inplay_runner.py — this runner would read them as a pre-match
+        # spec with no market and pause them.
         cur.execute("""SELECT id, name, theory, spec FROM strategies
-                        WHERE source = 'lab' AND run_status = 'running' AND retired_at IS NULL""")
+                        WHERE source = 'lab' AND run_status = 'running' AND retired_at IS NULL
+                          AND coalesce(spec->>'kind', '') <> 'inplay'""")
         rows = [dict(r) for r in cur.fetchall()]
     ok = []
     for r in rows:
