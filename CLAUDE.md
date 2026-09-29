@@ -2103,6 +2103,36 @@ run fills their favourite records (`rowsMissingFav`). A cancelled fixture
 are spelled from a table, not `toLocaleDateString`: Node writes "Sep" where
 Chrome writes "Sept", which broke hydration.
 
+## Pinnacle's close, measured — and a club strategy that beats it (2026-09-29)
+
+`agent/pinnacle_audit.py` measures Pinnacle's close against results (101,469
+matches, 2012-2025, Football-Data's raw CSVs cached in `agent/.cache/pinnacle_audit/`).
+Full numbers in `reports/pinnacle_audit_2026-09-29.md`.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python pinnacle_audit.py --calibration --scan --clubs
+python pinnacle_audit.py --picks 2026      # this season's clubs, from earlier seasons only
+```
+
+- **Favourite–longshot bias replicates train → test.** Heavy favourites win
+  2.4-3.4pp more often than the de-vigged close; away 8.0+ win 1.2-2.1pp less
+  (drifters in top divisions −4pp). At the best price across books favourites
+  under 1.6 return **+2.1% / +3.2%**.
+- Early season, promoted teams, league identity: no replication (778 cells, BH; the 9 that replicate are all favourite/longshot).
+- Team residuals do not persist in general (season → season 0.004), **except
+  specific clubs as heavy favourites** (corr 0.34 across 42 clubs).
+- 🔑 **H-FAV-CLUBS (id 42):** rolling picks of clubs with a shrunk ≥+4pp record
+  as <1.60 favourites. **+5.91% ±2.56 at Pinnacle's own close, n=1,792,
+  2015-25**, 10 of 11 seasons positive, team-clustered CI [+2.6, +9.0], +3.6%
+  without the top three clubs; control (every heavy favourite) +0.01%. Forward on
+  2026-27: 42 bets, −0.4% ±18.6 — too early to read.
+- **H-LONGSHOT-NO (id 43):** buy No on away longshots on PM. Needs PM's own
+  calibration first (the `pm_results` backfill).
+- ⚠️ **Football-Data's 2026-27 files have NO Pinnacle columns.** They carry
+  Betfair Exchange close (BFEC) and team xG (HxG/AxG) instead. Stage A must
+  load those, or every "Pinnacle (closing)" reader is blank this season.
+
 ## Live stats coverage — measured 2026-08-19
 
 "More leagues" turned out not to be a stats problem. Over three days of
