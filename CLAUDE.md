@@ -2129,6 +2129,12 @@ python pinnacle_audit.py --picks 2026      # this season's clubs, from earlier s
   2026-27: 42 bets, −0.4% ±18.6 — too early to read.
 - **H-LONGSHOT-NO (id 43):** buy No on away longshots on PM. Needs PM's own
   calibration first (the `pm_results` backfill).
+- **Polymarket's own kick-off price (12,781 fixtures, Mar–Sep 2026, backfilled
+  2026-09-30):** the same favourite–longshot tilt, about the same size, and
+  within the fee. Away longshots' No +0.2% ±1.6 at the mid, favourites > 62.5%
+  +0.2% ±2.5. H-FAV-CLUBS on PM: 54 out-of-sample bets, +1.1% ±15.2. Famous
+  national teams as favourites: −3.5pp vs priced (n=75), other nations +4.6pp
+  (n=174). Right direction, far from significant. Section 5 of the report.
 - ⚠️ **Football-Data's 2026-27 files have NO Pinnacle columns.** They carry
   Betfair Exchange close (BFEC) and team xG (HxG/AxG) instead. Stage A must
   load those, or every "Pinnacle (closing)" reader is blank this season.

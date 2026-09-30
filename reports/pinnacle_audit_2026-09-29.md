@@ -96,3 +96,44 @@ Stage A needs to store BFEC (and the xG) instead.
 2. Paper-trade H-FAV-CLUBS on PM (CLOB ask ≤45' before kick-off) beside the
    Betfair-close record.
 3. Stage A: load BFEC + xG for 2026-27.
+
+## 5. Polymarket's own calibration (added 2026-09-30)
+
+The `pm_results` backfill ran 2026-03-01 → 09-28: **12,781 fixtures, no empty
+day.** The price is Polymarket's 1X2 at kick-off (CLOB history, normalised). The
+outcome is PM's own resolution. Books under $1k traded are excluded. ROI is at
+the **mid, net of the taker fee** and does not include the half-spread, so the
+real cost is ~0.5-1pp worse.
+
+| selection | n | priced | won | gap | ROI at mid |
+|---|--:|--:|--:|--:|--:|
+| every outcome, 10-70% | ~12,000 | — | — | within ±1pp in every decile | — |
+| longshots < 12.5%, back **No** | 2,039 | 7.9% | 6.9% | −1.0pp | **+0.7% ±1.2** |
+| … away longshots (H-LONGSHOT-NO) | 1,244 | 8.0% | 7.4% | −0.6pp | +0.2% ±1.6 |
+| … home longshots | 378 | 7.4% | 5.0% | −2.4pp | +2.2% ±2.4 |
+| favourites > 62.5%, back | 2,325 | 73.3% | 74.5% | +1.2pp | +0.2% ±2.5 |
+| … away favourites | 528 | 73.9% | 76.9% | +3.0pp | +2.6% ±5.0 |
+
+- **PM's kick-off mid has the same favourite–longshot tilt as Pinnacle's
+  close, and it is about the same size.** Neither half-sample (Mar–Jun,
+  Jun–Sep) is significant on its own, and nothing clears the spread.
+- **H-LONGSHOT-NO at PM's mid: no edge measured** (+0.2% ±1.6 on away
+  longshots). The Pinnacle finding was about the de-vigged close, and PM's mid
+  already sits where a better de-vig would put it. Still open: buying at the
+  bid as a maker, and the drifting-longshot sub-arm (PM has no opening price
+  in this table).
+- **H-FAV-CLUBS on PM (2026-27 picks):** 54 bets Jul–Sep, 42 won,
+  **+1.1% ±15.2**. Mar–Jun: 50 bets, −15.9% ±19.0, but in-sample for the picks.
+  Far too few to read either way. It needs the forward record.
+- **Famous national teams as favourites** (Germany, France, Spain, England,
+  Brazil, Argentina, Portugal, Netherlands, Italy, Belgium, PM > 55%): won
+  **3.5pp less** than priced (n=75, ROI −5.5% ±14.2). Other national
+  favourites won **4.6pp more** (n=174, +4.9% ±9.4). That is the direction of
+  the hypothesis, but not a result. It needs the international odds stage and
+  more tournaments.
+
+The next measurable lever is **being the maker**. At the mid, the tilt is
+worth roughly the fee; at the bid, a resting order earns half the spread on
+top. That was +0.60% CI[+0.45,+0.75] on NFL lines. Measuring it here needs the
+bid side, which the recorder has for every in-play market and `pm_results` does
+not.
