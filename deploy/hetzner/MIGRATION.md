@@ -21,6 +21,7 @@ dos passos abaixo existe por causa disto.
 | `np-stage-a.timer` | Football-Data, 05:00 UTC | --daily 07:00 (hora do Mac, UTC+2) |
 | `np-nfl-agent.timer` | `nfl_agent.py --once`, 5 em 5 min | */5 |
 | `np-unl-agent.timer` | `unl_agent.py --once` (Nations League), 5 em 5 min | */5 |
+| `np-nba-agent.timer` | `nba_agent.py --once` (NBA, época regular + playoffs), 5 em 5 min | novo 2026-10-06 |
 | `np-nfl-live.timer` | `nfl_live_recorder.py --once`, cada minuto | * |
 | `np-factory-run.timer` | `factory_cli.py run`, cada minuto | * |
 | `np-factory-settle.timer` | `factory_cli.py settle`, 10 em 10 min | */10 |

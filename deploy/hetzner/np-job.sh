@@ -56,6 +56,8 @@ case "$job" in
     exec python nfl_agent.py --once >> nfl_agent.log 2>&1 ;;
   unl-agent)
     exec python unl_agent.py --once >> unl_agent.log 2>&1 ;;
+  nba-agent)
+    exec python nba_agent.py --once >> nba_agent.log 2>&1 ;;
   nfl-live)
     exec python nfl_live_recorder.py --once >> nfl_live_recorder.log 2>&1 ;;
   factory-run)
