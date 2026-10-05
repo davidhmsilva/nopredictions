@@ -236,8 +236,9 @@ export function StreakHighlights({ ctx, swapped, limit = 4 }: {
       <p className="gc-chart-note">
         &quot;1 in N&quot; is the chance of a run that long at the league&apos;s own rate. We check{' '}
         {ctx.checked} patterns per fixture, so a 1-in-20 run turns up by chance about three times a
-        match — only the rarer ones are shown. And they describe; they don&apos;t predict: on 14,365
-        held-out matches, recent form added nothing the closing price didn&apos;t already have.
+        match — only the rarer ones are shown. They describe: on 14,365 held-out matches the form
+        features we tested added nothing to Pinnacle&apos;s closing price. That is one method against
+        the sharpest close, not proof that every price has form priced in.
       </p>
     </section>
   )

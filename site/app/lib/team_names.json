@@ -1,0 +1,1971 @@
+{
+ "21": {
+  "name": "Burnley",
+  "short": "Burnley",
+  "abbr": "BUR"
+ },
+ "22": {
+  "name": "Manchester City",
+  "short": "Man City",
+  "abbr": "MNC"
+ },
+ "23": {
+  "name": "Arsenal",
+  "short": "Arsenal",
+  "abbr": "ARS"
+ },
+ "24": {
+  "name": "Nottingham Forest",
+  "short": "Nottm Forest",
+  "abbr": "NFO"
+ },
+ "25": {
+  "name": "AFC Bournemouth",
+  "short": "Bournemouth",
+  "abbr": "BOU"
+ },
+ "26": {
+  "name": "West Ham United",
+  "short": "West Ham",
+  "abbr": "WHU"
+ },
+ "27": {
+  "name": "Brighton & Hove Albion",
+  "short": "Brighton",
+  "abbr": "BHA"
+ },
+ "28": {
+  "name": "Luton Town",
+  "short": "Luton",
+  "abbr": "LTN"
+ },
+ "29": {
+  "name": "Everton",
+  "short": "Everton",
+  "abbr": "EVE"
+ },
+ "30": {
+  "name": "Fulham",
+  "short": "Fulham",
+  "abbr": "FUL"
+ },
+ "31": {
+  "name": "Sheffield United",
+  "short": "Sheffield Utd",
+  "abbr": "SHU"
+ },
+ "32": {
+  "name": "Crystal Palace",
+  "short": "C Palace",
+  "abbr": "CRY"
+ },
+ "33": {
+  "name": "Newcastle United",
+  "short": "Newcastle",
+  "abbr": "NEW"
+ },
+ "34": {
+  "name": "Aston Villa",
+  "short": "Aston Villa",
+  "abbr": "AVL"
+ },
+ "35": {
+  "name": "Brentford",
+  "short": "Brentford",
+  "abbr": "BRE"
+ },
+ "36": {
+  "name": "Tottenham Hotspur",
+  "short": "Spurs",
+  "abbr": "TOT"
+ },
+ "37": {
+  "name": "Chelsea",
+  "short": "Chelsea",
+  "abbr": "CHE"
+ },
+ "38": {
+  "name": "Liverpool",
+  "short": "Liverpool",
+  "abbr": "LIV"
+ },
+ "39": {
+  "name": "Manchester United",
+  "short": "Man United",
+  "abbr": "MAN"
+ },
+ "40": {
+  "name": "Wolverhampton Wanderers",
+  "short": "Wolves",
+  "abbr": "WOL"
+ },
+ "41": {
+  "name": "Blackburn Rovers",
+  "short": "Blackburn",
+  "abbr": "BLK"
+ },
+ "42": {
+  "name": "Bolton Wanderers",
+  "short": "Bolton",
+  "abbr": "BOL"
+ },
+ "43": {
+  "name": "West Bromwich Albion",
+  "short": "West Brom",
+  "abbr": "WBA"
+ },
+ "44": {
+  "name": "Sunderland",
+  "short": "Sunderland",
+  "abbr": "SUN"
+ },
+ "45": {
+  "name": "Birmingham City",
+  "short": "Birmingham",
+  "abbr": "BIR"
+ },
+ "46": {
+  "name": "Wigan Athletic",
+  "short": "Wigan",
+  "abbr": "WGA"
+ },
+ "47": {
+  "name": "Blackpool",
+  "short": "Blackpool",
+  "abbr": "BLP"
+ },
+ "48": {
+  "name": "Stoke City",
+  "short": "Stoke",
+  "abbr": "STK"
+ },
+ "49": {
+  "name": "Queens Park Rangers",
+  "short": "QPR",
+  "abbr": "QPR"
+ },
+ "50": {
+  "name": "Norwich City",
+  "short": "Norwich City",
+  "abbr": "NOR"
+ },
+ "51": {
+  "name": "Swansea City",
+  "short": "Swansea",
+  "abbr": "SWA"
+ },
+ "52": {
+  "name": "Reading",
+  "short": "Reading",
+  "abbr": "REA"
+ },
+ "53": {
+  "name": "Southampton",
+  "short": "Southampton",
+  "abbr": "SOU"
+ },
+ "54": {
+  "name": "Cardiff City",
+  "short": "Cardiff",
+  "abbr": "CAR"
+ },
+ "55": {
+  "name": "Hull City",
+  "short": "Hull",
+  "abbr": "HUL"
+ },
+ "56": {
+  "name": "Leicester City",
+  "short": "Leicester",
+  "abbr": "LEI"
+ },
+ "57": {
+  "name": "Watford",
+  "short": "Watford",
+  "abbr": "WAT"
+ },
+ "58": {
+  "name": "Middlesbrough",
+  "short": "Boro",
+  "abbr": "MID"
+ },
+ "59": {
+  "name": "Huddersfield Town",
+  "short": "Huddersfield",
+  "abbr": "HUD"
+ },
+ "60": {
+  "name": "Leeds United",
+  "short": "Leeds",
+  "abbr": "LEE"
+ },
+ "61": {
+  "name": "Ipswich Town",
+  "short": "Ipswich",
+  "abbr": "IPS"
+ },
+ "62": {
+  "name": "Bristol City",
+  "short": "Bristol City",
+  "abbr": "BRC"
+ },
+ "63": {
+  "name": "Millwall",
+  "short": "Millwall",
+  "abbr": "MIL"
+ },
+ "64": {
+  "name": "Coventry City",
+  "short": "Coventry",
+  "abbr": "COV"
+ },
+ "65": {
+  "name": "Portsmouth",
+  "short": "Portsmouth",
+  "abbr": "POR"
+ },
+ "66": {
+  "name": "Derby County",
+  "short": "Derby",
+  "abbr": "DER"
+ },
+ "67": {
+  "name": "Preston North End",
+  "short": "Preston",
+  "abbr": "PNE"
+ },
+ "68": {
+  "name": "Doncaster Rovers",
+  "short": "Doncaster",
+  "abbr": "DON"
+ },
+ "69": {
+  "name": "Barnsley",
+  "short": "Barnsley",
+  "abbr": "BAR"
+ },
+ "70": {
+  "name": "Scunthorpe United",
+  "short": "Scunthorpe",
+  "abbr": "SCU"
+ },
+ "71": {
+  "name": "Peterborough United",
+  "short": "Peterborough",
+  "abbr": "PET"
+ },
+ "72": {
+  "name": "Charlton Athletic",
+  "short": "Charlton",
+  "abbr": "CHA"
+ },
+ "73": {
+  "name": "Sheffield Wednesday",
+  "short": "Sheffield Wed",
+  "abbr": "SHW"
+ },
+ "74": {
+  "name": "Yeovil Town",
+  "short": "Yeovil",
+  "abbr": "YEO"
+ },
+ "75": {
+  "name": "Rotherham United",
+  "short": "Rotherham",
+  "abbr": "ROT"
+ },
+ "76": {
+  "name": "Milton Keynes Dons",
+  "short": "MK Dons",
+  "abbr": "MKD"
+ },
+ "77": {
+  "name": "Burton Albion",
+  "short": "Burton Albion",
+  "abbr": "BRT"
+ },
+ "78": {
+  "name": "Wycombe Wanderers",
+  "short": "Wycombe",
+  "abbr": "WYC"
+ },
+ "79": {
+  "name": "Plymouth Argyle",
+  "short": "Plymouth",
+  "abbr": "PLY"
+ },
+ "80": {
+  "name": "Oxford United",
+  "short": "Oxford Utd",
+  "abbr": "OXF"
+ },
+ "81": {
+  "name": "Wrexham",
+  "short": "Wrexham",
+  "abbr": "WXM"
+ },
+ "82": {
+  "name": "Carlisle United",
+  "short": "Carlisle",
+  "abbr": "CAR"
+ },
+ "83": {
+  "name": "Exeter City",
+  "short": "Exeter",
+  "abbr": "EXE"
+ },
+ "84": {
+  "name": "Colchester United",
+  "short": "Colchester",
+  "abbr": "COL"
+ },
+ "85": {
+  "name": "Notts County",
+  "short": "Notts County",
+  "abbr": "NCO"
+ },
+ "86": {
+  "name": "Bristol Rovers",
+  "short": "Bristol Rovers",
+  "abbr": "BRI"
+ },
+ "87": {
+  "name": "Rochdale",
+  "short": "Rochdale",
+  "abbr": "RCH"
+ },
+ "88": {
+  "name": "Hartlepool United",
+  "short": "Hartlepool",
+  "abbr": "HAR"
+ },
+ "90": {
+  "name": "Swindon Town",
+  "short": "Swindon",
+  "abbr": "SWI"
+ },
+ "91": {
+  "name": "Tranmere Rovers",
+  "short": "Tranmere",
+  "abbr": "TRN"
+ },
+ "92": {
+  "name": "Oldham Athletic",
+  "short": "Oldham",
+  "abbr": "OLD"
+ },
+ "93": {
+  "name": "Walsall",
+  "short": "Walsall",
+  "abbr": "WAL"
+ },
+ "94": {
+  "name": "Leyton Orient",
+  "short": "Leyton Orient",
+  "abbr": "LEY"
+ },
+ "96": {
+  "name": "Stevenage",
+  "short": "Stevenage",
+  "abbr": "STE"
+ },
+ "97": {
+  "name": "Chesterfield",
+  "short": "Chesterfield",
+  "abbr": "CHES"
+ },
+ "98": {
+  "name": "Crawley Town",
+  "short": "Crawley",
+  "abbr": "CRA"
+ },
+ "99": {
+  "name": "Crewe Alexandra",
+  "short": "Crewe",
+  "abbr": "CAX"
+ },
+ "100": {
+  "name": "Shrewsbury Town",
+  "short": "Shrewsbury",
+  "abbr": "SHR"
+ },
+ "101": {
+  "name": "Bradford City",
+  "short": "Bradford",
+  "abbr": "BRD"
+ },
+ "102": {
+  "name": "Gillingham",
+  "short": "Gillingham",
+  "abbr": "GIL"
+ },
+ "103": {
+  "name": "Port Vale",
+  "short": "Port Vale",
+  "abbr": "PTV"
+ },
+ "104": {
+  "name": "Fleetwood Town",
+  "short": "Fleetwood Town",
+  "abbr": "FLE"
+ },
+ "105": {
+  "name": "Southend United",
+  "short": "Southend Utd",
+  "abbr": "SOUT"
+ },
+ "106": {
+  "name": "Northampton Town",
+  "short": "Northampton",
+  "abbr": "NHT"
+ },
+ "107": {
+  "name": "AFC Wimbledon",
+  "short": "Wimbledon",
+  "abbr": "WIM"
+ },
+ "108": {
+  "name": "Accrington Stanley",
+  "short": "Accrington",
+  "abbr": "ACC"
+ },
+ "109": {
+  "name": "Lincoln City",
+  "short": "Lincoln City",
+  "abbr": "LCN"
+ },
+ "110": {
+  "name": "Cambridge United",
+  "short": "Cambridge",
+  "abbr": "CAM"
+ },
+ "111": {
+  "name": "Cheltenham Town",
+  "short": "Cheltenham",
+  "abbr": "CHL"
+ },
+ "113": {
+  "name": "Forest Green Rovers",
+  "short": "Forest Green",
+  "abbr": "FGR"
+ },
+ "114": {
+  "name": "Mansfield Town",
+  "short": "Mansfield",
+  "abbr": "MNF"
+ },
+ "115": {
+  "name": "Stockport County",
+  "short": "Stockport",
+  "abbr": "STO"
+ },
+ "116": {
+  "name": "Aldershot Town",
+  "short": "Aldershot",
+  "abbr": "ALD"
+ },
+ "117": {
+  "name": "Barnet",
+  "short": "Barnet",
+  "abbr": "BAR"
+ },
+ "121": {
+  "name": "York City",
+  "short": "York City",
+  "abbr": "YORK"
+ },
+ "122": {
+  "name": "Newport County",
+  "short": "Newport",
+  "abbr": "NEW"
+ },
+ "123": {
+  "name": "Grimsby Town",
+  "short": "Grimsby",
+  "abbr": "GRI"
+ },
+ "124": {
+  "name": "Salford City",
+  "short": "Salford City",
+  "abbr": "SAL"
+ },
+ "125": {
+  "name": "Barrow",
+  "short": "Barrow",
+  "abbr": "BRW"
+ },
+ "126": {
+  "name": "Harrogate Town",
+  "short": "Harrogate",
+  "abbr": "HAR"
+ },
+ "127": {
+  "name": "Sutton United",
+  "short": "Sutton Utd",
+  "abbr": "SUT"
+ },
+ "128": {
+  "name": "Bromley",
+  "short": "Bromley",
+  "abbr": "BRO"
+ },
+ "130": {
+  "name": "Gateshead",
+  "short": "Gateshead",
+  "abbr": "GAT"
+ },
+ "135": {
+  "name": "Altrincham",
+  "short": "Altrincham",
+  "abbr": "ALT"
+ },
+ "138": {
+  "name": "Tamworth",
+  "short": "Tamworth",
+  "abbr": "TAM"
+ },
+ "140": {
+  "name": "Kidderminster Harriers",
+  "short": "Kid'minster",
+  "abbr": "KID"
+ },
+ "149": {
+  "name": "Woking",
+  "short": "Woking",
+  "abbr": "WOK"
+ },
+ "151": {
+  "name": "Bayern Munich",
+  "short": "Bayern",
+  "abbr": "MUN"
+ },
+ "152": {
+  "name": "VfL Wolfsburg",
+  "short": "Wolfsburg",
+  "abbr": "WOB"
+ },
+ "153": {
+  "name": "FC Cologne",
+  "short": "Cologne",
+  "abbr": "KOE"
+ },
+ "154": {
+  "name": "Kaiserslautern",
+  "short": "Kaiserslautern",
+  "abbr": "FCK"
+ },
+ "155": {
+  "name": "SC Freiburg",
+  "short": "Freiburg",
+  "abbr": "SCF"
+ },
+ "156": {
+  "name": "St. Pauli",
+  "short": "St. Pauli",
+  "abbr": "STP"
+ },
+ "157": {
+  "name": "Hamburg SV",
+  "short": "Hamburg",
+  "abbr": "HSV"
+ },
+ "158": {
+  "name": "Schalke 04",
+  "short": "Schalke",
+  "abbr": "S04"
+ },
+ "159": {
+  "name": "Hannover 96",
+  "short": "Hannover",
+  "abbr": "H96"
+ },
+ "160": {
+  "name": "Eintracht Frankfurt",
+  "short": "Frankfurt",
+  "abbr": "SGE"
+ },
+ "161": {
+  "name": "TSG Hoffenheim",
+  "short": "Hoffenheim",
+  "abbr": "TSG"
+ },
+ "162": {
+  "name": "Werder Bremen",
+  "short": "Bremen",
+  "abbr": "SVW"
+ },
+ "163": {
+  "name": "Borussia Mönchengladbach",
+  "short": "Gladbach",
+  "abbr": "BMG"
+ },
+ "164": {
+  "name": "1. FC Nürnberg",
+  "short": "1. FC Nürnberg",
+  "abbr": "FCN"
+ },
+ "165": {
+  "name": "Borussia Dortmund",
+  "short": "Dortmund",
+  "abbr": "DOR"
+ },
+ "166": {
+  "name": "Bayer Leverkusen",
+  "short": "Leverkusen",
+  "abbr": "B04"
+ },
+ "167": {
+  "name": "Mainz",
+  "short": "Mainz",
+  "abbr": "M05"
+ },
+ "168": {
+  "name": "VfB Stuttgart",
+  "short": "Stuttgart",
+  "abbr": "VFB"
+ },
+ "169": {
+  "name": "FC Augsburg",
+  "short": "Augsburg",
+  "abbr": "FCA"
+ },
+ "170": {
+  "name": "Hertha Berlin",
+  "short": "Hertha",
+  "abbr": "BSC"
+ },
+ "172": {
+  "name": "SpVgg Greuther Fürth",
+  "short": "Greuther Furth",
+  "abbr": "SGF"
+ },
+ "173": {
+  "name": "TSV Eintracht Braunschweig",
+  "short": "E Braunschweig",
+  "abbr": "EBS"
+ },
+ "174": {
+  "name": "SC Paderborn 07",
+  "short": "Paderborn",
+  "abbr": "SCP"
+ },
+ "175": {
+  "name": "SV Darmstadt 98",
+  "short": "Darmstadt",
+  "abbr": "SVD"
+ },
+ "177": {
+  "name": "RB Leipzig",
+  "short": "RB Leipzig",
+  "abbr": "RBL"
+ },
+ "178": {
+  "name": "1. FC Union Berlin",
+  "short": "Union Berlin",
+  "abbr": "FCU"
+ },
+ "179": {
+  "name": "Arminia Bielefeld",
+  "short": "Bielefeld",
+  "abbr": "DSC"
+ },
+ "180": {
+  "name": "VfL Bochum",
+  "short": "Bochum",
+  "abbr": "BOC"
+ },
+ "181": {
+  "name": "1. FC Heidenheim 1846",
+  "short": "Heidenheim",
+  "abbr": "HDH"
+ },
+ "182": {
+  "name": "Holstein Kiel",
+  "short": "Holstein Kiel",
+  "abbr": "KSV"
+ },
+ "187": {
+  "name": "Energie Cottbus",
+  "short": "Cottbus",
+  "abbr": "COT"
+ },
+ "188": {
+  "name": "Karlsruher SC",
+  "short": "Karlsruher",
+  "abbr": "KSC"
+ },
+ "189": {
+  "name": "VfL Osnabruck",
+  "short": "Osnabruck",
+  "abbr": "OSN"
+ },
+ "192": {
+  "name": "Dynamo Dresden",
+  "short": "D Dresden",
+  "abbr": "SGD"
+ },
+ "198": {
+  "name": "1. FC Magdeburg",
+  "short": "Magdeburg",
+  "abbr": "FCM"
+ },
+ "200": {
+  "name": "SV Elversberg",
+  "short": "Elversberg",
+  "abbr": "ELV"
+ },
+ "203": {
+  "name": "AS Roma",
+  "short": "AS Roma",
+  "abbr": "ROMA"
+ },
+ "204": {
+  "name": "Cesena",
+  "short": "Cesena",
+  "abbr": "CES"
+ },
+ "205": {
+  "name": "Udinese",
+  "short": "Udinese",
+  "abbr": "UDI"
+ },
+ "206": {
+  "name": "Genoa",
+  "short": "Genoa",
+  "abbr": "GEN"
+ },
+ "208": {
+  "name": "Juventus",
+  "short": "Juventus",
+  "abbr": "JUV"
+ },
+ "211": {
+  "name": "Fiorentina",
+  "short": "Fiorentina",
+  "abbr": "FIO"
+ },
+ "212": {
+  "name": "Napoli",
+  "short": "Napoli",
+  "abbr": "NAP"
+ },
+ "213": {
+  "name": "AC Milan",
+  "short": "Milan",
+  "abbr": "MIL"
+ },
+ "214": {
+  "name": "Lecce",
+  "short": "Lecce",
+  "abbr": "LEC"
+ },
+ "215": {
+  "name": "Palermo",
+  "short": "Palermo",
+  "abbr": "PAL"
+ },
+ "216": {
+  "name": "Cagliari",
+  "short": "Cagliari",
+  "abbr": "CAG"
+ },
+ "217": {
+  "name": "Parma",
+  "short": "Parma",
+  "abbr": "PAR"
+ },
+ "219": {
+  "name": "Sampdoria",
+  "short": "Sampdoria",
+  "abbr": "SAM"
+ },
+ "220": {
+  "name": "Lazio",
+  "short": "Lazio",
+  "abbr": "LAZ"
+ },
+ "221": {
+  "name": "Bologna",
+  "short": "Bologna",
+  "abbr": "BOL"
+ },
+ "222": {
+  "name": "Inter Milan",
+  "short": "Inter Milan",
+  "abbr": "INT"
+ },
+ "225": {
+  "name": "Atalanta",
+  "short": "Atalanta",
+  "abbr": "ATA"
+ },
+ "227": {
+  "name": "Torino",
+  "short": "Torino",
+  "abbr": "TOR"
+ },
+ "228": {
+  "name": "Hellas Verona",
+  "short": "Verona",
+  "abbr": "VER"
+ },
+ "230": {
+  "name": "Sassuolo",
+  "short": "Sassuolo",
+  "abbr": "SAS"
+ },
+ "231": {
+  "name": "Empoli",
+  "short": "Empoli",
+  "abbr": "EMP"
+ },
+ "232": {
+  "name": "Frosinone",
+  "short": "Frosinone",
+  "abbr": "FRO"
+ },
+ "236": {
+  "name": "Benevento",
+  "short": "Benevento",
+  "abbr": "BEN"
+ },
+ "239": {
+  "name": "Venezia",
+  "short": "Venezia",
+  "abbr": "VEN"
+ },
+ "240": {
+  "name": "Monza",
+  "short": "Monza",
+  "abbr": "MON"
+ },
+ "241": {
+  "name": "Cremonese",
+  "short": "Cremonese",
+  "abbr": "CRE"
+ },
+ "242": {
+  "name": "Como",
+  "short": "Como",
+  "abbr": "COMO"
+ },
+ "243": {
+  "name": "Pisa",
+  "short": "Pisa",
+  "abbr": "PIS"
+ },
+ "244": {
+  "name": "Vicenza",
+  "short": "Vicenza",
+  "abbr": "VIC"
+ },
+ "246": {
+  "name": "Ascoli",
+  "short": "Ascoli",
+  "abbr": "ASC"
+ },
+ "247": {
+  "name": "Modena",
+  "short": "Modena",
+  "abbr": "MOD"
+ },
+ "249": {
+  "name": "Padova",
+  "short": "Padova",
+  "abbr": "PAD"
+ },
+ "256": {
+  "name": "Juve Stabia",
+  "short": "Juve Stabia",
+  "abbr": "JVS"
+ },
+ "262": {
+  "name": "US Avellino",
+  "short": "Avellino",
+  "abbr": "AVE"
+ },
+ "266": {
+  "name": "Virtus Entella",
+  "short": "Virtus Entella",
+  "abbr": "ENT"
+ },
+ "272": {
+  "name": "Sudtirol",
+  "short": "Sudtirol",
+  "abbr": "SUD"
+ },
+ "273": {
+  "name": "Catanzaro",
+  "short": "Catanzaro",
+  "abbr": "CAT"
+ },
+ "276": {
+  "name": "Carrarese",
+  "short": "Carrarese",
+  "abbr": "CAR"
+ },
+ "277": {
+  "name": "Mantova",
+  "short": "Mantova",
+  "abbr": "MAN"
+ },
+ "279": {
+  "name": "Athletic Club"
+ },
+ "280": {
+  "name": "Levante",
+  "short": "Levante",
+  "abbr": "LEV"
+ },
+ "281": {
+  "name": "Sevilla",
+  "short": "Sevilla",
+  "abbr": "SEV"
+ },
+ "282": {
+  "name": "Málaga",
+  "short": "Málaga",
+  "abbr": "MCF"
+ },
+ "283": {
+  "name": "Valencia",
+  "short": "Valencia",
+  "abbr": "VAL"
+ },
+ "284": {
+  "name": "Espanyol",
+  "short": "Espanyol",
+  "abbr": "ESP"
+ },
+ "285": {
+  "name": "Getafe",
+  "short": "Getafe",
+  "abbr": "GET"
+ },
+ "286": {
+  "name": "Deportivo La Coruña",
+  "short": "Deportivo",
+  "abbr": "DEP"
+ },
+ "288": {
+  "name": "Mallorca",
+  "short": "Mallorca",
+  "abbr": "MLL"
+ },
+ "289": {
+  "name": "Real Madrid",
+  "short": "Real Madrid",
+  "abbr": "RMA"
+ },
+ "290": {
+  "name": "Osasuna",
+  "short": "Osasuna",
+  "abbr": "OSA"
+ },
+ "291": {
+  "name": "Almería",
+  "short": "Almería",
+  "abbr": "ALM"
+ },
+ "292": {
+  "name": "Racing Santander",
+  "short": "Racing",
+  "abbr": "RAC"
+ },
+ "293": {
+  "name": "Barcelona",
+  "short": "Barcelona",
+  "abbr": "BAR"
+ },
+ "294": {
+  "name": "Real Sociedad",
+  "short": "Real Sociedad",
+  "abbr": "RSO"
+ },
+ "295": {
+  "name": "Villarreal",
+  "short": "Villarreal",
+  "abbr": "VIL"
+ },
+ "296": {
+  "name": "Atlético Madrid",
+  "short": "Atlético",
+  "abbr": "ATM"
+ },
+ "297": {
+  "name": "Sporting Gijón",
+  "short": "Gijón",
+  "abbr": "RSG"
+ },
+ "298": {
+  "name": "Granada",
+  "short": "Granada",
+  "abbr": "GRA"
+ },
+ "299": {
+  "name": "Real Betis",
+  "short": "Betis",
+  "abbr": "BET"
+ },
+ "300": {
+  "name": "Rayo Vallecano",
+  "short": "Rayo",
+  "abbr": "RAY"
+ },
+ "301": {
+  "name": "Celta Vigo",
+  "short": "Celta Vigo",
+  "abbr": "CEL"
+ },
+ "302": {
+  "name": "Real Valladolid",
+  "short": "Valladolid",
+  "abbr": "VLL"
+ },
+ "303": {
+  "name": "Elche",
+  "short": "Elche",
+  "abbr": "ELC"
+ },
+ "304": {
+  "name": "Eibar",
+  "short": "Eibar",
+  "abbr": "EIB"
+ },
+ "305": {
+  "name": "Córdoba",
+  "short": "Córdoba",
+  "abbr": "COR"
+ },
+ "306": {
+  "name": "Las Palmas",
+  "short": "Las Palmas",
+  "abbr": "LPA"
+ },
+ "307": {
+  "name": "Alavés",
+  "short": "Alavés",
+  "abbr": "ALA"
+ },
+ "308": {
+  "name": "Leganés",
+  "short": "Leganés",
+  "abbr": "LEG"
+ },
+ "309": {
+  "name": "Girona",
+  "short": "Girona",
+  "abbr": "GIR"
+ },
+ "311": {
+  "name": "Cádiz",
+  "short": "Cádiz",
+  "abbr": "CAD"
+ },
+ "312": {
+  "name": "Real Oviedo",
+  "short": "Real Oviedo",
+  "abbr": "OVI"
+ },
+ "316": {
+  "name": "Tenerife",
+  "short": "Tenerife",
+  "abbr": "TEN"
+ },
+ "321": {
+  "name": "Albacete",
+  "short": "Albacete",
+  "abbr": "ALB"
+ },
+ "327": {
+  "name": "CD Sabadell",
+  "short": "CD Sabadell",
+  "abbr": "CDS"
+ },
+ "343": {
+  "name": "Castellón",
+  "short": "Castellón",
+  "abbr": "CAS"
+ },
+ "346": {
+  "name": "Real Sociedad II",
+  "short": "Real Sociedad II",
+  "abbr": "RSO2"
+ },
+ "348": {
+  "name": "Burgos",
+  "short": "Burgos",
+  "abbr": "BUR"
+ },
+ "349": {
+  "name": "FC Andorra",
+  "short": "FC Andorra",
+  "abbr": "AND"
+ },
+ "351": {
+  "name": "Eldense",
+  "short": "Eldense",
+  "abbr": "ELD"
+ },
+ "353": {
+  "name": "Ceuta",
+  "short": "Ceuta",
+  "abbr": "CEU"
+ },
+ "354": {
+  "name": "AJ Auxerre",
+  "short": "Auxerre",
+  "abbr": "AUX"
+ },
+ "355": {
+  "name": "Lorient",
+  "short": "Lorient",
+  "abbr": "LOR"
+ },
+ "356": {
+  "name": "Lens",
+  "short": "Lens",
+  "abbr": "RCL"
+ },
+ "357": {
+  "name": "AS Nancy Lorraine",
+  "short": "Nancy",
+  "abbr": "ASNL"
+ },
+ "358": {
+  "name": "Lyon",
+  "short": "Lyon",
+  "abbr": "LYON"
+ },
+ "359": {
+  "name": "AS Monaco",
+  "short": "Monaco",
+  "abbr": "MON"
+ },
+ "360": {
+  "name": "Marseille",
+  "short": "Marseille",
+  "abbr": "OLM"
+ },
+ "362": {
+  "name": "Nice",
+  "short": "Nice",
+  "abbr": "NICE"
+ },
+ "364": {
+  "name": "Paris Saint-Germain",
+  "short": "PSG",
+  "abbr": "PSG"
+ },
+ "365": {
+  "name": "Saint-Étienne",
+  "short": "St. Étienne",
+  "abbr": "ASSE"
+ },
+ "366": {
+  "name": "Stade Rennais",
+  "short": "Rennes",
+  "abbr": "REN"
+ },
+ "367": {
+  "name": "Lille",
+  "short": "Lille",
+  "abbr": "LILL"
+ },
+ "368": {
+  "name": "Sochaux",
+  "short": "Sochaux",
+  "abbr": "SOC"
+ },
+ "370": {
+  "name": "Toulouse",
+  "short": "Toulouse",
+  "abbr": "TOU"
+ },
+ "371": {
+  "name": "Brest",
+  "short": "Brest",
+  "abbr": "BRE"
+ },
+ "372": {
+  "name": "Montpellier",
+  "short": "Montpellier",
+  "abbr": "MON"
+ },
+ "376": {
+  "name": "Dijon FCO",
+  "short": "Dijon FCO",
+  "abbr": "DIJO"
+ },
+ "378": {
+  "name": "Troyes",
+  "short": "Troyes",
+  "abbr": "TRY"
+ },
+ "379": {
+  "name": "Stade de Reims",
+  "short": "Reims",
+  "abbr": "REIM"
+ },
+ "380": {
+  "name": "Nantes",
+  "short": "Nantes",
+  "abbr": "NAN"
+ },
+ "381": {
+  "name": "Guingamp",
+  "short": "Guingamp",
+  "abbr": "EAG"
+ },
+ "382": {
+  "name": "Metz",
+  "short": "Metz",
+  "abbr": "METZ"
+ },
+ "383": {
+  "name": "Angers",
+  "short": "Angers",
+  "abbr": "ANG"
+ },
+ "385": {
+  "name": "Strasbourg",
+  "short": "Strasbourg",
+  "abbr": "STR"
+ },
+ "388": {
+  "name": "Clermont Foot",
+  "short": "Clermont Foot",
+  "abbr": "CLE"
+ },
+ "389": {
+  "name": "Le Havre AC",
+  "short": "Le Havre AC",
+  "abbr": "HAC"
+ },
+ "390": {
+  "name": "Paris FC",
+  "short": "Paris FC",
+  "abbr": "PAR"
+ },
+ "391": {
+  "name": "Boulogne",
+  "short": "Boulogne",
+  "abbr": "BOU"
+ },
+ "394": {
+  "name": "Grenoble",
+  "short": "Grenoble",
+  "abbr": "GRE"
+ },
+ "395": {
+  "name": "Stade Laval",
+  "short": "Stade Laval",
+  "abbr": "SLFC"
+ },
+ "399": {
+  "name": "Le Mans",
+  "short": "Le Mans",
+  "abbr": "MNS"
+ },
+ "405": {
+  "name": "Red Star FC 93",
+  "short": "Red Star FC",
+  "abbr": "RSFC"
+ },
+ "409": {
+  "name": "Rodez Aveyron",
+  "short": "Rodez Aveyron",
+  "abbr": "AVE"
+ },
+ "410": {
+  "name": "Dunkerque",
+  "short": "Dunkerque",
+  "abbr": "DUN"
+ },
+ "411": {
+  "name": "Pau",
+  "short": "Pau",
+  "abbr": "PAU"
+ },
+ "412": {
+  "name": "Annecy",
+  "short": "Annecy",
+  "abbr": "ANN"
+ },
+ "416": {
+  "name": "FC Twente",
+  "short": "FC Twente",
+  "abbr": "TWE"
+ },
+ "418": {
+  "name": "Excelsior",
+  "short": "Excelsior",
+  "abbr": "EXC"
+ },
+ "419": {
+  "name": "Heerenveen",
+  "short": "Heerenveen",
+  "abbr": "HEE"
+ },
+ "420": {
+  "name": "PSV Eindhoven",
+  "short": "PSV",
+  "abbr": "PSV"
+ },
+ "422": {
+  "name": "Willem II",
+  "short": "Willem II",
+  "abbr": "WIL"
+ },
+ "423": {
+  "name": "NEC Nijmegen",
+  "short": "NEC",
+  "abbr": "NEC"
+ },
+ "425": {
+  "name": "Feyenoord Rotterdam",
+  "short": "Feyenoord",
+  "abbr": "FEY"
+ },
+ "426": {
+  "name": "FC Utrecht",
+  "short": "FC Utrecht",
+  "abbr": "UTR"
+ },
+ "427": {
+  "name": "FC Groningen",
+  "short": "FC Groningen",
+  "abbr": "GRO"
+ },
+ "428": {
+  "name": "Ajax Amsterdam",
+  "short": "Ajax",
+  "abbr": "AJA"
+ },
+ "430": {
+  "name": "AZ Alkmaar",
+  "short": "AZ Alkmaar",
+  "abbr": "AZ"
+ },
+ "432": {
+  "name": "ADO Den Haag",
+  "short": "ADO Den Haag",
+  "abbr": "ADO"
+ },
+ "434": {
+  "name": "PEC Zwolle",
+  "short": "PEC Zwolle",
+  "abbr": "PEC"
+ },
+ "435": {
+  "name": "SC Cambuur",
+  "short": "Cambuur",
+  "abbr": "CAM"
+ },
+ "436": {
+  "name": "Go Ahead Eagles",
+  "short": "Go Ahead Eagles",
+  "abbr": "GAE"
+ },
+ "438": {
+  "name": "Sparta Rotterdam",
+  "short": "Sparta",
+  "abbr": "SPA"
+ },
+ "439": {
+  "name": "Fortuna Sittard",
+  "short": "Fortuna",
+  "abbr": "FOR"
+ },
+ "443": {
+  "name": "Telstar",
+  "short": "Telstar",
+  "abbr": "TEL"
+ },
+ "444": {
+  "name": "Standard Liege",
+  "short": "Standard Liege",
+  "abbr": "STL"
+ },
+ "445": {
+  "name": "Zulte-Waregem",
+  "short": "Zulte-Waregem",
+  "abbr": "ZUL"
+ },
+ "446": {
+  "name": "Anderlecht",
+  "short": "Anderlecht",
+  "abbr": "AND"
+ },
+ "448": {
+  "name": "KV Kortrijk",
+  "short": "KV Kortrijk",
+  "abbr": "KVK"
+ },
+ "449": {
+  "name": "Club Brugge",
+  "short": "Club Brugge",
+  "abbr": "BRU"
+ },
+ "450": {
+  "name": "KV Mechelen",
+  "short": "KV Mechelen",
+  "abbr": "KVM"
+ },
+ "452": {
+  "name": "Sint-Truidense",
+  "short": "Sint-Truidense",
+  "abbr": "STVV"
+ },
+ "454": {
+  "name": "KVC Westerlo",
+  "short": "Westerlo",
+  "abbr": "KVCW"
+ },
+ "455": {
+  "name": "KAA Gent",
+  "short": "KAA Gent",
+  "abbr": "GENT"
+ },
+ "456": {
+  "name": "Cercle Brugge KSV",
+  "short": "Cercle Brugge",
+  "abbr": "CBK"
+ },
+ "457": {
+  "name": "Royal Charleroi SC",
+  "short": "Royal Charleroi",
+  "abbr": "CHA"
+ },
+ "458": {
+  "name": "Racing Genk",
+  "short": "Genk",
+  "abbr": "GENK"
+ },
+ "460": {
+  "name": "OH Leuven",
+  "short": "OH Leuven",
+  "abbr": "OHL"
+ },
+ "466": {
+  "name": "Antwerp",
+  "short": "Antwerp",
+  "abbr": "ANT"
+ },
+ "469": {
+  "name": "Union St.-Gilloise",
+  "short": "Union SG",
+  "abbr": "USG"
+ },
+ "472": {
+  "name": "RAAL La Louvière",
+  "short": "La Louvière",
+  "abbr": "RLL"
+ },
+ "473": {
+  "name": "Braga",
+  "short": "Braga",
+  "abbr": "SCB"
+ },
+ "475": {
+  "name": "Maritimo",
+  "short": "Maritimo",
+  "abbr": "MAR"
+ },
+ "478": {
+  "name": "FC Porto",
+  "short": "FC Porto",
+  "abbr": "FCP"
+ },
+ "480": {
+  "name": "Sporting CP",
+  "short": "Sporting",
+  "abbr": "SCP"
+ },
+ "483": {
+  "name": "Benfica",
+  "short": "Benfica",
+  "abbr": "SLB"
+ },
+ "485": {
+  "name": "Rio Ave",
+  "short": "Rio Ave",
+  "abbr": "RAFC"
+ },
+ "486": {
+  "name": "C.D. Nacional",
+  "short": "Nacional",
+  "abbr": "CDN"
+ },
+ "488": {
+  "name": "Vitória de Guimarães",
+  "short": "Vitória",
+  "abbr": "VSC"
+ },
+ "489": {
+  "name": "Gil Vicente",
+  "short": "Gil Vicente",
+  "abbr": "GVFC"
+ },
+ "491": {
+  "name": "Estoril",
+  "short": "Estoril",
+  "abbr": "EPF"
+ },
+ "492": {
+  "name": "Moreirense",
+  "short": "Moreirense",
+  "abbr": "MFC"
+ },
+ "494": {
+  "name": "Arouca",
+  "short": "Arouca",
+  "abbr": "FCA"
+ },
+ "501": {
+  "name": "Santa Clara",
+  "short": "Santa Clara",
+  "abbr": "CDSC"
+ },
+ "502": {
+  "name": "FC Famalicao",
+  "short": "FC Famalicao",
+  "abbr": "FCF"
+ },
+ "505": {
+  "name": "Casa Pia",
+  "short": "Casa Pia",
+  "abbr": "CPAC"
+ },
+ "506": {
+  "name": "Estrela",
+  "short": "Estrela",
+  "abbr": "EST"
+ },
+ "508": {
+  "name": "Alverca",
+  "short": "Alverca",
+  "abbr": "ALV"
+ },
+ "510": {
+  "name": "Besiktas",
+  "short": "Besiktas",
+  "abbr": "BES"
+ },
+ "512": {
+  "name": "Genclerbirligi",
+  "short": "Genclerbirli",
+  "abbr": "GEN"
+ },
+ "514": {
+  "name": "Kasimpasa",
+  "short": "Kasimpasa",
+  "abbr": "KAS"
+ },
+ "516": {
+  "name": "Galatasaray",
+  "short": "Galatasaray",
+  "abbr": "GAL"
+ },
+ "518": {
+  "name": "Trabzonspor",
+  "short": "Trabzonspor",
+  "abbr": "TRAB"
+ },
+ "519": {
+  "name": "Fenerbahce",
+  "short": "Fenerbahce",
+  "abbr": "FEN"
+ },
+ "524": {
+  "name": "Konyaspor",
+  "short": "Konyaspor",
+  "abbr": "KNY"
+ },
+ "525": {
+  "name": "Istanbul Basaksehir",
+  "short": "Istanbul BB",
+  "abbr": "IBFK"
+ },
+ "528": {
+  "name": "Samsunspor",
+  "short": "Samsunspor",
+  "abbr": "SAM"
+ },
+ "533": {
+  "name": "Caykur Rizespor",
+  "short": "Caykur Rizespor",
+  "abbr": "CAY"
+ },
+ "537": {
+  "name": "Alanyaspor",
+  "short": "Alanyaspor",
+  "abbr": "ALA"
+ },
+ "538": {
+  "name": "Goztepe",
+  "short": "Goztepe",
+  "abbr": "GOZ"
+ },
+ "542": {
+  "name": "Gaziantep FK",
+  "short": "Gaziantep",
+  "abbr": "GAZ"
+ },
+ "551": {
+  "name": "Eyupspor",
+  "short": "Eyupspor",
+  "abbr": "EYU"
+ },
+ "553": {
+  "name": "Kocaelispor",
+  "short": "Kocaelispor",
+  "abbr": "KOC"
+ },
+ "554": {
+  "name": "Panathinaikos",
+  "short": "Panathinaikos",
+  "abbr": "PAO"
+ },
+ "556": {
+  "name": "Iraklis",
+  "short": "Iraklis",
+  "abbr": "IRAK"
+ },
+ "557": {
+  "name": "Olympiacos",
+  "short": "Olympiacos",
+  "abbr": "OLY"
+ },
+ "559": {
+  "name": "Atromitos",
+  "short": "Atromitos",
+  "abbr": "ATRO"
+ },
+ "563": {
+  "name": "Asteras Tripoli",
+  "short": "Asteras Trip",
+  "abbr": "AST"
+ },
+ "565": {
+  "name": "Aris",
+  "short": "Aris",
+  "abbr": "ARI"
+ },
+ "567": {
+  "name": "AEK Athens",
+  "short": "AEK Athens",
+  "abbr": "AEK"
+ },
+ "568": {
+  "name": "PAOK",
+  "short": "PAOK",
+  "abbr": "PAOK"
+ },
+ "572": {
+  "name": "Panetolikos",
+  "short": "Panetolikos",
+  "abbr": "PAN"
+ },
+ "573": {
+  "name": "Levadiakos",
+  "short": "Levadiakos",
+  "abbr": "LEV"
+ },
+ "582": {
+  "name": "OFI CRETE",
+  "short": "OFI CRETE",
+  "abbr": "OFI Crete"
+ },
+ "583": {
+  "name": "Volos NFC",
+  "short": "Volos",
+  "abbr": "VOL"
+ },
+ "585": {
+  "name": "Kifisia",
+  "short": "Kifisia",
+  "abbr": "KIF"
+ },
+ "587": {
+  "name": "Aberdeen",
+  "short": "Aberdeen",
+  "abbr": "ABE"
+ },
+ "588": {
+  "name": "Hamilton Academical",
+  "short": "Hamilton",
+  "abbr": "HAM"
+ },
+ "589": {
+  "name": "Heart of Midlothian",
+  "short": "Hearts",
+  "abbr": "HOM"
+ },
+ "590": {
+  "name": "St Johnstone",
+  "short": "St Johnstone",
+  "abbr": "STJ"
+ },
+ "591": {
+  "name": "Inverness Caledonian Thistle",
+  "short": "Inverness CT",
+  "abbr": "ICT"
+ },
+ "592": {
+  "name": "Celtic",
+  "short": "Celtic",
+  "abbr": "CEL"
+ },
+ "593": {
+  "name": "Rangers",
+  "short": "Rangers",
+  "abbr": "RAN"
+ },
+ "594": {
+  "name": "Kilmarnock",
+  "short": "Kilmarnock",
+  "abbr": "KIL"
+ },
+ "595": {
+  "name": "St Mirren",
+  "short": "St Mirren",
+  "abbr": "STM"
+ },
+ "596": {
+  "name": "Dundee United",
+  "short": "Dundee Utd",
+  "abbr": "DUN"
+ },
+ "597": {
+  "name": "Motherwell",
+  "short": "Motherwell",
+  "abbr": "MOT"
+ },
+ "598": {
+  "name": "Hibernian",
+  "short": "Hibernian",
+  "abbr": "HIBS"
+ },
+ "599": {
+  "name": "Dunfermline Athletic",
+  "short": "Dunfermline",
+  "abbr": "DFA"
+ },
+ "600": {
+  "name": "Dundee",
+  "short": "Dundee",
+  "abbr": "DUN"
+ },
+ "602": {
+  "name": "Partick Thistle",
+  "short": "Partick",
+  "abbr": "PAR"
+ },
+ "603": {
+  "name": "Livingston",
+  "short": "Livingston",
+  "abbr": "LIV"
+ },
+ "604": {
+  "name": "Falkirk",
+  "short": "Falkirk",
+  "abbr": "FALK"
+ },
+ "606": {
+  "name": "Queen of the South",
+  "short": "Queens",
+  "abbr": "QOS"
+ },
+ "607": {
+  "name": "Greenock Morton",
+  "short": "Morton",
+  "abbr": "MORT"
+ },
+ "608": {
+  "name": "Stirling Albion",
+  "short": "Stirling",
+  "abbr": "STI"
+ },
+ "609": {
+  "name": "Raith Rovers",
+  "short": "Raith",
+  "abbr": "RRFC"
+ },
+ "610": {
+  "name": "Ayr United",
+  "short": "Ayr",
+  "abbr": "AYR"
+ },
+ "611": {
+  "name": "Airdrieonians"
+ },
+ "612": {
+  "name": "Dumbarton",
+  "short": "Dumbarton",
+  "abbr": "DUM"
+ },
+ "613": {
+  "name": "Alloa Athletic",
+  "short": "Alloa",
+  "abbr": "ALL"
+ },
+ "615": {
+  "name": "Arbroath",
+  "short": "Arbroath",
+  "abbr": "ARB"
+ },
+ "616": {
+  "name": "Cove Rangers",
+  "short": "Cove Rangers",
+  "abbr": "COVE"
+ },
+ "617": {
+  "name": "Queen's Park",
+  "short": "Queen's Park",
+  "abbr": "QUE"
+ },
+ "618": {
+  "name": "East Fife",
+  "short": "East Fife",
+  "abbr": "EFIF"
+ },
+ "619": {
+  "name": "Forfar Athletic",
+  "short": "Forfar",
+  "abbr": "FOR"
+ },
+ "620": {
+  "name": "Stenhousemuir",
+  "short": "Stenhousem'r",
+  "abbr": "STE"
+ },
+ "621": {
+  "name": "Peterhead",
+  "short": "Peterhead",
+  "abbr": "PET"
+ },
+ "623": {
+  "name": "Stranraer",
+  "short": "Stranraer",
+  "abbr": "STR"
+ },
+ "624": {
+  "name": "Montrose",
+  "short": "Montrose",
+  "abbr": "MON"
+ },
+ "625": {
+  "name": "Clyde",
+  "short": "Clyde",
+  "abbr": "CLY"
+ },
+ "628": {
+  "name": "Annan Athletic",
+  "short": "Annan Athlet",
+  "abbr": "ANN"
+ },
+ "629": {
+  "name": "Edinburgh City",
+  "short": "Edinburgh City",
+  "abbr": "EDI"
+ },
+ "632": {
+  "name": "Elgin City",
+  "short": "Elgin",
+  "abbr": "ELG"
+ },
+ "634": {
+  "name": "Spartans FC",
+  "short": "Spartans",
+  "abbr": "SFC"
+ },
+ "639": {
+  "name": "FC Halifax Town",
+  "short": "Halifax",
+  "abbr": "HAL"
+ },
+ "641": {
+  "name": "Eastleigh",
+  "short": "Eastleigh",
+  "abbr": "ELH"
+ },
+ "642": {
+  "name": "Boreham Wood",
+  "short": "Boreham Wood",
+  "abbr": "BOR"
+ },
+ "646": {
+  "name": "Solihull Moors",
+  "short": "Solihull",
+  "abbr": "SOL"
+ },
+ "647": {
+  "name": "AFC Fylde",
+  "short": "AFC Fylde",
+  "abbr": "FYL"
+ },
+ "653": {
+  "name": "Wealdstone",
+  "short": "Wealdstone",
+  "abbr": "WEA"
+ },
+ "656": {
+  "name": "Boston United",
+  "short": "Boston Utd",
+  "abbr": "BOST"
+ },
+ "1159": {
+  "name": "Worthing",
+  "short": "Worthing",
+  "abbr": "WOR"
+ },
+ "1160": {
+  "name": "AFC Hornchurch",
+  "short": "Hornchurh",
+  "abbr": "HOR"
+ },
+ "1161": {
+  "name": "Académico de Viseu",
+  "short": "Académico",
+  "abbr": "ACV"
+ },
+ "1162": {
+  "name": "Lommel SK",
+  "short": "Lommel SK",
+  "abbr": "LOM"
+ },
+ "1163": {
+  "name": "Waasland-Beveren",
+  "short": "Waasland-Beveren",
+  "abbr": "WAA"
+ },
+ "1165": {
+  "name": "Celta Fortuna"
+ },
+ "1166": {
+  "name": "Çorum FK",
+  "short": "Çorum FK",
+  "abbr": "COR"
+ },
+ "1167": {
+  "name": "Amed SFK",
+  "short": "Amed SFK",
+  "abbr": "AMED"
+ },
+ "1168": {
+  "name": "Erzurum BB",
+  "short": "Erzurum",
+  "abbr": "ERZ"
+ },
+ "1173": {
+  "name": "Arezzo",
+  "short": "Arezzo",
+  "abbr": "ARE"
+ },
+ "1174": {
+  "name": "Kalamata",
+  "short": "Kalamata",
+  "abbr": "KAL"
+ }
+}

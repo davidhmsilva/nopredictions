@@ -12,18 +12,23 @@ import { BoardView, HowPricesWork } from './BoardView'
 import { SOCCER_COLUMNS } from '../lib/boardRow'
 import { useSoccerRows } from './useBoards'
 import type { ScoutFixture } from '../lib/scoutTypes'
+import type { BoardDay } from './DayStrip'
 
 export function SoccerBoard({ initial = null }: { initial?: ScoutFixture[] | null }) {
   const { rows, placed, loading, error, kalshiPending } = useSoccerRows(initial)
   const [query, setQuery] = useState('')
+  const [day, setDay] = useState<BoardDay>('all')
 
   useEffect(() => {
     // The nav search sends a team here as ?q=. Read from the URL directly
     // rather than through useSearchParams, which would opt this statically
     // rendered page into a Suspense boundary for one string.
     try {
-      const q = new URLSearchParams(window.location.search).get('q')
+      const params = new URLSearchParams(window.location.search)
+      const q = params.get('q')
       if (q) setQuery(q)
+      const d = params.get('day')
+      if (d === 'today' || d === 'tomorrow') setDay(d)
     } catch {
       /* no query string is the normal case */
     }
@@ -76,6 +81,8 @@ export function SoccerBoard({ initial = null }: { initial?: ScoutFixture[] | nul
       emptyLabel="No games match that right now."
       pending={kalshiPending ? 'Loading Kalshi prices…' : null}
       initialQuery={query}
+      days
+      initialDay={day}
     />
   )
 }

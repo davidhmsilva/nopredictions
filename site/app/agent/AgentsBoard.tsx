@@ -77,7 +77,7 @@ function AgentCard({ a }: { a: AgentSummary }) {
       </div>
       <div className="ag-card-foot">
         {a.n_open > 0 && <span className="np-num">{a.n_open} open</span>}
-        <span>Last bet {ago(a.last_bet_at)}</span>
+        <span>{a.last_bet_at ? `Last bet ${ago(a.last_bet_at)}` : 'Waiting for a game that fits'}</span>
         <span className="sc-report">
           View agent <span aria-hidden="true">→</span>
         </span>

@@ -43,6 +43,8 @@ import { columnsFor, hasPrice, volumeByVenue, type BoardColumn, type BoardRow } 
 import { VENUE_NAME, type Venue } from '../lib/venues'
 import { useSession } from '../lib/useSession'
 import { useWatchlist } from '../lib/useWatchlist'
+import { DayStrip, type BoardDay } from './DayStrip'
+import { localDate, shiftDay, todayLocal } from '../lib/localDay'
 
 // ── one price, across both exchanges ─────────────────────────────────────────
 
@@ -321,6 +323,11 @@ export interface BoardViewProps {
    *  count still names the whole list, because "Top 10 of 97" and "10 of 97"
    *  are different claims. */
   limit?: number
+  /** The Yesterday · Today · Tomorrow strip. Soccer only: yesterday is the
+   *  soccer results page. */
+  days?: boolean
+  /** Seeded from ?day= (the results page links back with it). */
+  initialDay?: BoardDay
 }
 
 export function BoardView({
@@ -338,11 +345,15 @@ export function BoardView({
   initialQuery = '',
   featured = 4,
   limit,
+  days = false,
+  initialDay = 'all',
 }: BoardViewProps) {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<SortKey>('default')
   const [query, setQuery] = useState(initialQuery)
   const [comp, setComp] = useState<string | null>(null)
+  const [day, setDay] = useState<BoardDay>(initialDay)
+  useEffect(() => setDay(initialDay), [initialDay])
   const [allComps, setAllComps] = useState(false)
   const { me } = useSession()
   const oddsFmt = useOddsFormat()
@@ -367,8 +378,18 @@ export function BoardView({
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
+    // The reader's own calendar day; nothing is filtered before hydration,
+    // when there is no reader's zone to ask.
+    const target =
+      days && mounted && day !== 'all' ? (day === 'today' ? todayLocal() : shiftDay(todayLocal(), 1)) : null
     const filtered = rows.filter((r) => {
       if (q && !r.search.includes(q)) return false
+      if (target) {
+        // A live game is today's whatever time it started.
+        if (r.live) {
+          if (day !== 'today') return false
+        } else if (!r.kickoff || localDate(new Date(r.kickoff)) !== target) return false
+      }
       if (comp && r.competition !== comp) return false
       switch (filter) {
         case 'live':
@@ -387,7 +408,7 @@ export function BoardView({
       }
     })
     return sortRows(filtered, sort)
-  }, [rows, filter, sort, query, comp, watchlist])
+  }, [rows, filter, sort, query, comp, watchlist, days, day, mounted])
 
   /** Ordered by how much of today's card each competition is. */
   const competitions = useMemo(() => {
@@ -466,6 +487,7 @@ export function BoardView({
       </div>
 
       <div className="np-wrap">
+        {days && <DayStrip active={day} onPick={setDay} />}
         {head}
 
         {!error && featured > 0 && top.length > 0 && (
@@ -558,7 +580,7 @@ export function BoardView({
 
           {listed.length > 0 && (
             <div className="sc-table-wrap">
-              <table className="sc-table">
+              <table className="sc-table sc-table-board">
                 <thead>
                   <tr>
                     <th className="sc-c-star" />

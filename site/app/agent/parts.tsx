@@ -128,7 +128,11 @@ export function EquityChart({ curve }: { curve: { t: string; pl: number }[] }) {
   const W = 1000
   const H = 240
   const PAD = 14
-  const LEFT = 64
+  const ticks = Array.from(new Set([hi, 0, lo].map((v) => Number(v.toFixed(2)))))
+  // The axis is drawn at up to 22 units on a phone (.gc-chart-tick), ~13.5 a
+  // mono character, so a fixed 64 cut "+7.28u" down to ".28u". The margin is
+  // sized to the longest label instead.
+  const LEFT = Math.max(64, Math.max(...ticks.map((v) => units(v).length)) * 13.5 + 14)
   const plotW = W - LEFT - 8
   const y = (v: number) => PAD + (1 - (v - lo) / (hi - lo || 1)) * (H - 2 * PAD)
   const line = path(series, plotW, H, PAD, lo, hi)
@@ -137,7 +141,6 @@ export function EquityChart({ curve }: { curve: { t: string; pl: number }[] }) {
   const first = new Date(curve[0].t)
   const last = new Date(curve[curve.length - 1].t)
   const withYear = first.getFullYear() !== last.getFullYear()
-  const ticks = Array.from(new Set([hi, 0, lo].map((v) => Number(v.toFixed(2)))))
   return (
     <div className="gc-chart">
       <svg className="gc-chart-svg" viewBox={`0 0 ${W} ${H + 26}`} role="img"

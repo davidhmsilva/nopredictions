@@ -180,3 +180,14 @@ export function IconStar({ className }: P) {
     </svg>
   )
 }
+
+/** Teams — a crest. A shield rather than a jersey or a ball: it reads as "a
+ *  club" at 21px, and the ball already means "football" everywhere else. */
+export function IconTeams({ className }: P) {
+  return (
+    <svg {...box} className={className}>
+      <path d="M12 3 5 5.5v5.8c0 4.4 2.9 8 7 9.7 4.1-1.7 7-5.3 7-9.7V5.5z" />
+      <path d="M12 3v18M5.4 11h13.2" />
+    </svg>
+  )
+}

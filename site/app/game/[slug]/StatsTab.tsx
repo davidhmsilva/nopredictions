@@ -10,6 +10,8 @@ import type { EspnMatch } from '../../lib/espnMatch'
 import { StreakChip } from './Insights'
 import { dayMonth, dayMonthYear, frac, oddsDec, rateOf, shortName, type Count } from './fmt'
 import { useOddsFormat } from '../../lib/display'
+import Link from 'next/link'
+import { teamHref } from '../../lib/teamSlug'
 
 type SplitKey = 'last5' | 'last10' | 'venue' | 'season'
 
@@ -20,7 +22,7 @@ const SPLITS: Array<[SplitKey, string]> = [
   ['season', 'Since 1 Jul'],
 ]
 
-interface Row {
+export interface Row {
   label: string
   get: (s: FormStats) => Count | number | null
   fmt?: (v: number) => string
@@ -28,7 +30,7 @@ interface Row {
   avg?: boolean
 }
 
-const GROUPS: Array<{ title: string; rows: Row[] }> = [
+export const GROUPS: Array<{ title: string; rows: Row[] }> = [
   {
     title: 'Results',
     rows: [
@@ -65,7 +67,7 @@ const GROUPS: Array<{ title: string; rows: Row[] }> = [
   },
 ]
 
-function Cell({ v, fmt }: { v: Count | number | null; fmt?: (x: number) => string }) {
+export function Cell({ v, fmt }: { v: Count | number | null; fmt?: (x: number) => string }) {
   if (v == null) return <span className="gcx-cmp-v gcx-dim">—</span>
   if (typeof v === 'number') return <span className="gcx-cmp-v gc-mono">{fmt ? fmt(v) : v}</span>
   const r = rateOf(v)
@@ -134,7 +136,7 @@ function CompareTable({ home, away, split, swapped }: {
   )
 }
 
-function MarketLine({ label, r }: { label: string; r: MarketRecord | null }) {
+export function MarketLine({ label, r }: { label: string; r: MarketRecord | null }) {
   if (!r) return null
   const diff = r.actual - r.expected
   return (
@@ -149,7 +151,7 @@ function MarketLine({ label, r }: { label: string; r: MarketRecord | null }) {
   )
 }
 
-function Pill({ r }: { r: 'W' | 'D' | 'L' | string }) {
+export function Pill({ r }: { r: 'W' | 'D' | 'L' | string }) {
   return <span className={`gcx-pill gcx-pill-${r}`}>{r}</span>
 }
 
@@ -166,7 +168,9 @@ function GameList({ games }: { games: TeamGame[] }) {
             <li key={i}>
               <span className="gcx-games-date gc-mono">{dayMonth(g.date)}</span>
               <span className="gcx-games-venue">{g.venue === 'H' ? 'v' : '@'}</span>
-              <span className="gcx-games-opp" title={g.league}>{g.opponent}</span>
+              <span className="gcx-games-opp" title={g.league}>
+                {g.opponentId ? <Link href={teamHref(g.opponentId, g.opponent)} className="tm-link">{g.opponent}</Link> : g.opponent}
+              </span>
               <span className="gcx-games-ht gc-mono">{g.hf != null ? `${g.hf}-${g.ha}` : ''}</span>
               <span className="gcx-games-ft gc-mono">{g.gf}-{g.ga}</span>
               <Pill r={g.result} />
@@ -223,7 +227,9 @@ function H2H({ games, home, away }: { games: H2HGame[]; home: string; away: stri
 function TeamColumn({ t, swapped }: { t: TeamForm; swapped: boolean }) {
   return (
     <div className="gcx-team-col">
-      <h3 className="gcx-h3">{t.name} <span className="gcx-dim">{t.league}</span></h3>
+      <h3 className="gcx-h3">
+        <Link href={teamHref(t.id, t.name)} className="tm-link">{t.name}</Link> <span className="gcx-dim">{t.league}</span>
+      </h3>
 
       <div className="gcx-mkt">
         <div className="gcx-mkt-title">Against the closing price</div>

@@ -19,13 +19,46 @@ and mathematical models to find mispricings, then logs paper trades publicly at
 We sit at the intersection. The agent doesn't predict — it finds **mispricings**.
 Hence the brand: *no predictions, just edges*.
 
-**Why Polymarket primary, Betfair as benchmark:** Betfair Exchange is the most
-efficient sports market in the world — prices are set by sharp money competing
-against each other, no bookmaker margin. We use Betfair (and Pinnacle closing
-lines) as the **truth oracle for fair value**. If our model says a Polymarket
-price is mispriced *relative to the Betfair / Pinnacle consensus*, that's our
-edge signal. Betfair tells us what the market should be; Polymarket tells us
-where to trade.
+**Why Polymarket primary, Betfair/Pinnacle as benchmark:** Betfair Exchange and
+Pinnacle are the sharpest prices we can read, so they are the **strongest
+benchmark we have — not the truth.** A Polymarket price away from them is one
+edge signal among several. Betfair/Pinnacle tell us what the sharpest money
+thinks; Polymarket tells us where to trade.
+
+## How we think about markets (rewritten 2026-09-29, by the operator's direction)
+
+**Sports markets are beatable, and money is made in them every day.** Bettors and
+syndicates live off beating Pinnacle; Polymarket, thinner and more retail, is
+easier still. Our own data already shows it: wallet GSX- made +$85k in 105 days
+on a book under $29k (`reports/wallet_gsx_2026-09-02.md`); resting at the bid on
+NFL lines Pinnacle prices exactly measured +0.60% CI[+0.45,+0.75]; the same
+football outcome is routinely cheaper on one venue than the other (median 1.3pp
+net, max 5.4pp on 2026-09-20).
+
+So the default stance changes:
+
+1. **Pinnacle is a benchmark, not an oracle.** Its closing line is sharp and
+   still has measurable biases (favourite–longshot, lower leagues, early
+   season, internationals, public-heavy names). Measure it against results too;
+   its blind spots are where syndicates earn.
+2. **A failed test says "this method did not find it" — never "the market is
+   efficient".** Write conclusions about the method, the sample and the
+   population tested, and name the next test. A negative on clubs says nothing
+   about national teams; a negative against Pinnacle's close says nothing about
+   Polymarket's microstructure.
+3. **Start from who pays and why** (the NFL profit map is the template): slow
+   price updates after news and line-ups, niche leagues nobody prices well,
+   public money on big names, settlement windows, cross-venue gaps, being the
+   maker instead of the taker, platform rewards, rule quirks.
+4. **Evidence that someone is making money is the strongest lead there is.**
+   Winning wallets are studied before models are built: what they buy, when,
+   at what price, maker or taker, and which leg carries the profit.
+5. **Rigor stays; it points at finding edges, not at dismissing them.** Out of
+   sample, no lookahead, sample sized to the effect — and when the sample is
+   too small, say "not enough data yet", collect more, and keep the idea alive.
+6. **When the data we need does not exist, say so and propose getting it**
+   (a new source, a paid feed, a recorder) instead of answering a different,
+   easier question.
 
 **Two active strategies:**
 1. **PM-vs-Sharp Consensus (pre-match)** — compare PM prices against vig-removed Pinnacle + Betfair odds. Edge = sharp_prob − pm_price. Trade if edge >= threshold.
@@ -131,6 +164,8 @@ riding the AI + prediction-markets wave simultaneously.
     │   ├── lib/supabaseAuth.ts        ← server half (imports next/headers)
     │   ├── lib/useSession.ts · lib/useWatchlist.ts
     │   ├── game/[slug]/page.tsx       ← GAME CENTER — tabs: Overview · Stats · Match · Markets
+    │   ├── team/[slug]/ · teams/      ← TEAM PAGES — /team/<id>-<name>, and the index ✅ NEW
+    │   ├── lib/teampage.ts · teamSlug.ts ← club data (form, table vs price, next games) · URLs
     │   ├── game/[slug]/{Insights,StatsTab,MatchTab}.tsx · fmt.ts
     │   ├── api/game/context · api/game/brief   ← team form + ESPN + pressure · the AI brief
     │   ├── lib/teamform.ts            ← our DB → form, streaks with rarity, H2H, vs closing price
@@ -1952,6 +1987,164 @@ A decision for the operator, flagged when it shipped.
 (unset in production) so a second session can preview on its own build dir —
 `np-site-gc` in `.claude/launch.json`, port 3107, `.next-gc/`.
 
+## Team pages — the Sofascore habit, with the price (2026-09-28)
+
+`/team/<teams.id>-<name>` for every club in our database, and `/teams`, an index
+by league (clubs with 3+ domestic league matches in the last 120 days). Linked
+from the Game Center's Stats tab (both team names and every opponent) and from
+each other (table rows, recent matches); every club is in the sitemap. A wrong
+or missing name part redirects to the current slug.
+
+| panel | source | what makes it ours |
+|---|---|---|
+| Next with a market | Scout board cache | fixtures resolved with `resolveTeams` (both sides together), 1X2 in the reader's odds format, both venues |
+| Against the closing price | `matches` + `match_odds` | points vs the points the closing 1X2 expected (Σ 3·P(win)+P(draw)), wins and overs vs priced-in |
+| Runs | `teamform.streaksOf` | league base rates, rarity shown, "17 patterns checked" printed |
+| Numbers | `teamform.stats` | Last 5 · Last 10 · Home 10 · Away 10 · Season in one grid |
+| League table | the season's results | **Priced** and **±** columns: points against what the prices expected |
+
+```
+site/app/lib/teampage.ts    teamPage(id) cached 3h · buildTable / assemble are pure
+site/app/lib/teamSlug.ts    teamHref(id, name), client-safe
+site/app/team/[slug]/       page.tsx (server, metadata, SportsTeam JSON-LD) · TeamView.tsx
+```
+
+⚠️ **The table is Stage A's.** It is computed from `matches`, so it is only as
+fresh as the last Football-Data CSV (the page prints the latest result date),
+with no points deductions and no conference split.
+
+🐛 **Three La Liga fixtures are in `matches` twice** (17-20 Aug 2026, match ids
+301761/314839, 305170/307839, 305171/307840): the same game under two spellings
+of one club ("Ath Madrid"/"Atl. Madrid", "La Coruna"/"Dep. A Coruna",
+"Vallecano"/"Rayo Vallecano"). They are the only such pairs in the database.
+`teamform.dedupeGames` (a team cannot play twice at one kick-off) and the
+table builder both keep the lower-id row, so the Game Center and the team pages
+no longer count them twice. **The rows themselves were not deleted.**
+
+Also fixed: `.gcx-table th` out-ranked `.gc-r`, so every numeric table header
+(the Game Center's standings included) sat left of its column.
+
+### Display names, the Teams tab and club search (2026-09-29)
+
+🔑 **Our canonical names are Football-Data's abbreviations** ("Sp Lisbon",
+"Ath Madrid", "Nott'm Forest", "M'gladbach", "Sociedad"). They stay the join
+key everywhere; what the site SHOWS now comes from
+`site/app/lib/team_names.json` through `lib/teamDisplay.ts`, written by
+`agent/team_display_names.py` from ESPN's team list, league by league. 395 of
+398 listed clubs are named; the rest keep the canonical. Team page titles,
+slugs (`/team/480-sporting-cp`), tables, opponents, the Game Center's Stats tab
+and H2H all use it. Re-run it when promoted clubs arrive:
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python team_display_names.py --dry-run   # every rename, nothing written
+python team_display_names.py
+```
+
+⚠️ A one-word ESPN short name ("Atlético") scores 1.0 for Athletic Bilbao as
+readily as for Atlético Madrid, and a greedy assignment then gives it to
+whichever club is listed first. Short names are weighted 0.9 and **two clubs
+tied for one ESPN team are both left out**; five hand overrides, each with its
+reason, cover the rest.
+
+- **Teams** is a tab (desktop and the phone bar), between Home and Lab.
+- The nav search suggests clubs as you type: `/api/teams` (the listed clubs
+  plus every spelling we hold: canonical, ESPN, Polymarket, the database's
+  aliases), fetched on the first focus only, matched on whole names and word
+  prefixes, ties broken by division. Enter with no club highlighted keeps the
+  old behaviour (a board search, or a pasted Polymarket link).
+- 🐛 From 761 to ~845px the nav was wider than the window and "Sign up" was cut
+  off; the fifth tab would have pushed that to ~935px. A 761-1000px band now
+  tightens the tabs and the box, and Pricing drops out below 900px.
+
+## Results against the price — Yesterday · Today · Tomorrow (2026-09-29)
+
+`/results/<day>`: every finished Polymarket soccer fixture of a day, with the
+1X2 price at kick-off, what happened, the day's line ("favourites won 54 of
+97; the prices expected 48.4") and the games the market gave least. The soccer
+board has a Yesterday · Today · Tomorrow · Next 48h strip; Yesterday is this
+page, the others filter the board by the READER's calendar day
+(`lib/localDay.ts`).
+
+| | |
+|---|---|
+| `db/059` `pm_results` | one row per fixture event; RLS on, no policies |
+| `lib/pmResults.ts` | `computeDay` (Gamma + CLOB history), `favRecordFor`, `storeRows`, `readRange`, `calibration` |
+| `/api/cron/pm-results` | Vercel Cron daily 05:17 UTC (the two days before); `?day=`, `?from=&to=` (backfill, returns `next`), `?dry=1` |
+| `/results/[day]` | server page + `ResultsView`; `/results` redirects to yesterday |
+
+Measured on Sunday 2026-09-27 (`?dry=1`, 12s): **95 fixtures, 95 priced, 95
+resolved.** The price is the CLOB's own history at the last point at or before
+kick-off (inside the kick-off minute on 97 of 98 in the prototype; the three
+Yes prices summed to 1.005 at the median), normalised. The outcome is
+Polymarket's RESOLUTION (exactly one Yes paid), never the score. 60 of 98
+events carry PM's own final score; the rest show the outcome only. History
+exists back to at least March 2026 (10/10 fixtures of 2026-03-14 priced), so a
+backfill fills the calibration table at once:
+
+```bash
+curl "https://<deployment>/api/cron/pm-results?from=2026-03-01&to=2026-09-27"   # repeat with from=<next>
+```
+
+**The favourite's record at its price** (`fav_record`, frozen at write time,
+games BEFORE the kick-off only): Polymarket's own earlier fixtures of that
+name at ±7.5pp, and for clubs our closing odds (Pinnacle, else the average).
+Measured so far, for CLUBS against Pinnacle's close only: a club's
+wins-minus-priced-wins in one season correlates **0.004** with the next over
+**4,455 club seasons**, and **0.040 over 646 pairs** as a 60–75% favourite.
+That rules out one method (season-level residuals of clubs vs the close). It
+says nothing about national teams, about Polymarket's own price (thinner, more
+public money on famous names), or about finer splits — all untested. Open
+hypothesis: **famous national teams are overpriced as favourites on
+Polymarket**; it needs the international odds stage below and the
+`pm_results` backfill.
+
+⚠️ **National teams have no odds in our database.** 8,394 international
+matches since 2015 (106 of Germany's), zero with odds. Free sources are thin:
+ESPN's pickcenter (DraftKings) only from 2024-09 (10 completed Germany games),
+Polymarket from 2024 (20). A long history needs a new stage: The Odds API's
+historical endpoint (paid plans, from June 2020), Betfair Historical Data
+(free BASIC, from 2015, needs a Betfair account — may not open from
+Portugal), or OddsPortal (from ~2004, but its terms forbid scraping). **A
+decision for the operator; asked 2026-09-29.**
+
+Seeded by hand on 2026-09-29 with 27 and 28 September (126 rows, no
+`fav_record`) so the page had data before the first cron; the first backfill
+run fills their favourite records (`rowsMissingFav`). A cancelled fixture
+(`period = CAN`) has no outcome whatever its markets paid. Dates on this page
+are spelled from a table, not `toLocaleDateString`: Node writes "Sep" where
+Chrome writes "Sept", which broke hydration.
+
+## Pinnacle's close, measured — and a club strategy that beats it (2026-09-29)
+
+`agent/pinnacle_audit.py` measures Pinnacle's close against results (101,469
+matches, 2012-2025, Football-Data's raw CSVs cached in `agent/.cache/pinnacle_audit/`).
+Full numbers in `reports/pinnacle_audit_2026-09-29.md`.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python pinnacle_audit.py --calibration --scan --clubs
+python pinnacle_audit.py --picks 2026      # this season's clubs, from earlier seasons only
+```
+
+- **Favourite–longshot bias replicates train → test.** Heavy favourites win
+  2.4-3.4pp more often than the de-vigged close; away 8.0+ win 1.2-2.1pp less
+  (drifters in top divisions −4pp). At the best price across books favourites
+  under 1.6 return **+2.1% / +3.2%**.
+- Early season, promoted teams, league identity: no replication (778 cells, BH; the 9 that replicate are all favourite/longshot).
+- Team residuals do not persist in general (season → season 0.004), **except
+  specific clubs as heavy favourites** (corr 0.34 across 42 clubs).
+- 🔑 **H-FAV-CLUBS (id 42):** rolling picks of clubs with a shrunk ≥+4pp record
+  as <1.60 favourites. **+5.91% ±2.56 at Pinnacle's own close, n=1,792,
+  2015-25**, 10 of 11 seasons positive, team-clustered CI [+2.6, +9.0], +3.6%
+  without the top three clubs; control (every heavy favourite) +0.01%. Forward on
+  2026-27: 42 bets, −0.4% ±18.6 — too early to read.
+- **H-LONGSHOT-NO (id 43):** buy No on away longshots on PM. Needs PM's own
+  calibration first (the `pm_results` backfill).
+- ⚠️ **Football-Data's 2026-27 files have NO Pinnacle columns.** They carry
+  Betfair Exchange close (BFEC) and team xG (HxG/AxG) instead. Stage A must
+  load those, or every "Pinnacle (closing)" reader is blank this season.
+
 ## Live stats coverage — measured 2026-08-19
 
 "More leagues" turned out not to be a stats problem. Over three days of
@@ -2665,13 +2858,13 @@ We have both Pinnacle opening and closing odds, so CLV is measurable now:
 
 | Metric | Why it matters |
 |---|---|
-| **CLV (Closing Line Value)** | Gold standard. Beat the closing line = real edge. |
-| **Pinnacle closing as benchmark** | Sharpest available closing line in our dataset — primary fair-value oracle. |
+| **CLV (Closing Line Value)** | Strong evidence of a pricing edge. Not the only kind: maker, settlement-window and cross-venue edges do not show up as CLV against Pinnacle. |
+| **Pinnacle closing as benchmark** | Sharpest closing line in our dataset — the strongest benchmark, with its own measurable biases. |
 | **Betfair Exchange closing as benchmark** | Cross-check against the second-sharpest market (~13k matches). |
 | **Polymarket spread vs Betfair/Pinnacle implied** | Direct edge signal — where Polymarket diverges from sharp consensus. |
 | **Yield %** | Profit / total staked. More stable than ROI on small samples. |
 | **p-value vs ROI=0** | Require p < 0.05 before promoting. |
-| **Sample size** | Minimum 200 selections before any conclusion. |
+| **Sample size** | Sized to the effect and the question (see rule 4), not one number for everything. |
 
 ---
 
@@ -2680,9 +2873,19 @@ We have both Pinnacle opening and closing odds, so CLV is measurable now:
 1. **No lookahead bias.** Every feature used must have been available before kickoff.
 2. **Train/test split.** Walk-forward validation. Never evaluate on discovery data.
 3. **Reject silent p-hacking.** Every hypothesis tested goes into `research_hypotheses`.
-4. **Minimum 200 selections** before any conclusion.
-5. **CLV is king.** Positive ROI with negative CLV = luck. Always measure both.
-6. **The agent must be creative.** Reject obvious hypotheses unless data confirms them.
+4. **Size the sample to the question.** Yield at ~2.0 odds needs thousands of bets
+   to see a 2% edge; price-vs-fair and calibration arms need hundreds of
+   observations; CLV needs tens. Below that, the answer is "not enough data
+   yet", never "no edge".
+5. **Measure CLV and ROI both.** Positive ROI with negative CLV against the close is
+   probably luck; but an edge that does not trade on price (maker, settlement,
+   cross-venue) is measured by its own mechanism, not by CLV.
+6. **The agent must be creative.** Look where others do not, and follow the money.
+7. **Negative results are about the method, never the market.** No conclusion may
+   read "the market is efficient"; it says what was tested, on what, and what
+   to test next.
+8. **Missing data is a task, not an answer.** If the question needs data we do
+   not hold, propose the source before answering anything else.
 
 ---
 
