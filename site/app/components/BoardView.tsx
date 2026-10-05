@@ -580,7 +580,7 @@ export function BoardView({
 
           {listed.length > 0 && (
             <div className="sc-table-wrap">
-              <table className="sc-table">
+              <table className="sc-table sc-table-board">
                 <thead>
                   <tr>
                     <th className="sc-c-star" />

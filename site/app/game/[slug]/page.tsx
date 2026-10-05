@@ -145,7 +145,7 @@ function OddsTiles({ headlines }: { headlines: Headline[] }) {
   return (
     <section className="gc-section">
       <h2 className="gc-h2">The main markets</h2>
-      <div className="gc-tiles">
+      <div className="gc-tiles gc-tiles-odds">
         {headlines.map((h) => (
           <div key={h.label} className={`gc-tile${h.isMid ? ' is-mid' : ''}`}>
             <span className="gc-tile-k">{h.label}</span>

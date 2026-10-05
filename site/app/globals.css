@@ -2783,8 +2783,10 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 /* ── odds format ──
    One control, and every price on the site follows it. Written as the format
    itself (+150 · 2.50 · 40%) because a reader knows their own odds on sight.
-   In the nav from 1100px, where it fits beside the search; below that it sits
-   in Scout's own bar, and on a phone in the menu sheet too. */
+   In the nav from 1180px, where it fits beside the search; below that it sits
+   in Scout's own bar, and on a phone in the menu sheet too. It was 1100px,
+   which left 1100-1140 with the search at its 130px floor and Sign up pushed
+   12px past the window (2026-10-05). */
 .np-odds {
   display: inline-flex; gap: 2px; padding: 3px; flex-shrink: 0;
   background: var(--bg2); border: 1px solid var(--border2); border-radius: 999px;
@@ -2798,7 +2800,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .np-odds button:hover { color: var(--white); }
 .np-odds button.is-on { background: var(--bg3); color: var(--white); }
 .np-odds-nav { display: none; }
-@media (min-width: 1100px) {
+@media (min-width: 1180px) {
   .np-odds-nav { display: inline-flex; }
   .np-odds-bar { display: none; }
 }
@@ -3123,9 +3125,9 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .gc-quiet { font-size: 13px; color: var(--grey); line-height: 1.55; }
 
 /* ── odds tiles ── */
-.gc-tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.gc-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .gc-tile {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0;
   background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r);
   padding: 12px 8px 10px;
 }
@@ -3136,6 +3138,14 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
 }
 .gc-tile-v { font-size: 22px; font-weight: 650; color: var(--white); line-height: 1.1; }
+/* The market tiles are labelled with a team, and "VANCOUVER WHITECAPS" is
+   wider than a third of a phone: it widened its column and, at 360px, pushed
+   the row off the screen. Columns are equal now and the label wraps to two
+   lines; it takes the slack so every price in a row sits on one line. */
+.gc-tiles-odds .gc-tile-k {
+  white-space: normal; line-height: 1.3; flex: 1 0 auto;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .gc-tile-sub { font-size: 10.5px; color: var(--grey2); }
 .gc-tile-spread { color: var(--grey2); }
 .gc-tile-warn { color: var(--amber); cursor: help; }
@@ -3209,7 +3219,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .gc-hero-team { font-size: 17px; }
   .gc-hero-score { font-size: 26px; }
   /* Five tiles across a phone is five unreadable columns. */
-  .gc-tiles { grid-template-columns: repeat(3, 1fr); }
+  .gc-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .gc-tile-v { font-size: 19px; }
   .gc-chart-tick { font-size: 22px; }
   .gc-pulse-list li { flex-wrap: wrap; gap: 4px 10px; }
@@ -4416,18 +4426,33 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .ag-spark-zero { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 3 3; }
 .ag-spark-none { font-size: 11.5px; color: var(--grey2); height: 44px; display: flex; align-items: center; }
 
-.ag-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+/* Four equal columns gave "+15.35u" 53px of a 58px need in a four-up row, so
+   each tile is sized to its own number (`auto`) and the room left over is
+   shared out. A tile can still shrink past its number (min-width: 0) — it
+   then ends in an ellipsis, never in the next tile. The card measures itself,
+   not the window, and goes two by two when four cannot fit. */
+.ag-card { container-type: inline-size; }
+.ag-tiles { display: grid; grid-template-columns: repeat(4, auto); gap: 5px; }
+/* A one-line name or no curve made a card shorter inside, so the tiles of one
+   row sat at three different heights. Pinned to the bottom, they line up. */
+.ag-card > .ag-tiles { margin-top: auto; }
+@container (max-width: 230px) { .ag-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ag-tile {
   display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0;
   padding: 7px 4px; border-radius: var(--r-sm);
   background: var(--bg3); border: 1px solid transparent;
+  overflow: hidden;
 }
+.ag-tile .ag-wl { width: 100%; }
 .ag-card:hover .ag-tile { background: var(--bg-hover); border-color: var(--border2); }
 .ag-tile em {
   font-style: normal; font-size: 9.5px; letter-spacing: .06em;
   color: var(--grey2); font-weight: 600; text-transform: uppercase;
 }
-.ag-tile b { font-size: 14px; font-weight: 600; color: var(--white); white-space: nowrap; }
+.ag-tile b {
+  font-size: 14px; font-weight: 600; color: var(--white); white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
 .ag-tile b.ag-pos { color: var(--green); }
 .ag-tile b.ag-neg { color: var(--red); }
 
@@ -4482,9 +4507,12 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .ag-wl-won { display: block; height: 100%; background: var(--green); }
 .ag-wl-sm { height: 4px; margin-top: 5px; }
 /* Six tiles, not the Game Center's five, so the row divides evenly on a phone
-   (two rows of three) instead of leaving a gap in the second one. */
-.ag-tiles { grid-template-columns: repeat(6, 1fr); }
-@media (max-width: 900px) { .ag-tiles { grid-template-columns: repeat(3, 1fr); } }
+   (two rows of three) instead of leaving a gap in the second one.
+   ⚠️ Scoped to `.gc-tiles`: the list cards use `.ag-tiles` too, with FOUR
+   tiles, and an unscoped rule gave each of them a sixth of the card — the
+   P&L ran into the yield on every card (2026-10-05). */
+.gc-tiles.ag-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 900px) { .gc-tiles.ag-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .ag-chart-axis { fill: var(--grey2); font-size: 11px; font-family: var(--font-mono); }
 .ag-chart-zero { stroke: var(--border2); stroke-width: 1; stroke-dasharray: 4 4; }
 
@@ -4786,8 +4814,15 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .gcx-pl, .gcx-teams { grid-template-columns: 1fr; }
   .gcx-brief-points li { grid-template-columns: 1fr; gap: 2px; }
   .gcx-logo { width: 28px; height: 28px; }
-  .gc-hero-team { font-size: 17px; gap: 8px; }
+  .gc-hero-team { font-size: 17px; gap: 6px; }
   .gcx-hero-sub { flex-wrap: wrap; }
+  /* Five 18px pills are 102px and a 390px phone leaves the team ~88 beside
+     its logo, so the home form ran into the score. Smaller pills fit down to
+     360px, and past that they wrap rather than spill (2026-10-05). */
+  .gc-hero-team > span { min-width: 0; }
+  .gc-hero-team .gcx-hero-form { flex-wrap: wrap; gap: 2px; }
+  .gc-hero-team .gcx-pill { width: 15px; height: 15px; border-radius: 3px; }
+  .gc-hero-team .gcx-logo { width: 24px; height: 24px; }
   .gcx-cmp-row { grid-template-columns: 58px 1fr 58px; gap: 8px; }
   .gcx-games li { grid-template-columns: 40px 12px minmax(0, 1fr) 28px 32px 18px 30px; }
   .gcx-games-odds { display: none; }
@@ -4860,6 +4895,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .pr-save, .in-lead-flag, .gcx-tab-new { font-size: 10.5px; }
   .do-top-label, .do-top-sel-label, .do-when, .do-chip, .do-pp { font-size: 10.5px; }
   .do-top-odds em, .do-thin-chev, .gcx-pill { font-size: 10.5px; }
+  .gc-hero-team .gcx-pill { font-size: 10px; }
   .gc-board th, .gcx-table th { font-size: 10.5px; }
 }
 
@@ -5241,15 +5277,18 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 
 /* Prices on a phone, where the price columns are hidden: each row becomes a
    grid — star, game, start, traded, arrow on one line, and the prices on a
-   line of their own underneath, the full width of the row. */
+   line of their own underneath, the full width of the row.
+   ⚠️ The board's table only (`.sc-table-board`). Unscoped, the five board
+   columns were laid over the agent tables too: an agent's name landed in the
+   30px star column and its status badge on top of it (2026-10-05). */
 .sc-c-modds { display: none; }
 @media (max-width: 760px) {
-  .sc-table thead { display: none; }
-  .sc-table tbody tr {
+  .sc-table-board thead { display: none; }
+  .sc-table-board tbody tr {
     display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
     align-items: center; column-gap: 6px; padding: 10px 0;
   }
-  .sc-table tbody tr td { padding: 0 2px; }
+  .sc-table-board tbody tr td { padding: 0 2px; }
   .sc-c-state, .sc-c-vol, .sc-c-go { width: auto; }
   .sc-c-modds { display: block; grid-column: 2 / -1; padding-top: 8px !important; }
   .sc-modds { display: flex; gap: 6px; }
