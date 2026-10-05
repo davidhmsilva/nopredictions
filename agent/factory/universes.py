@@ -127,8 +127,11 @@ def load_next_goal(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> p
     df["abs_diff"] = df["goal_diff"].abs()
     df["fair_gap"] = _flt(df["fair_base"]) - _flt(df["ask"])
     df["won"] = _won_bool(df["won_raw"])
-    df["label"] = ("Over " + (_flt(df["goals_total"]) + 0.5).map("{:g}".format) + " (next goal) — "
-                   + df["event_title"].fillna("?"))
+    # .astype(str): on a quiet minute the frame is empty, .map leaves an empty
+    # column float, and "Over " + float raises — it failed every factory-run
+    # with no live match in the window (7,729 times, 09-28 → 10-05).
+    df["label"] = ("Over " + (_flt(df["goals_total"]) + 0.5).map("{:g}".format).astype(str)
+                   + " (next goal) — " + df["event_title"].fillna("?"))
     return _finish(df, dedupe=["fixture", "minute"])
 
 
