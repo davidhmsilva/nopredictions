@@ -146,3 +146,38 @@ def test_nfl_tape_is_sane():
     assert 0.52 < ml.won.mean() < 0.60                       # home teams win a bit more than half
     # the proxy price is calibrated: implied ≈ realised on the moneyline
     assert abs(ml.prob.mean() - ml.won.mean()) < 0.02
+
+
+# Every column any live loader reads, as psycopg2 hands back a query with no
+# rows: the names, dtype object, nothing in them.
+_LIVE_COLS = ["source_row_id", "fixture_id", "ts", "minute", "home_goals", "away_goals",
+              "goals_total", "league", "event_title", "question", "fav_side", "fav_team",
+              "home_possession", "fair_base", "token_id", "condition_id", "bid", "ask", "depth",
+              "obs_version", "won_raw"]
+
+
+def _sql_returning(rows):
+    def fake(sql, conn, params=None):
+        return pd.DataFrame(rows, columns=_LIVE_COLS) if rows else \
+            pd.DataFrame({c: pd.Series([], dtype=object) for c in _LIVE_COLS})
+    return fake
+
+
+@pytest.mark.parametrize("name", [n for n, u in uv.UNIVERSES.items() if u.live and n != "t_inplay"])
+def test_live_loaders_survive_a_quiet_minute(monkeypatch, name):
+    """No live match in the window is the normal state most of the day. The
+    next-goal loader built its label from an empty float column and raised,
+    which failed the whole factory-run job every quiet minute from 09-28 to
+    10-05 (7,729 times)."""
+    monkeypatch.setattr(uv.pd, "read_sql_query", _sql_returning([]))
+    df = uv.UNIVERSES[name].load(None, mode="live", live_minutes=4)
+    assert df.empty and "label" in df
+
+
+def test_next_goal_label_reads_the_line_and_the_match(monkeypatch):
+    row = dict.fromkeys(_LIVE_COLS)
+    row.update(source_row_id=1, fixture_id=7, ts="2026-10-05T20:00:00Z", minute=80, home_goals=1,
+               away_goals=0, goals_total=1, event_title="A vs. B", bid=0.4, ask=0.42, won_raw=None)
+    monkeypatch.setattr(uv.pd, "read_sql_query", _sql_returning([[row[c] for c in _LIVE_COLS]]))
+    df = uv.load_next_goal(None, mode="live")
+    assert df["label"].tolist() == ["Over 1.5 (next goal) — A vs. B"]
