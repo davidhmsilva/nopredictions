@@ -98,10 +98,11 @@ class KeyedDist:
 
 
 def _fit(values: np.ndarray, means: np.ndarray, support: np.ndarray,
-         symmetric: bool) -> KeyedDist:
-    """σ from the residuals, then the key-number factors by IPF."""
+         symmetric: bool, impossible: tuple = ()) -> KeyedDist:
+    """σ from the residuals, then the key-number factors by IPF. `impossible`
+    points carry no mass at all (an NBA margin of 0: overtime ends every tie)."""
     sigma = float(np.sqrt(np.mean((values - means) ** 2)))
-    factor = np.ones_like(support, dtype=float)
+    factor = np.where(np.isin(support, impossible), 0.0, 1.0)
     idx = {int(k): i for i, k in enumerate(support)}
     obs = np.zeros_like(factor)
     for v in values:
