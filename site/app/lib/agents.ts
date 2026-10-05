@@ -240,10 +240,7 @@ async function summaries(userId: string, onlyId?: number): Promise<AgentSummary[
            s.run_status, s.run_blocker, s.is_public, s.created_at, s.promoted_at,
            p.parent_strategy_id,
            coalesce(p.n_trades, 0)::int            as n_trades,
-           -- The view counts n_open with count(*) over a LEFT JOIN, so an
-           -- agent with no trades at all reads "1 open" (its NULL row). An
-           -- open count can never exceed the trade count; clamp it there.
-           least(coalesce(p.n_open, 0), coalesce(p.n_trades, 0))::int as n_open,
+           coalesce(p.n_open, 0)::int              as n_open,
            coalesce(p.n_wins, 0)::int              as wins,
            coalesce(p.n_losses, 0)::int            as losses,
            coalesce(p.total_staked, 0)::float8     as staked,

@@ -111,6 +111,8 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── nba_scanner.py                 ← Strategy 5: NBA Elo Pre-Match scanner ✅
 │   ├── unl_agent.py                   ← Nations League Every Game (paper) ✅ NEW
 │   ├── soccer_line_model.py           ← Dixon-Coles fitted to sharp 1X2 + total ✅ NEW
+│   ├── nba_agent.py                   ← NBA Every Game (paper) ✅ NEW 2026-10-06
+│   ├── nba_model.py                   ← NBA margin/total model anchored on Pinnacle ✅ NEW
 │   ├── espn_stats.py                  ← free live stats, no key — fallback ✅ NEW
 │   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
@@ -2475,6 +2477,63 @@ python -m pytest tests/test_unl_agent.py -q
   any tag/series/slug containing "nations league" and refuses CONCACAF; the
   first `--dry-run` log line prints how many soccer events it scanned and how
   many it kept — read it.
+
+## NBA Every Game — the NFL agent on basketball (paper, 2026-10-06)
+
+By the user's decision: every NBA regular-season, play-in and play-off game
+Polymarket lists gets exactly one bet, of the agent's choosing. Same structure
+as [NFL Every Game](#nfl-every-game--one-bet-on-every-nfl-game-paper-2026-09-13):
+EDGE (EV ≥ 1.5% exact / 3% model, from 24h out, fresh sharp snapshot) and FORCED
+(inside 40 min with no bet, the best EV on the board), 1u flat, never pooled.
+Strategy **"NBA Every Game"** (created on the first real run, owned by whoever
+owns the NFL one), hypothesis `H-NBA-SHARP`, table `nba_candidates` (db/070,
+applied 2026-10-06). **The 2026-27 season opens Tue 2026-10-20** (BOS@DET,
+PHI@NYK, OKC@SAS); preseason ran from 10-03.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python nba_agent.py --once --dry-run   # the board, nothing written, no credits spent
+python nba_agent.py --once             # bet, read closes, settle
+python nba_agent.py --report           # EDGE vs FORCED, net of fee, pm_clv
+python nba_model.py --validate
+python -m pytest tests/test_nba_agent.py -q
+```
+
+- **`nba_model.py`** is `nfl_model`'s construction on NBA data (`bt_nba`,
+  2018-19 → 2021-22, cached to `ingest/.cache/nba/lines.csv`): a margin of 0
+  carries no mass (overtime), factors m(1)=0.75, m(2)=0.92, m(5-8)≈1.2, margin
+  σ 13.25, total σ 18.4. σ is solved per game from Pinnacle's spread + ML;
+  at the historical σ, the book's ML on 10-14pt favourites runs 4.3pp above the
+  model, so the per-game solve matters. Alternate-line error ±1-4.5pp → haircuts
+  spreads 1.0 + 0.30/pt (cap 4), totals 0.5 + 0.10/pt (cap 2), nothing past 10
+  points from the sharp spread.
+- 🔑 **Preseason is never bet, and that took ESPN.** Polymarket lists preseason
+  games under the same tags and series (`nba-2026`); The Odds API keeps them
+  under `basketball_nba_preseason`, so without a gate every preseason game would
+  find no sharp line and be FORCED at Polymarket's mid. A game is in scope only
+  when ESPN files it as season type 2/3/5 (regular, play-offs, play-in); ESPN
+  down = no new bet that cycle. The gate runs before anything is priced or
+  fetched, so preseason costs no credits.
+- **Names:** Polymarket says "Pistons", The Odds API "Detroit Pistons", ESPN
+  "LA Clippers" / `GS` / `NO` / `UTAH`. `nba_agent.TEAMS` (30 clubs, checked
+  against all three feeds) maps every spelling; two names match only when both
+  resolve to the same club, and a spelling naming two clubs raises at import.
+- **Credits:** the Odds API key is shared with nfl_agent and unl_agent.
+  `pool_remaining()` reads whichever of the three caches fetched last; below
+  `RESERVE_CREDITS = 150` the NBA agent stops EDGE refreshes, below
+  `FLOOR_CREDITS = 60` it fetches nothing (the NFL agent keeps the last 60).
+  ⚠️ 206 credits were left on 2026-10-06. An NBA day needs ~15-20 snapshots
+  (≈50 credits, ~1,500/month), so on the free plan the NBA agent will mostly
+  run on FORCED bets priced off old or no sharp lines. A paid plan fixes it.
+- Settlement: the CLOB winner flag; provisional grading from ESPN's final score
+  (STATUS_FINAL only), keyed on the PAIR of clubs, never home/away: a
+  neutral-site game (Mexico City, Paris, Berlin) can be designated differently.
+  `self_settling`, so `resolver.py` skips it. `--report` quotes `pm_clv`.
+- First real-price check (3 preseason credits, 2026-10-06): σ solved 13-14,
+  ML residual 0.00-0.05pp, best token per game −0.8% to −2.7% at the ask:
+  the NFL board's shape again.
+- ⚠️ `nba_scanner.py` (Strategy 5, NBA Elo) is a different, older agent and is
+  not scheduled on the server.
 
 ## Strategy factory — thousands of specs, out of sample, paper bots (2026-09-13)
 
