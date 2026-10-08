@@ -3,21 +3,25 @@ import { notFound } from 'next/navigation'
 import { SportBoard } from '../components/SportBoard'
 import { getSportBoard } from '../lib/sports'
 import { within } from '../lib/deadline'
-import { SPORT_META, isSportKey } from '../lib/sportsMeta'
+import { SPORT_KEYS, SPORT_META, isSportKey } from '../lib/sportsMeta'
 
 // One page per US sport: /nfl, /cfb, /mlb, /nba, /nhl, /wnba. Anything else at
 // the top level 404s below — the static routes (lab, pricing, …) win over this
 // segment, and a name that is not a sport is refused before any work is done.
 
-/** Rendered per request, from the same shared caches the boards read (a
- *  minute old at most), so the games are in the HTML.
+/** Regenerated at most once a minute (ISR), from the boards the publisher
+ *  writes (lib/remoteBoard), so the games are in the HTML and a crawler
+ *  walking the site does not cost a render per hit.
  *
- *  ⚠️ Not ISR. The board sweeps fetch with `cache: 'no-store'`, which makes
- *     Next abandon a static render — and the `.catch` around the board read
- *     swallowed that signal, so the page was built EMPTY and served empty to
- *     every crawler. Measured on the first deploy: /nfl with 0 games in its
- *     HTML, and a sitemap with no games at all. */
-export const dynamic = 'force-dynamic'
+ *  ⚠️ This only works because the board read is a cacheable fetch. With the
+ *     old in-process sweep (`cache: 'no-store'`) Next abandoned the static
+ *     render and the page was built EMPTY — /nfl with 0 games in its HTML. */
+export const revalidate = 60
+
+/** The six boards are prerendered and regenerated like the home page. */
+export function generateStaticParams() {
+  return SPORT_KEYS.map((sport) => ({ sport }))
+}
 
 export function generateMetadata({ params }: { params: { sport: string } }): Metadata {
   if (!isSportKey(params.sport)) return {}

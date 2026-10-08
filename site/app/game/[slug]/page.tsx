@@ -20,6 +20,7 @@ function ordinal(n: number): string {
 import { BriefCard, MomentumChart, PricedLikeCard, StreakHighlights } from './Insights'
 import { MatchTab } from './MatchTab'
 import { StatsTab } from './StatsTab'
+import { pollWhileVisible } from '../../lib/poll'
 
 // ── the match, big ───────────────────────────────────────────────────────────
 //
@@ -803,16 +804,16 @@ export default function GamePage({ params }: { params: { slug: string } }) {
     loadCtx()
   }, [load, loadCtx])
 
-  // Refresh while the match is live. 30s matches how long the live feed is
-  // cached server-side; the match context changes more slowly than the prices.
+  // Refresh while the match is live and the tab is visible (lib/poll). The
+  // match context changes more slowly than the prices.
   const isLive = data?.board.phase === 'live' || ctx?.espn?.state === 'in'
   useEffect(() => {
     if (!isLive) return
-    const a = setInterval(load, 30000)
-    const b = setInterval(loadCtx, 60000)
+    const stopA = pollWhileVisible(load, 60_000)
+    const stopB = pollWhileVisible(loadCtx, 120_000)
     return () => {
-      clearInterval(a)
-      clearInterval(b)
+      stopA()
+      stopB()
     }
   }, [isLive, load, loadCtx])
 
@@ -820,8 +821,7 @@ export default function GamePage({ params }: { params: { slug: string } }) {
   const waitingForXi = !!ctx?.espn && ctx.espn.state === 'pre' && !ctx.espn.lineupsConfirmed
   useEffect(() => {
     if (!waitingForXi) return
-    const id = setInterval(loadCtx, 5 * 60000)
-    return () => clearInterval(id)
+    return pollWhileVisible(loadCtx, 5 * 60_000)
   }, [waitingForXi, loadCtx])
 
   const swapped = !!ctx?.espn?.swapped

@@ -19,10 +19,11 @@ import { BoardView, HowPricesWork } from './BoardView'
 import { rankRows, rowFromSportGame, US_COLUMNS } from '../lib/boardRow'
 import { timeText, useMounted } from '../lib/display'
 import { SPORT_META, type SportBoardData, type SportKey } from '../lib/sportsMeta'
+import { pollWhileVisible } from '../lib/poll'
 
 /** A live board moves; a pre-match one barely does. The server caches for a
  *  minute, so asking more often than that would only re-read the same board. */
-const REFRESH_MS = 60_000
+const REFRESH_MS = 120_000
 
 /** `initial` is the board as the server rendered it, so the page arrives with
  *  its games in the HTML — for search engines and for a first paint that does
@@ -52,10 +53,11 @@ export function SportBoard({ sport, initial = null }: { sport: SportKey; initial
           if (!cancelled) setError(e instanceof Error ? e.message : 'Could not reach the exchanges')
         })
     load()
-    const t = setInterval(load, REFRESH_MS)
+    // Only while the tab is visible (lib/poll).
+    const stop = pollWhileVisible(load, REFRESH_MS)
     return () => {
       cancelled = true
-      clearInterval(t)
+      stop()
     }
   }, [sport])
 
