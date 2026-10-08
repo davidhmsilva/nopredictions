@@ -1,0 +1,27 @@
+# The board publisher (site/scripts/publish-boards.ts): every board sweep the
+# site used to run in Vercel functions, once a minute, written as JSON files
+# under /srv/boards. Caddy serves them (deploy/hetzner/Caddyfile.template) and
+# the site reads them through BOARDS_URL. Vercel paused the site on 2026-10-07
+# for Fluid Active CPU; this is what moved the CPU here.
+[Unit]
+Description=NOPREDICTIONS board publisher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=np
+Group=np
+WorkingDirectory=/opt/nopredictions/site
+Environment=NP_PUBLISHER=1
+Environment=BOARDS_DIR=/srv/boards
+Environment=NODE_OPTIONS=--max-old-space-size=768
+ExecStart=/usr/bin/npx tsx scripts/publish-boards.ts
+Restart=always
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=20
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
