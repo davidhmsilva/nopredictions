@@ -25,15 +25,14 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title, description, images: ['/banner.jpg'] },
 }
 
-/** Rendered per request, from the same shared caches the boards read (a
- *  minute old at most), so the games are in the HTML.
+/** Regenerated at most once a minute (ISR), from the boards the publisher
+ *  writes (lib/remoteBoard), so the games are in the HTML and a crawler
+ *  walking the site does not cost a render per hit.
  *
- *  ⚠️ Not ISR. The board sweeps fetch with `cache: 'no-store'`, which makes
- *     Next abandon a static render — and the `.catch` around the board read
- *     swallowed that signal, so the page was built EMPTY and served empty to
- *     every crawler. Measured on the first deploy: /nfl with 0 games in its
- *     HTML, and a sitemap with no games at all. */
-export const dynamic = 'force-dynamic'
+ *  ⚠️ This only works because the board read is a cacheable fetch. With the
+ *     old in-process sweep (`cache: 'no-store'`) Next abandoned the static
+ *     render and the page was built EMPTY — /nfl with 0 games in its HTML. */
+export const revalidate = 60
 
 export default async function SoccerPage() {
   const board = await within(getBoard(), 3000)

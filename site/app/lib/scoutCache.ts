@@ -21,7 +21,8 @@
  *  never anything else. Every board carries `generatedAt` and the page shows it.
  */
 
-import { unstable_cache } from 'next/cache'
+import { sharedCache } from './sharedCache'
+import { BOARDS_URL, remoteGetter } from './remoteBoard'
 import {
   buildFixtures,
   fetchSoccerEvents,
@@ -69,12 +70,13 @@ let inFlight: Promise<Board> | null = null
 //    a fixture's shape changes — as it did when both venues landed on every
 //    row — a stale entry is served straight into the new renderer, and the
 //    page crashes on a field that did not exist yesterday. Bump it.
-const sweepShared = unstable_cache(sweep, ['scout-board-v2'], {
+const sweepShared = sharedCache(sweep, ['scout-board-v2'], {
   revalidate: TTL_MS / 1000,
   tags: ['scout-board'],
 })
 
-async function sweep(): Promise<Board> {
+/** The sweep itself, uncached. The board publisher calls this. */
+export async function sweep(): Promise<Board> {
   // Both in parallel: they hit unrelated hosts, and ESPN is free so its cost is
   // latency alone. A failed ESPN sweep leaves the board exactly as it was
   // before the feed existed rather than taking it down.
@@ -117,7 +119,10 @@ async function sweep(): Promise<Board> {
   }
 }
 
+const remoteBoard = remoteGetter<Board>('scout')
+
 export async function getBoard(): Promise<Board> {
+  if (BOARDS_URL) return remoteBoard()
   if (cached && Date.now() - cachedAt < TTL_MS) return cached
   if (inFlight) return inFlight
 

@@ -29,8 +29,9 @@ import type {
 import { VENUE_NAME, type Venue } from '../lib/venues'
 import { useSession } from '../lib/useSession'
 import { useWatchlist } from '../lib/useWatchlist'
+import { pollWhileVisible } from '../lib/poll'
 
-const REFRESH_MS = 60_000
+const REFRESH_MS = 120_000
 
 const TABS = [
   ['overview', 'Overview'],
@@ -548,10 +549,11 @@ export function SportGameView({
           if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load the game')
         })
     load()
-    const t = setInterval(load, REFRESH_MS)
+    // Only while the tab is visible (lib/poll).
+    const stop = pollWhileVisible(load, REFRESH_MS)
     return () => {
       cancelled = true
-      clearInterval(t)
+      stop()
     }
   }, [sport, id])
 

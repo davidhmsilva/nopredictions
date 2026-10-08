@@ -18,7 +18,8 @@
  *  Fees differ by venue and are not netted out; the page says so.
  */
 
-import { unstable_cache } from 'next/cache'
+import { sharedCache } from './sharedCache'
+import { BOARDS_URL, remoteGetter } from './remoteBoard'
 import { SPORT_META, type SportBoardData, type SportGame, type SportKey, type TeamRef } from './sportsMeta'
 import {
   bestFor,
@@ -582,7 +583,8 @@ function teamRef(t: EspnTeam): TeamRef {
   return { name: t.display || t.name, short: t.short || t.name, abbr: t.abbr, logo: t.logo, score: t.score }
 }
 
-async function build(sport: SportKey): Promise<SportBoardData> {
+/** One board, uncached. The board publisher calls this. */
+export async function buildSportBoard(sport: SportKey): Promise<SportBoardData> {
   const src = SOURCES[sport]
   const days = SPORT_META[sport].days
   const now = new Date()
@@ -737,7 +739,7 @@ export function espnPathOf(sport: SportKey): string {
  *  landing on an instance that never swept reads someone else's sweep. */
 const TTL_MS = 60_000
 
-const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-board-v5'], {
+const buildShared = sharedCache((sport: SportKey) => buildSportBoard(sport), ['sport-board-v5'], {
   revalidate: TTL_MS / 1000,
   tags: ['sport-board'],
 })
@@ -745,7 +747,14 @@ const buildShared = unstable_cache((sport: SportKey) => build(sport), ['sport-bo
 const l1 = new Map<SportKey, { at: number; board: SportBoardData }>()
 const inFlight = new Map<SportKey, Promise<SportBoardData>>()
 
+const remote = new Map<SportKey, () => Promise<SportBoardData>>()
+
 export async function getSportBoard(sport: SportKey): Promise<SportBoardData> {
+  if (BOARDS_URL) {
+    let get = remote.get(sport)
+    if (!get) remote.set(sport, (get = remoteGetter<SportBoardData>(`sport-${sport}`)))
+    return get()
+  }
   const hit = l1.get(sport)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.board
   const running = inFlight.get(sport)

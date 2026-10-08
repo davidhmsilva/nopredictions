@@ -12,9 +12,10 @@ import { teamHref } from './lib/teamSlug'
  *  every hour from the same caches the boards read — no extra sweep.
  *
  *  A board that fails to load costs its games, not the sitemap. */
-export const dynamic = 'force-dynamic'
-// See app/page.tsx: a static build of this file would swallow the board reads
-// and list no games.
+// Regenerated at most once an hour. The board reads are cacheable fetches of
+// the publisher's files (lib/remoteBoard), so this no longer builds empty —
+// see app/page.tsx. A crawler asking for it again inside the hour costs nothing.
+export const revalidate = 3600
 
 const SITE = 'https://www.nopredictions.com'
 

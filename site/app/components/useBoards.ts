@@ -22,12 +22,12 @@ import type { KalshiFixture } from '../lib/kalshiSoccerTypes'
 import { mergeKalshi } from '../lib/venueMerge'
 import { rankRows, rowFromScout, rowFromSportGame, type BoardRow } from '../lib/boardRow'
 import { SPORT_KEYS, type SportBoardData, type SportKey } from '../lib/sportsMeta'
+import { pollWhileVisible } from '../lib/poll'
 
-/** Kalshi's index is rebuilt about four times an hour across the deployment;
- *  asking more often than its own price clock would only re-read it. */
-const KALSHI_REFRESH_MS = 60_000
-/** The US boards are cached server-side for a minute. */
-const SPORTS_REFRESH_MS = 60_000
+/** Two minutes, and only while the tab is visible (lib/poll). The boards are
+ *  published once a minute; a board on screen does not need every cycle. */
+const KALSHI_REFRESH_MS = 120_000
+const SPORTS_REFRESH_MS = 120_000
 
 export interface SoccerRows {
   rows: BoardRow[]
@@ -83,10 +83,10 @@ export function useSoccerRows(initial?: ScoutFixture[] | null): SoccerRows {
           /* the board is never waiting on this */
         })
     load()
-    const t = setInterval(load, KALSHI_REFRESH_MS)
+    const stop = pollWhileVisible(load, KALSHI_REFRESH_MS)
     return () => {
       cancelled = true
-      clearInterval(t)
+      stop()
     }
   }, [])
 
@@ -146,10 +146,10 @@ export function useAllSports(): Record<SportKey, SportRows> {
         })
     const loadAll = () => SPORT_KEYS.forEach(loadOne)
     loadAll()
-    const t = setInterval(loadAll, SPORTS_REFRESH_MS)
+    const stop = pollWhileVisible(loadAll, SPORTS_REFRESH_MS)
     return () => {
       cancelled = true
-      clearInterval(t)
+      stop()
     }
   }, [])
 

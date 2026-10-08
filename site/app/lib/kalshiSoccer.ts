@@ -28,7 +28,8 @@
  *  account, read-only.
  */
 
-import { unstable_cache } from 'next/cache'
+import { sharedCache } from './sharedCache'
+import { BOARDS_URL, remoteGetter } from './remoteBoard'
 import { quoteOf, type Quote } from './venues'
 import { sameFixture } from './venueMatch'
 import { etDateOf } from './etDate'
@@ -162,7 +163,7 @@ async function fetchSoccerSeries(): Promise<{ game: SoccerSeries[]; totals: [str
 
 /** Six hours. A competition does not appear or vanish inside a day, and this
  *  is the one call that must succeed before any of the other 139 can. */
-const soccerSeries = unstable_cache(fetchSoccerSeries, ['kalshi-soccer-series-v1'], {
+const soccerSeries = sharedCache(fetchSoccerSeries, ['kalshi-soccer-series-v1'], {
   revalidate: 6 * 3600,
   tags: ['kalshi-soccer'],
 })
@@ -418,7 +419,7 @@ async function events(seriesTicker: string): Promise<KEvent[] | null> {
  *  an hour across the whole deployment, short enough that a game listed at
  *  lunchtime is on the board before kick-off. Next's Data Cache serves the
  *  stale index while it rebuilds, so only the very first call ever waits. */
-const indexShared = unstable_cache(sweepIndex, ['kalshi-soccer-index-v2'], {
+const indexShared = sharedCache(sweepIndex, ['kalshi-soccer-index-v2'], {
   revalidate: 900,
   tags: ['kalshi-soccer'],
 })
@@ -453,7 +454,7 @@ export async function fetchKalshiQuotes(tickers: string[]): Promise<Map<string, 
  *  A failed re-price leaves the index's own quotes in place rather than
  *  emptying the column — a round trip that could not be made is not evidence
  *  that a book is gone. */
-async function pricedIndex(): Promise<KalshiSoccerIndex> {
+export async function pricedIndex(): Promise<KalshiSoccerIndex> {
   const idx = await indexShared()
   const tickers: string[] = []
   for (const f of idx.fixtures) {
@@ -479,7 +480,7 @@ async function pricedIndex(): Promise<KalshiSoccerIndex> {
 
 const TTL_MS = 45_000
 
-const pricedShared = unstable_cache(pricedIndex, ['kalshi-soccer-priced-v2'], {
+const pricedShared = sharedCache(pricedIndex, ['kalshi-soccer-priced-v2'], {
   revalidate: TTL_MS / 1000,
   tags: ['kalshi-soccer'],
 })
@@ -514,7 +515,10 @@ function refresh(): Promise<KalshiSoccerIndex> {
  *     The board is built to render without this column anyway, so the one
  *     caller that does wait still gets a board.
  */
+const remoteKalshi = remoteGetter<KalshiSoccerIndex>('kalshi-soccer')
+
 export async function getKalshiSoccer(): Promise<KalshiSoccerIndex> {
+  if (BOARDS_URL) return remoteKalshi()
   if (l1 && Date.now() - l1.at < TTL_MS) return l1.idx
   if (l1) {
     // Stale, but real. Kick the refresh off and answer now.
