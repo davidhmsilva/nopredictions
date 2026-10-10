@@ -156,6 +156,55 @@ export interface WalletProfile {
   trust: 'ok' | 'partial' | 'unreconciled'
   archetypes: { key: string; label: string; confidence: string; evidence: string[] }[]
   narrative: { headline: string; sections: { title: string; paragraphs: string[] }[] }
+  /** The latest positions, one per token, newest first — what the page shows
+   *  as "recent bets". Site only: the Python has no equivalent, and nothing in
+   *  `--verify-site` reads it. */
+  recent: RecentPosition[]
+}
+
+export interface RecentPosition {
+  title: string
+  outcome: string
+  event: string
+  /** Cash in, fees included, and what it made (marked to the last price if open). */
+  cost: number
+  pnl: number
+  /** Average price paid per share. */
+  entry: number
+  status: 'open' | 'won' | 'lost' | 'sold'
+  /** Last time anything happened on it. */
+  ts: number
+}
+
+/** One row per token: a FIFO lot is a fragment of a bet, and ten fragments of
+ *  one buy are not ten bets. Settled by the market → won/lost by what it paid;
+ *  any exit by the wallet's own hand (sell, merge) → sold. */
+function recentPositions(lots: Lot[], k = 10): RecentPosition[] {
+  const byAsset = new Map<string, Lot[]>()
+  for (const l of lots) {
+    const arr = byAsset.get(l.asset)
+    if (arr) arr.push(l)
+    else byAsset.set(l.asset, [l])
+  }
+  const out: RecentPosition[] = []
+  byAsset.forEach((ls) => {
+    const c = sum(ls.map(cost))
+    const p = sum(ls.map(lotPnl))
+    const shares = sum(ls.map((l) => l.shares))
+    const open = ls.some((l) => l.exitKind === 'open')
+    const settled = ls.every((l) => l.exitKind === 'redeem' || l.exitKind === 'resolved')
+    out.push({
+      title: ls[0].title,
+      outcome: ls[0].outcome,
+      event: ls[0].eventSlug,
+      cost: c,
+      pnl: p,
+      entry: shares ? c / shares : 0,
+      status: open ? 'open' : settled ? (p >= 0 ? 'won' : 'lost') : 'sold',
+      ts: maxOf(ls.map((l) => l.exitTs ?? l.entryTs)),
+    })
+  })
+  return out.sort((a, b) => b.ts - a.ts).slice(0, k)
 }
 
 // ─── deterministic PRNG (must match the Python, seed for seed) ──────────────
@@ -913,6 +962,7 @@ export function analyse(
     trust: 'ok',
     archetypes: [],
     narrative: { headline: '', sections: [] },
+    recent: recentPositions(lots),
   }
   // How much of this report can be believed, in one field. Everything that
   // reads a number out loud checks it first.

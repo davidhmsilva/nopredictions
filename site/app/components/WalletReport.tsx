@@ -89,7 +89,9 @@ function Bar({ value, max }: { value: number; max: number }) {
 
 // ─── report ─────────────────────────────────────────────────────────────────
 
-export function WalletReport({ p }: { p: WalletProfile }) {
+/** `compact`: the identity header is left out, because WalletSummary already
+ *  sits above the report with the same name, avatar and address. */
+export function WalletReport({ p, compact = false }: { p: WalletProfile; compact?: boolean }) {
   const t = p.totals
   const cov = p.coverage
   const boot = p.bootstrap
@@ -107,30 +109,32 @@ export function WalletReport({ p }: { p: WalletProfile }) {
   return (
     <div className="wallet-report">
       {/* ── identity ── */}
-      <header className="wallet-head">
-        {p.profile_image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.profile_image} alt="" className="wallet-avatar" />
-        ) : (
-          <div className="wallet-avatar wallet-avatar-blank">?</div>
-        )}
-        <div>
-          <h1 className="wallet-name">{p.name || p.pseudonym || 'Unnamed wallet'}</h1>
-          <a
-            className="wallet-addr"
-            href={`https://polymarket.com/profile/${p.wallet}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {p.wallet}
-          </a>
-          <div className="wallet-meta">
-            {cov.rows.toLocaleString('en-US')} activity rows · {day(cov.first_ts)} → {day(cov.last_ts)} ·{' '}
-            {cov.days_active} active days
-            {!cov.complete && <span className="wallet-warn"> · PARTIAL HISTORY</span>}
+      {!compact && (
+        <header className="wallet-head">
+          {p.profile_image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={p.profile_image} alt="" className="wallet-avatar" />
+          ) : (
+            <div className="wallet-avatar wallet-avatar-blank">?</div>
+          )}
+          <div>
+            <h1 className="wallet-name">{p.name || p.pseudonym || 'Unnamed wallet'}</h1>
+            <a
+              className="wallet-addr"
+              href={`https://polymarket.com/profile/${p.wallet}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {p.wallet}
+            </a>
+            <div className="wallet-meta">
+              {cov.rows.toLocaleString('en-US')} activity rows · {day(cov.first_ts)} → {day(cov.last_ts)} ·{' '}
+              {cov.days_active} active days
+              {!cov.complete && <span className="wallet-warn"> · PARTIAL HISTORY</span>}
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* A report you cannot trust must say so before it says anything else —
           the caveat at the bottom of a long page is a caveat nobody reads. */}
