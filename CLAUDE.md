@@ -112,6 +112,8 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── soccer_line_model.py           ← Dixon-Coles fitted to sharp 1X2 + total ✅ NEW
 │   ├── nba_agent.py                   ← NBA Every Game (paper) ✅ NEW 2026-10-06
 │   ├── nba_model.py                   ← NBA margin/total model anchored on Pinnacle ✅ NEW
+│   ├── close_model.py                 ← forecasts where a 1X2 price will CLOSE (H-STATS-CLOSE) ✅ NEW 2026-10-10
+│   ├── close_maker_agent.py           ← Close Forecast: paper maker bids on PM from that forecast ✅ NEW
 │   ├── espn_stats.py                  ← free live stats, no key — fallback ✅ NEW
 │   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
@@ -2522,6 +2524,71 @@ python -m pytest tests/test_nba_agent.py -q
   the NFL board's shape again.
 - ⚠️ `nba_scanner.py` (Strategy 5, NBA Elo) is a different, older agent and is
   not scheduled on the server.
+
+## Close Forecast — maker bids on where the price will close (paper, 2026-10-10)
+
+By the operator's direction: the skill this project is after is **knowing
+where a price will close** before the market gets there, not treating Pinnacle
+(or any venue) as the truth. Hypothesis `H-STATS-CLOSE` (#47), exploratory.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python close_model.py --evaluate        # walk-forward: Pinnacle pre-close -> close, then Polymarket
+python close_model.py --evaluate-tm     # research: + Transfermarkt congestion / XI value
+python close_model.py --train --teams   # refit close_model.json, rebuild the team-state cache
+python close_maker_agent.py --once --dry-run
+python close_maker_agent.py --report
+python -m pytest tests/test_close_maker_agent.py -q
+```
+
+**What the statistics know.** Team EWMAs from previous league matches only
+(goal diff fast/slow, shots-on-target diff fast/slow, shots diff, points vs
+the points their closing prices expected, rest) plus the side's own price
+logit, one logistic per side, walk-forward by season:
+
+| | |
+|---|---|
+| stats ALONE vs Pinnacle's pre-close, on results | far worse (+13e-3 log loss): the price knows much more |
+| stats + pre-close vs pre-close, on results | −0.16e-3 CI[−0.29,−0.03] — almost nothing |
+| stats + close vs close | nothing: the close absorbs it |
+| **the pre-close → close MOVE** | **OOS R² 0.027, corr 0.166** (price level alone 0) |
+| bets at the pre-close where model >= 2% value | **CLV +1.17% CI[+0.92,+1.41], n=4,504**, 91% of seasons + |
+| Polymarket T−24h, model fitted on Pinnacle < 2024 | ≥2pp gap: PM moved **+0.56pp CI[+0.25,+0.84]** to its close (n=387, 4,724 fixtures) |
+
+🔑 The target is the move, not the result. The stats know less than the price
+about who wins, but something the price has not absorbed yet, and the close
+absorbs it. Reading of the coefficients (correlated, indicative): the price
+1-3 days out chases recent results against the price (`mres` −) and is slow to
+credit a recent rise in shots on target (`sot_f` + against `sot_s` −).
+
+Transfermarkt (rest in all competitions, Europe before/after, games in 14
+days, XI value depletion and strength) on the 37k matches it covers: move R²
+0.0290 → 0.0316, CLV per bet unchanged. Not worth the live plumbing yet, and
+`tm_games` stops in 2026-05 anyway.
+
+**The agent** (strategy "Close Forecast — maker bids", table
+`close_maker_orders`, db/073, timers `close-maker` */5 and
+`close-maker-settle`): Polymarket 1X2 fixtures 3-30 h out in the 22 modelled
+leagues, sides confirmed by ESPN. Where the model sits >= 2pp above a side's
+normalised mid, it posts a paper BID (one tick above the best bid when the
+spread allows, never within 2pp of the model), one per fixture. A bid FILLS on
+a print strictly below it or the ask coming down to it; a print AT it is only
+`touched_at` (queue). 1u at the bid, no fee. Every order, filled or not, gets
+the venue's close (last read inside 15 min of kick-off) and the payout, so
+**filled vs unfilled is the adverse-selection measurement** — the reason a
+maker can lose with a correct forecast. The site's agent page shows the bids.
+
+⚠️ As a taker this does not pay: entry (~1.6pp) > the ~0.6pp move. The maker
+version earns half-spread + move ≈ +1pp (~+2.5% of stake) only if fills are
+not adverse — exactly what the record is for. CLV first (tens of fills), yield
+much later (thousands).
+⚠️ Team-history guard: a team is compared with its OWN league's latest match,
+not the calendar. Leagues pause three weeks (the Premier League played
+2026-09-20 and next on 10-10), so "last match > 16 days ago" wrongly blocked
+the first round after a break; it looked like a Football-Data outage and was
+not one.
+⚠️ `mres` uses Betfair's close after 2026-01-15 (Pinnacle gone from
+Football-Data); the coefficients are from the Pinnacle years.
 
 ## Strategy factory — thousands of specs, out of sample, paper bots (2026-09-13)
 
