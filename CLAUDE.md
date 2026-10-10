@@ -361,6 +361,68 @@ Pinnacle closing as the CLV benchmark. Can be added later if needed.
 
 Kalshi is also parked — build after Polymarket edge is confirmed at scale.
 
+### Stages K-N — the free data enrichment (2026-10-03)
+
+Everything free that closed a measured gap. Full write-up, caveats and the
+analyses it unlocks: `reports/data_enrichment_2026-10-03.md`.
+
+| stage | file | what |
+|---|---|---|
+| K | `ingest/stage_k_fd_extra.py` | `--extra-leagues`: 16 countries from football-data.co.uk/new/ (12 new leagues + Copa de la Liga; MLS/BRA/ARG/MEX 2012-19 and 2026), closing 1X2 from 2012. `--enrich`: AH line + prices, pre-closing max/avg 1X2+O/U+AH (`MAXO`/`AVGO`, snapshot 'opening'), xG 2026-27, referees |
+| L | `ingest/stage_l_espn_events.py` | ESPN timelines: every goal and card with minute + stoppage, ~75 competitions incl. cups/Europe/internationals, 2010 → now → `espn_matches`, `espn_match_events` (db/065) |
+| M | `ingest/stage_m_price_paths.py` | 1-minute price path of every settled PM (2024-08 →) and Kalshi (2025-05 →) football market, KO −90' → +180'. **Files**, `ingest/data/price_paths/` (gitignored) |
+| N | `ingest/stage_n_transfermarkt.py` | Transfermarkt (CC0): 89k games incl. cups/Europe, `match_context`, XI market value as of the day + rotation → `tm_games`, `tm_lineup_features`, `tm_club_map` (db/066-067) |
+
+After it: 200,119 football matches (+53,668) in 53 leagues; AH on 124k
+matches (was 0); O/U 2.5 before 2019 on 70k (was 0); 185,590 ESPN timelines
+linked, 63,817 red cards with a minute; referee on 97k matches; line-up value
+and rotation on 162k club-games.
+
+🔑 **Every link needs the date, the same final score and both names**, unique
+best, one-to-one — then a **pairing pass** on stable ids: a row with one side
+proven whose candidates (same score, in the window, that team on that side)
+number exactly one is that match, and the other spelling is learned.
+"Athletico-PR" vs "Atletico Paranaense" scores 0.00 and "Ath Madrid" vs
+"Atlético de Madrid" 0.50; loosening the scorer is how "Chaco For Ever"
+becomes Fortaleza.
+
+⚠️ **The session pooler (5432) had all 15 slots held by idle daemons** on
+2026-10-03; one more client refuses the agents' crons (`EMAXCONNSESSION`).
+Bulk jobs connect through `ingest/db_pool.ingest_url()` (transaction mode,
+6543), which holds no slot between transactions.
+⚠️ PM `prices-history` is (best bid + best ask)/2 with a missing bid
+counted as 0 and a missing ask as 1: the mid on a two-sided book, **ask/2,
+(bid+1)/2 or 0.5000 on a one-sided or empty one** — never a fill, and on a
+thin book not a price. See [H-PM-INPLAY-CAL](#is-polymarkets-in-play-price-calibrated--no-taker-edge-2026-10-04).
+Kalshi's candles carry the real bid/ask. Path minutes count from the
+LISTED kick-off: goals show 2-5 min after KO + minute + 15', so anchor the
+clock per fixture.
+⚠️ Kalshi moves markets settled before `/historical/cutoff` to
+`/historical/markets/<t>/candlesticks`, with different field names (`close`
+vs `close_dollars`).
+⚠️ ESPN: `dates=YYYY&limit=1000` is a whole year in one call; a date range
+400s; do not set a User-Agent. Use `timeline_ok` rows only — detail thins
+before ~2016 outside the big leagues.
+⚠️ The `/new/` files are UK local time (converted to real UTC here — unlike
+Stage A's 22 leagues) and carry 1X2 closes only: no HT, no stats, no O/U.
+⚠️ `refresh_bt_lab()` reads every league with a PSC/BFEX close except the
+NBA, so its next run puts the new leagues and the newly priced Americas
+(~63k matches) into the Lab. Filter there first if that is not wanted.
+
+```bash
+cd ingest && source .venv/bin/activate
+python stage_k_fd_extra.py --extra-leagues --refresh     # weekly
+python stage_k_fd_extra.py --enrich --seasons 2026-27    # after Stage A
+python stage_l_espn_events.py --refresh-current          # daily (crawl + relink)
+python stage_m_price_paths.py                            # after Stage J, resumable
+python stage_n_transfermarkt.py --refresh                # monthly
+python -m pytest tests/test_data_enrichment_parsers.py -q
+```
+
+None is scheduled yet. Still missing and free, in order of value: Betfair's
+historical BASIC data (1-minute in-play prices since 2016 — needs a Betfair
+account to download), Understat shot-level data, ESPN box scores, weather.
+
 ---
 
 ## Agent architecture ✅ BUILT
@@ -419,6 +481,10 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Stage F — NBA pipeline | ✅ 15k games, Elo model, scanner |
 | Stage G — International results | ✅ 8,394 matches, 48 WC teams in DC model |
 | Stage I — Kalshi markets (read-only) | ✅ 930 markets / 310 fixtures / 29 competitions |
+| Stage K — Football-Data extra leagues + AH / pre-close / xG / referees | ✅ NEW 2026-10-03 — 53,668 matches, 13 leagues; AH on 124k |
+| Stage L — ESPN goal/card timelines | ✅ NEW — 304,771 matches, 185,590 linked, 63,817 red cards |
+| Stage M — PM + Kalshi 1-minute price paths (files) | ✅ NEW — 55k PM + 31k Kalshi settled markets |
+| Stage N — Transfermarkt context + line-up value/rotation | ✅ NEW — 58,034 league games linked (99.7%) |
 | Odds — Pinnacle opening | ✅ ~95k records ("Pinnacle (legacy)") |
 | Odds — Pinnacle closing | ✅ ~95k records ("Pinnacle (closing)") |
 | Odds — Betfair Exchange closing | ✅ ~13k records |
@@ -2955,6 +3021,50 @@ token and picks the best net EV — extending the candidate set to Kalshi is the
 same decision with more candidates.
 
 ---
+
+## Is Polymarket's in-play price calibrated? — no taker edge (2026-10-04)
+
+H-PM-INPLAY-CAL, `research_hypotheses` #44, pre-registered in db/068 before any
+price met an outcome, amended once before unblinding, verdict recorded
+(`confirmed`: the null holds). Full write-up:
+`reports/pm_inplay_calibration_2026-10-04.md`.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python pm_inplay_calibration.py --build       # outcome-blind: clock, observations, costs, what the price is
+python pm_inplay_calibration.py --report      # the registered test + real quotes on the live tape
+python pm_inplay_calibration.py --coherence   # the post-hoc validity check, kept apart
+```
+
+Stage M paths (55,458 markets, 6,261 fixtures on an ESPN-anchored clock — 93%
+of 17,458 goals matched to the minute the fixture's markets jumped) against
+`payout0`, split at 2026-03-01.
+
+🔑 **The history price is not a price on a one-sided book.** It is
+(bid + ask)/2 with a missing bid as 0 and a missing ask as 1: ask-only reads
+ask/2, bid-only (bid+1)/2, empty 0.5000. 47% of matched tape minutes are
+one-sided (pre-match included); by 70' four totals books in five. Those artefacts understate cheap
+tokens and overstate dear ones — the shape a longshot-bias study is looking
+for. As registered, the rule flagged 16 cells (moneyline 0.45-0.85 3-6pp below
+price); on minutes where a fixture's three moneyline books sum to 0.98-1.04
+(83%), **0 of 39 cells survive BH-FDR**, while the other 17% carry −8 to
+−14pp. Any study of Polymarket history mids — Stage M, Stage J's `mid_*` on
+thin books — has to filter them.
+
+At real quotes on the live tape (261 fixtures), taking loses everywhere
+in-play: moneyline −2.9 / −3.4 / −4.3pp at the ask (1H / 46-69' / 70'+),
+totals −8.8 to −13.9, spreads −12.5 to −16.9. Pre-match moneyline −1.55,
+the known spread cost, reproduced.
+- **P2, late longshot bias: rejected.** Fading longshots −2.14pp, backing
+  favourites −4.07pp at real quotes.
+- **P3, late overs cheap: rejected, the opposite.** At 70'+ the Over resolves
+  7.5pp below the mid and buying at the ask loses ~18pp. The late book's ask
+  sits far above fair, so the mid does too: the 100-game review's "20pp+ is
+  not a market", on every family.
+
+What remains for an in-play edge is what this test did not cover: not taking
+(rewards, a resting order — with [[finding-maker-adverse-selection]] against
+it), and settlement windows (H-SETTLED-SWEEP).
 
 ## CLV framework (how we measure edge)
 
