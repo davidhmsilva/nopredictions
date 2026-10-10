@@ -5,7 +5,7 @@
  *  fetches and acts, this draws. */
 
 import Link from 'next/link'
-import type { AgentDetail, AgentSummary } from '../lib/agents'
+import type { AgentDetail, AgentOrder, AgentSummary } from '../lib/agents'
 import { dateText, dayTimeText, oddsText, useOddsFormat } from '../lib/display'
 import { EquityChart, StatusBadge, ago, pct, pickOf, settledOf, sinceText, tone, units } from './parts'
 import { describeInplay, isInplaySpec } from '../lib/inplaySpec'
@@ -17,6 +17,72 @@ const RESULT: Record<string, { label: string; cls: string }> = {
   won: { label: 'WON', cls: 'is-good' },
   lost: { label: 'LOST', cls: 'is-live' },
   void: { label: 'VOID', cls: '' },
+}
+
+const ORDER: Record<AgentOrder['status'], { label: string; cls: string }> = {
+  resting: { label: 'WAITING', cls: 'is-info' },
+  filled: { label: 'FILLED', cls: 'is-good' },
+  expired: { label: 'NOT FILLED', cls: '' },
+  cancelled: { label: 'CANCELLED', cls: '' },
+}
+
+/** A maker agent's bids: the price it asked for, the market's price when it
+ *  asked, where it thought the price would close, and where it did close. */
+function Bids({ orders }: { orders: AgentOrder[] }) {
+  const fmt = useOddsFormat()
+  const odds = (p: number | null) => oddsText(p != null && p > 0 ? 1 / p : null, fmt)
+  return (
+    <section className="gc-section">
+      <h2 className="gc-h2">Bids</h2>
+      <p className="gc-quiet">
+        This agent does not take the price on offer. It posts its own, a day before kick-off, where it
+        expects the market to close shorter, and waits. A bid becomes a bet only if someone sells at that
+        price. Bids that never fill are kept: comparing them with the ones that did shows whether fills
+        arrive when the forecast is wrong.
+      </p>
+      <div className="sc-table-wrap">
+        <table className="sc-table">
+          <thead>
+            <tr>
+              <th className="ag-c-placed">Posted</th>
+              <th>Bid</th>
+              <th className="ag-c-num">Our odds</th>
+              <th className="ag-c-num ag-hide-m">Market</th>
+              <th className="ag-c-num ag-hide-m">Forecast close</th>
+              <th className="ag-c-num ag-hide-m">Closed</th>
+              <th className="ag-c-status">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map((o) => {
+              const st = ORDER[o.status]
+              const won = o.payout == null ? null : o.payout >= 1 ? 'won' : o.payout <= 0 ? 'lost' : 'void'
+              return (
+                <tr key={o.id}>
+                  <td className="ag-c-placed np-num">
+                    {dayTimeText(new Date(o.created_at))}
+                    <span className="ag-row-sub">kick-off {dayTimeText(new Date(o.kickoff))}</span>
+                  </td>
+                  <td>
+                    <span className="ag-t-pick">{o.team ? `${o.team} to win` : 'To win'}</span>
+                    {o.title && <span className="ag-t-event">{o.title}</span>}
+                  </td>
+                  <td className="ag-c-num np-num">{odds(o.bid_price)}</td>
+                  <td className="ag-c-num ag-hide-m np-num">{odds(o.market_mid)}</td>
+                  <td className="ag-c-num ag-hide-m np-num">{odds(o.model_q)}</td>
+                  <td className="ag-c-num ag-hide-m np-num">{odds(o.close_mid)}</td>
+                  <td className="ag-c-status">
+                    <span className={`np-badge ${st.cls}`}>{st.label}</span>
+                    {won && o.status !== 'filled' && <span className="ag-row-sub">would have {won}</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
 }
 
 export interface AgentActions {
@@ -186,6 +252,8 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
           </p>
         </section>
       )}
+
+      {detail.orders?.length > 0 && <Bids orders={detail.orders} />}
 
       <section className="gc-section">
         <h2 className="gc-h2">Bets</h2>
