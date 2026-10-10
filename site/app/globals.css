@@ -4926,6 +4926,9 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   border: 1px solid rgba(255,255,255,.3); border-radius: 6px;
 }
 .sc-c-odd.is-empty { color: var(--grey2); }
+/* A closed market: a lock where a price would be, never a bare dash. */
+.np-closed { display: inline-flex; align-items: center; justify-content: center; color: var(--grey2); cursor: help; }
+.np-closed svg { width: 14px; height: 14px; }
 .sc-meta { align-items: center; margin-top: 3px; }
 .sc-venues { gap: 5px; }
 .sc-venue { display: inline-flex; border: none; opacity: .9; transition: opacity .12s, transform .12s; }
