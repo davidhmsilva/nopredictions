@@ -2049,6 +2049,39 @@ reason, cover the rest.
   off; the fifth tab would have pushed that to ~935px. A 761-1000px band now
   tightens the tabs and the box, and Pricing drops out below 900px.
 
+## Lab and Wallets open on a result, free (2026-10-10)
+
+Both tool pages were a headline, an empty box and a glossary, and every
+example hit a sign-in wall, so a visitor never saw what either one does.
+
+| | free, no account | metered (3/day free) |
+|---|---|---|
+| **Lab** | the picker ("Back [Draw] in [Serie B] at [odds]") and 6 popular tests, via `/api/lab/quick` | a theory in your own words (`/api/backtest`, a Claude call) |
+| **Wallets** | the sports leaderboard's top 12 (week · month · all time) and the 5 traders we wrote up | any other wallet |
+
+- 🔑 **The free Lab path never runs a spec the browser sent.** It takes an
+  example id or three picker choices and builds the spec on the server
+  (`lib/labQuick.ts`), so everything that can run free is a finite set and is
+  cached for a day (`lib/labRun.ts`). The typed path uses the same `runSpec`,
+  so a picked test and the same test written out cannot disagree.
+- The Lab opens on "Draws in Serie B": **+4.66% ± 4.06 on 5,452 bets with CLV
+  −0.07%**, which the page calls "Made money, but it looks like luck". The
+  plain verdict (`plainVerdict` in `lab/LabResult.tsx`) reads the CLV, which
+  `verdict()` in lib/backtest does not.
+- `db/074` adds `run_backtest_recent(spec, lim)`, the last games a test would
+  have bet. ⚠️ **Its WHERE clause is a copy of `run_backtest`'s** (live in the
+  database, migration on the Stage J branch). A filter added there must be
+  added here. Applied 2026-10-10. Count parity checked on 3 specs under 50 bets.
+- Wallets: `data-api /v1/leaderboard?category=SPORTS` (there is no `SOCCER`
+  category) and `gamma /public-search?search_profiles=true` for names. The
+  leaderboard profit is Polymarket's, GROSS of fees, and the page says so.
+  Free reads go through `sharedCache` for 12h, with in-flight requests coalesced,
+  so each free wallet is walked at most twice a day.
+- The report now opens on `WalletSummary` (4 numbers, skill-or-luck from the
+  event bootstrap, a plain reading, the latest 10 positions) with the old
+  report behind "Show the full analysis". `WalletProfile.recent` is site-only;
+  the Python has no equivalent and `--verify-site` does not read it.
+
 ## Results against the price — Yesterday · Today · Tomorrow (2026-09-29)
 
 `/results/<day>`: every finished Polymarket soccer fixture of a day, with the

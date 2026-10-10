@@ -6,8 +6,9 @@ import type { Metadata } from 'next'
 // other people's wallets, and a tab being public to visitors is not the same as
 // those records being surfaced in search results. Revisit deliberately.
 export const metadata: Metadata = {
-  title: 'Wallet analyser — NOPREDICTIONS',
-  description: "Rebuild a Polymarket wallet's entire trading record into FIFO round trips.",
+  title: "Wallets: how Polymarket's top traders trade — NOPREDICTIONS",
+  description:
+    "Polymarket's top sports traders, and any trader by name: every bet rebuilt, where the profit comes from, and whether it is skill or luck.",
   robots: { index: false, follow: false },
 }
 

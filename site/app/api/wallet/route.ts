@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
-import { analyseWallet } from '../../lib/wallet'
+import { analyseWallet, type WalletProfile } from '../../lib/wallet'
 import { currentUser } from '../../lib/supabaseAuth'
 import { claimUse, refundUse, refusalMessage } from '../../lib/plan'
+import { sharedCache } from '../../lib/sharedCache'
+import { isFreeWallet } from '../../lib/walletLeaders'
 
 // A 16k-row wallet is ~33 pages of activity plus a metadata sweep. The walk is
 // sliced and run in parallel, but a big account still needs more than the
@@ -10,6 +12,22 @@ export const maxDuration = 60
 export const dynamic = 'force-dynamic'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
+
+/** The free reads — traders we wrote up, and the leaderboard the page shows —
+ *  are the same few dozen wallets for every visitor, so they are analysed at
+ *  most twice a day each rather than once per click. In-flight requests for
+ *  the same wallet on one instance share one walk of the feed. */
+const cachedAnalysis = sharedCache((addr: string) => analyseWallet(addr), ['wallet-free-v1'], {
+  revalidate: 12 * 3600,
+})
+const inFlight = new Map<string, Promise<WalletProfile>>()
+function freeAnalysis(addr: string): Promise<WalletProfile> {
+  const hit = inFlight.get(addr)
+  if (hit) return hit
+  const p = cachedAnalysis(addr).finally(() => inFlight.delete(addr))
+  inFlight.set(addr, p)
+  return p
+}
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
@@ -30,6 +48,19 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: '`since` must be a date, e.g. 2026-07-01.' }, { status: 400 })
     }
     since = Math.floor(t / 1000)
+  }
+
+  // Free: no account, no use spent. A dated read (`since`) is never free — it
+  // is a different analysis from the cached one.
+  if (since === null && (await isFreeWallet(address))) {
+    try {
+      const profile = await freeAnalysis(address.toLowerCase())
+      return NextResponse.json({ ...profile, free: true })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown error'
+      const known = /no Polymarket activity|could not be reconstructed/i.test(msg)
+      return NextResponse.json({ error: msg }, { status: known ? 404 : 500 })
+    }
   }
 
   // After the address checks, before the ~33-page walk of Polymarket's feed.
