@@ -1,46 +1,49 @@
 """
-nfl_agent.py — the NFL every-game agent. PAPER, no orders.
+nba_agent.py — the NBA every-game agent. PAPER, no orders.
 
-Every NFL game Polymarket lists gets exactly one bet. Which bet is the agent's
-choice, and the choice is the whole strategy: across the game's full-match
-moneyline, ~30 spreads and ~40 totals (both sides of each — ~150 tokens), buy the
-one whose executable ask is cheapest against the sharp line, net of the taker fee.
+The NFL every-game agent (nfl_agent.py) on basketball, by the user's decision
+(2026-10-06). Every regular-season and play-off NBA game Polymarket lists gets
+exactly one bet, of the agent's choosing: across the game's full-match
+moneyline, ~25 spreads and ~20 totals (both sides of each), buy the token whose
+executable ask is cheapest against the sharp line, net of the taker fee.
 
-Fair value is never ours. It comes from Pinnacle (The Odds API; a median of
-other books when Pinnacle has not posted), de-vigged. Where Polymarket's line is
-the same half-point Pinnacle quotes, that de-vigged price IS the fair value
-(`sharp_exact`). Everywhere else — an alternate line, or any spread where
-Pinnacle sits on a whole number — it is read off `nfl_model`, anchored per game
-to Pinnacle's spread + moneyline + total and carrying NFL key numbers
+Fair value is never ours. It comes from Pinnacle (The Odds API,
+`basketball_nba`; a median of other books when Pinnacle has not posted),
+de-vigged. Where Polymarket's line is the same half-point Pinnacle quotes, that
+price IS the fair value (`sharp_exact`); everywhere else it is read off
+`nba_model`, anchored per game to Pinnacle's spread + moneyline + total
 (`sharp_model`, docked a haircut that grows with the distance from the sharp
-line, because that is where the model can be wrong).
+line).
 
-Two kinds of bet, kept apart in every report:
-  * EDGE   — net EV at the CLOB ask clears the threshold (1.5% exact, 3% model),
-             1 unit flat, from 24h before kick-off.
-  * FORCED — the game is inside 40 minutes of kick-off with no bet yet: the best
-             EV on the board, whatever its sign, at the same 1 unit. This is
-             the price of "every game". It is expected to lose roughly the
-             half-spread plus the fee; the report shows what it actually cost.
+Two kinds of bet, never pooled — the same split as the NFL agent:
+  * EDGE   — net EV at the CLOB ask >= 1.5% (exact) / 3% (model), 1u, from 24h out.
+  * FORCED — inside 40 minutes with no bet yet: the best EV on the board,
+             whatever its sign, 1u. This is the price of "every game".
 
-What the project already knows, and why the rules look like this:
-  * PM's pre-match mid sits ON the de-vigged Pinnacle line in soccer
-    (+0.10pp, finding_pm_mid_is_pinnacle). If NFL is the same, the typical token
-    is worth ~ −1% after fee and edge bets will be rare. The EDGE/FORCED split
-    exists so that is measured rather than argued.
-  * A stale sharp price fabricates edge in both directions
-    (finding_observer_live_price_stale). An EDGE bet needs a snapshot fresh for
-    its distance to kick-off; a stale one can only ever produce a FORCED bet.
-  * Every large claimed edge in this repo's history was our own bug. Anything
-    above IMPLAUSIBLE_EV_PCT is logged and refused, never bought.
-  * Sides are read from outcome LABELS mapped through Polymarket's own team
-    list — never from title order, and the pricing never needs to know which
-    team is at home.
+What is different from the NFL, and why:
+  * **Preseason is not bet.** Polymarket lists preseason games under the same
+    tags and series as the season (`nba-2026`), and The Odds API keeps them
+    under a different sport key — so a preseason game would never find a sharp
+    line and would be FORCED at Polymarket's own mid. A game is in scope only
+    when ESPN files it as regular season, play-in or play-offs; ESPN not
+    answering means no new bet this cycle (it fails closed, and the next cycle
+    five minutes later asks again).
+  * **Polymarket names NBA teams by nickname** ("Pistons", "76ers"), The Odds
+    API by full name, ESPN by its own ("LA Clippers"). Every spelling resolves
+    through one hand-checked table of 30 clubs, and two names match only when
+    both resolve to the same club — never by substring.
+  * **No ties.** Overtime ends every tied game; `nba_model` gives a margin of 0
+    no mass, so a moneyline has no 50-50 case to price.
+  * **The Odds API key is shared** with nfl_agent and unl_agent on a small
+    plan, and an NBA night has up to seven tip-off clusters. So this agent
+    reads the pool from whichever agent fetched last, stops refreshing for EDGE
+    below RESERVE_CREDITS and stops fetching altogether below FLOOR_CREDITS,
+    which leaves the last credits to the NFL agent's forced bets.
 
-    python nfl_agent.py --once --dry-run   # evaluate the board, write nothing
-    python nfl_agent.py --once             # the cron entry: bet, capture closes, settle
-    python nfl_agent.py --settle
-    python nfl_agent.py --report
+    python nba_agent.py --once --dry-run   # evaluate the board, write nothing
+    python nba_agent.py --once             # the cron entry: bet, capture closes, settle
+    python nba_agent.py --settle
+    python nba_agent.py --report
 """
 from __future__ import annotations
 
@@ -55,6 +58,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from statistics import median
+from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
@@ -66,35 +70,41 @@ load_dotenv(os.path.join(HERE, "../ingest/.env"))
 sys.path.insert(0, HERE)
 
 import db_txn                    # noqa: E402
-import nfl_model as nm           # noqa: E402
+import nba_model as nm           # noqa: E402
 from edge_engine import FEE_RATE, taker_fee_pp   # noqa: E402
 
-log = logging.getLogger("nfl_agent")
+log = logging.getLogger("nba_agent")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 ODDS_KEY = os.getenv("THE_ODDS_API_KEY")
 GAMMA = "https://gamma-api.polymarket.com"
 CLOB = "https://clob.polymarket.com"
-ODDS_URL = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds"
+ODDS_URL = "https://api.the-odds-api.com/v4/sports/basketball_nba/odds"
+ESPN_NBA = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+ET = ZoneInfo("America/New_York")
 
-STRATEGY_NAME = "NFL Every Game"
+STRATEGY_NAME = "NBA Every Game"
+OWNER_FROM = "NFL Every Game"   # the new strategy is owned by whoever owns this one
 OBS_VERSION = 1
 
 # ── the sharp feed ───────────────────────────────────────────────────────────
-# One request returns every NFL game. Cost = 3 markets × ceil(books / 10) = 3
-# credits against a 500/month plan, so the cadence is rationed by how close the
-# nearest unbet game is, not by the clock.
+# One request returns every NBA game: 3 markets × ceil(books / 10) = 3 credits.
 BOOKS = ["pinnacle", "betfair_ex_eu", "lowvig", "betonlineag", "draftkings",
          "fanduel", "betmgm", "williamhill_us", "bovada", "betrivers"]
-ODDS_CACHE = os.path.join(HERE, ".nfl_odds_cache.json")
-RESERVE_CREDITS = 60          # below this, fetch only to force a bet or read a close
+ODDS_CACHE = os.path.join(HERE, ".nba_odds_cache.json")
+SHARED_CACHES = (".nfl_odds_cache.json", ".unl_odds_cache.json", ".nba_odds_cache.json")
+RESERVE_CREDITS = 150         # below this, fetch only to force a bet or read a close
+FLOOR_CREDITS = 60            # below this, fetch nothing: nfl_agent's own reserve is 60
 HORIZON_MIN = 24 * 60         # edge bets from 24h out
 FORCE_MIN = 40                # inside this, an unbet game gets its bet
 CLOSE_MIN = 12                # a close is read inside this, for games already bet
 
+# ESPN season.type: 1 preseason · 2 regular season · 3 play-offs · 5 play-in
+BET_SEASON_TYPES = {2, 3, 5}
+
 
 def required_age_min(mins_to_ko: float) -> float | None:
-    """How old a sharp snapshot may be for a game this far from kick-off."""
+    """How old a sharp snapshot may be for a game this far from tip-off."""
     if mins_to_ko <= FORCE_MIN:
         return 20
     if mins_to_ko <= 150:
@@ -105,8 +115,8 @@ def required_age_min(mins_to_ko: float) -> float | None:
 
 
 # ── what may be bought ───────────────────────────────────────────────────────
-FAMILIES = ("moneyline", "spreads", "totals")   # full match only: the sharp line
-                                                # says nothing about quarters
+FAMILIES = ("moneyline", "spreads", "totals")   # full game only: the sharp line
+                                                # says nothing about halves
 MAX_SPREAD = 0.03
 MIN_LIQUIDITY_USD = 2000
 MIN_ASK, MAX_ASK = 0.05, 0.95
@@ -115,23 +125,81 @@ UNIT_USD = 10.0               # for the depth check only
 
 EDGE_MIN_EXACT = 1.5          # % net EV on cash, fair value = the book's own price
 EDGE_MIN_MODEL = 3.0          # % net EV, fair value read off the model
-# Model fair values are docked (base + per point from the sharp line, capped), sized
-# to the model's MEASURED error against 2012-2025 results (nfl_model tail check,
-# 2026-09-13). Totals track the empirical rate within one SE out to ±14.5 points.
-# Spreads miss by up to 2-4pp in both directions (a 1-3.5pt favourite covering
-# s+3.5: 0.333 real vs 0.364 model; a 6-7.5pt favourite by 15+: 0.307 vs 0.266),
-# so their haircut is larger and nothing past MAX_SPREAD_DIST is priced at all.
-HAIRCUT_PP = {"spreads": (1.0, 0.35, 4.0), "totals": (0.5, 0.10, 2.0),
+# Model fair values are docked (base + per point from the sharp line, capped),
+# sized to nba_model's MEASURED error against 2018-2022 results (--validate,
+# 2026-10-06). Spreads miss by up to 3-4.5pp within a μ bucket (n=364-830, SE
+# ~1.5-2.5pp), the same size as the NFL model's, so the NFL haircut is kept with
+# a slightly smaller per-point rate: an NBA point is a smaller step of σ.
+# Totals track the empirical rate within ~2pp out to ±12.5 points.
+HAIRCUT_PP = {"spreads": (1.0, 0.30, 4.0), "totals": (0.5, 0.10, 2.0),
               "moneyline": (0.75, 0.0, 0.75)}      # (base, per point, cap)
 MAX_SPREAD_DIST = 10.0
 MAX_ML_RESID_PP = 1.0         # the model must reproduce the book's own moneyline
 IMPLAUSIBLE_EV_PCT = 12.0     # above this it is our bug until proven otherwise
 
-# Every bet is 1 unit, EDGE and FORCED alike, like every other agent on the
-# site (the user's call, 2026-09-19). It was quarter-Kelly on 100u for EDGE
-# (0.5-3u) and 0.5u for FORCED, which made this agent's P&L half the scale of
-# its neighbours'; the 15 trades placed before the change were restated to 1u.
-STAKE_U = 1.0
+STAKE_U = 1.0                 # 1 unit flat, EDGE and FORCED, like every agent
+
+
+# ── the 30 clubs ─────────────────────────────────────────────────────────────
+# Canonical name = The Odds API's. Every other spelling — Polymarket's nickname
+# and abbreviation, ESPN's display name and abbreviation — maps to it. Checked
+# against all three feeds on 2026-10-06. A spelling that resolves to two clubs
+# raises at import; a spelling that resolves to none is refused at use.
+TEAMS = {
+    "Atlanta Hawks": ("Hawks", "atl"),
+    "Boston Celtics": ("Celtics", "bos"),
+    "Brooklyn Nets": ("Nets", "bkn"),
+    "Charlotte Hornets": ("Hornets", "cha"),
+    "Chicago Bulls": ("Bulls", "chi"),
+    "Cleveland Cavaliers": ("Cavaliers", "cle"),
+    "Dallas Mavericks": ("Mavericks", "dal"),
+    "Denver Nuggets": ("Nuggets", "den"),
+    "Detroit Pistons": ("Pistons", "det"),
+    "Golden State Warriors": ("Warriors", "gsw", "gs"),
+    "Houston Rockets": ("Rockets", "hou"),
+    "Indiana Pacers": ("Pacers", "ind"),
+    "Los Angeles Clippers": ("Clippers", "LA Clippers", "lac"),
+    "Los Angeles Lakers": ("Lakers", "lal"),
+    "Memphis Grizzlies": ("Grizzlies", "mem"),
+    "Miami Heat": ("Heat", "mia"),
+    "Milwaukee Bucks": ("Bucks", "mil"),
+    "Minnesota Timberwolves": ("Timberwolves", "min"),
+    "New Orleans Pelicans": ("Pelicans", "nop", "no"),
+    "New York Knicks": ("Knicks", "nyk", "ny"),
+    "Oklahoma City Thunder": ("Thunder", "okc"),
+    "Orlando Magic": ("Magic", "orl"),
+    "Philadelphia 76ers": ("76ers", "Sixers", "phi"),
+    "Phoenix Suns": ("Suns", "phx"),
+    "Portland Trail Blazers": ("Trail Blazers", "Blazers", "por"),
+    "Sacramento Kings": ("Kings", "sac"),
+    "San Antonio Spurs": ("Spurs", "sas", "sa"),
+    "Toronto Raptors": ("Raptors", "tor"),
+    "Utah Jazz": ("Jazz", "uta", "utah"),
+    "Washington Wizards": ("Wizards", "was", "wsh"),
+}
+
+
+def _norm(s: str | None) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _build_canon() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for full, spellings in TEAMS.items():
+        for s in (full, *spellings):
+            k = _norm(s)
+            if k in out and out[k] != full:
+                raise ValueError(f"'{s}' names both {out[k]} and {full}")
+            out[k] = full
+    return out
+
+
+CANON = _build_canon()
+
+
+def club(name: str | None) -> str | None:
+    """The canonical club for any spelling, or None. Exact key equality only."""
+    return CANON.get(_norm(name))
 
 
 # ── small helpers ────────────────────────────────────────────────────────────
@@ -152,10 +220,6 @@ def _f(v) -> float | None:
         return x if math.isfinite(x) else None
     except (TypeError, ValueError):
         return None
-
-
-def _norm(s: str | None) -> str:
-    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
 def _ts(s: str | None) -> datetime | None:
@@ -198,7 +262,7 @@ def is_half(x: float) -> bool:
 
 # ── Polymarket ───────────────────────────────────────────────────────────────
 
-SLUG_RE = re.compile(r"^nfl-[a-z]{2,4}-[a-z]{2,4}-\d{4}-\d{2}-\d{2}$")   # the main event
+SLUG_RE = re.compile(r"^nba-[a-z]{2,4}-[a-z]{2,4}-\d{4}-\d{2}-\d{2}$")   # the main event
 SPREAD_Q = re.compile(r"^Spread:\s*(.+?)\s*\(([+-]?\d+(?:\.\d+)?)\)\s*$", re.I)
 
 
@@ -206,10 +270,10 @@ SPREAD_Q = re.compile(r"^Spread:\s*(.+?)\s*\(([+-]?\d+(?:\.\d+)?)\)\s*$", re.I)
 class Game:
     slug: str
     title: str
-    kickoff: datetime
-    home: str                  # Polymarket's own designation, full names
+    kickoff: datetime          # tip-off
+    home: str                  # canonical club, Polymarket's home designation
     away: str
-    names: dict                # _norm(name | alias | abbreviation) -> full name
+    names: dict                # _norm(any spelling of either club) -> canonical
     markets: list
 
     def team(self, label: str) -> str | None:
@@ -219,32 +283,39 @@ class Game:
         return self.away if team == self.home else self.home
 
 
+def _club_of(t: dict) -> str | None:
+    """Polymarket's team object → one canonical club, or None when its name,
+    alias and abbreviation do not all agree on exactly one."""
+    hits = {club(t.get(k)) for k in ("name", "alias", "abbreviation") if t.get(k)}
+    return hits.pop() if len(hits) == 1 and None not in hits else None
+
+
 def game_from_event(ev: dict) -> Game | None:
     slug = ev.get("slug") or ""
     if not SLUG_RE.match(slug):
-        return None                       # player props, futures, "- More Markets"
+        return None                       # futures, awards, player props
     teams = ev.get("teams") or []
     home = next((t for t in teams if str(t.get("ordering", "")).lower() == "home"), None)
     away = next((t for t in teams if str(t.get("ordering", "")).lower() == "away"), None)
     ko = _ts(ev.get("startTime"))
-    if not (home and away and home.get("name") and away.get("name") and ko):
+    if not (home and away and ko):
         return None
+    h, a = _club_of(home), _club_of(away)
+    if not h or not a or h == a:
+        return None                       # an unknown or ambiguous club: fail closed
     names: dict = {}
-    for t in (home, away):
-        for key in (t.get("name"), t.get("alias"), t.get("abbreviation")):
-            if key:
-                if _norm(key) in names and names[_norm(key)] != t["name"]:
-                    return None           # an alias naming both teams: fail closed
-                names[_norm(key)] = t["name"]
-    return Game(slug=slug, title=ev.get("title") or slug, kickoff=ko, home=home["name"],
-                away=away["name"], names=names, markets=ev.get("markets") or [])
+    for full, t in ((h, home), (a, away)):
+        for s in (full, *TEAMS[full], t.get("name"), t.get("alias"), t.get("abbreviation")):
+            if s:
+                names[_norm(s)] = full
+    return Game(slug=slug, title=ev.get("title") or slug, kickoff=ko, home=h, away=a,
+                names=names, markets=ev.get("markets") or [])
 
 
 def fetch_pm_games(now: datetime) -> list[Game]:
-    """Main NFL game events from yesterday to past the horizon. Bounded by plain
-    DATES: a sports event's endDate equals its kick-off, and Gamma's date filters
-    misbehave on ISO timestamps (lab_strategy_runner.fetch_upcoming)."""
-    params = {"tag_slug": "nfl", "closed": "false", "limit": 100,
+    """Main NBA game events from yesterday to past the horizon, bounded by plain
+    DATES (a sports event's endDate equals its start; nfl_agent.fetch_pm_games)."""
+    params = {"tag_slug": "nba", "closed": "false", "limit": 100,
               "end_date_min": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
               "end_date_max": (now + timedelta(minutes=HORIZON_MIN, days=1)).strftime("%Y-%m-%d")}
     out: list[Game] = []
@@ -286,6 +357,69 @@ def fetch_book(token_id: str) -> dict | None:
     return {"bid": _f(bids[0]["price"]), "ask": _f(asks[0]["price"]), "ask_depth_usd": depth}
 
 
+# ── ESPN: which games are real, and how they finished ────────────────────────
+#
+# ⚠️ DO NOT SET A USER-AGENT — ESPN's edge serves library defaults and 403s
+# browser-shaped and custom agents (agent/espn_stats.py). And ask one ET day at
+# a time: the date-RANGE form 400s (CLAUDE.md, 2026-09-20).
+
+def _espn_day(day: str) -> list[dict] | None:
+    """One ET date (YYYYMMDD) of ESPN's NBA scoreboard, flattened. None = ESPN
+    did not answer, which is not the same as a day with no games."""
+    try:
+        r = requests.get(ESPN_NBA, params={"dates": day}, timeout=15)
+        r.raise_for_status()
+        d = r.json()
+    except Exception as exc:                                        # noqa: BLE001
+        log.warning(f"espn {day}: {exc}")
+        return None
+    out = []
+    for ev in d.get("events") or []:
+        for c in ev.get("competitions") or []:
+            scores = {}
+            for t in c.get("competitors") or []:
+                full = club((t.get("team") or {}).get("displayName"))
+                if full:
+                    scores[full] = t.get("score")
+            if len(scores) != 2:
+                continue
+            out.append({"teams": frozenset(scores), "start": _ts(ev.get("date")),
+                        "season_type": (ev.get("season") or {}).get("type"),
+                        "status": ((c.get("status") or {}).get("type") or {}).get("name"),
+                        "scores": scores})
+    return out
+
+
+def _et_days(times: list[datetime]) -> list[str]:
+    return sorted({t.astimezone(ET).strftime("%Y%m%d") for t in times})
+
+
+def espn_schedule(games: list[Game]) -> dict[str, list[dict]] | None:
+    """{YYYYMMDD: ESPN games} for the ET days these games fall on, or None if
+    any of those days did not answer."""
+    out: dict[str, list[dict]] = {}
+    for day in _et_days([g.kickoff for g in games]):
+        rows = _espn_day(day)
+        if rows is None:
+            return None
+        out[day] = rows
+    return out
+
+
+def season_type(game: Game, sched: dict[str, list[dict]] | None) -> int | None:
+    """ESPN's season type for this game, or None when ESPN cannot place it:
+    same two clubs, start within 12h (the pairing alone is unique on a day)."""
+    if not sched:
+        return None
+    pair = frozenset((game.home, game.away))
+    for rows in sched.values():
+        for r in rows:
+            if r["teams"] == pair and r["start"] \
+                    and abs((r["start"] - game.kickoff).total_seconds()) <= 12 * 3600:
+                return r["season_type"]
+    return None
+
+
 # ── the sharp line ───────────────────────────────────────────────────────────
 
 def load_cache() -> dict | None:
@@ -296,6 +430,22 @@ def load_cache() -> dict | None:
         return c
     except Exception:                                   # noqa: BLE001
         return None
+
+
+def pool_remaining() -> int | None:
+    """Credits left on the key the three agents share. Each keeps its own cache,
+    so the one that fetched LAST knows the pool best."""
+    best: tuple[datetime, int] | None = None
+    for name in SHARED_CACHES:
+        try:
+            with open(os.path.join(HERE, name)) as fh:
+                c = json.load(fh)
+        except Exception:                               # noqa: BLE001
+            continue
+        t, r = _ts(c.get("fetched_at")), c.get("remaining")
+        if t and r is not None and (best is None or t > best[0]):
+            best = (t, int(r))
+    return best[1] if best else None
 
 
 def fetch_odds() -> dict | None:
@@ -326,24 +476,22 @@ def fetch_odds() -> dict | None:
 class Sharp:
     book: str                  # 'pinnacle' | 'consensus(n)'
     anchor: nm.Anchor          # team A = Game.home
-    ml: dict                   # team -> (prop, pow)
-    spread: dict               # team -> (point, prop, pow)   pinnacle only
+    ml: dict                   # club -> (prop, pow)
+    spread: dict               # club -> (point, prop, pow)   pinnacle only
     total: tuple | None        # (point, (prop_o, pow_o), (prop_u, pow_u))   pinnacle only
     model_ok: bool
     snapshot_at: datetime
 
-    def mid(self, pair) -> float:
-        return 0.5 * (pair[0] + pair[1])
-
 
 def _book_view(bk: dict, home: str, away: str) -> dict | None:
+    """One bookmaker's three markets, keyed on canonical clubs."""
     mk = {m["key"]: m for m in bk.get("markets") or []}
     out: dict = {"ml": {}, "spread": {}, "total": None}
-    h2h = {o["name"]: o["price"] for o in (mk.get("h2h") or {}).get("outcomes") or []}
+    h2h = {club(o["name"]): o["price"] for o in (mk.get("h2h") or {}).get("outcomes") or []}
     if home in h2h and away in h2h:
         (ph, pa), (wh, wa) = devig(h2h[home], h2h[away])
         out["ml"] = {home: (ph, wh), away: (pa, wa)}
-    sp = {o["name"]: o for o in (mk.get("spreads") or {}).get("outcomes") or []}
+    sp = {club(o["name"]): o for o in (mk.get("spreads") or {}).get("outcomes") or []}
     if home in sp and away in sp and sp[home].get("point") is not None:
         (ph, pa), (wh, wa) = devig(sp[home]["price"], sp[away]["price"])
         out["spread"] = {home: (float(sp[home]["point"]), ph, wh),
@@ -366,22 +514,22 @@ def _anchor_of(view: dict, home: str) -> nm.Anchor:
 
 
 def sharp_for(game: Game, cache: dict) -> Sharp | None:
-    """Match the game by its two FULL team names (never title order), within a
-    kick-off window, then build the anchor from Pinnacle — or the median of the
-    other books when Pinnacle has not posted."""
-    want = {_norm(game.home), _norm(game.away)}
+    """Match the game by its two clubs (never title order), within a tip-off
+    window, then build the anchor from Pinnacle — or the median of the other
+    books when Pinnacle has not posted."""
+    want = {game.home, game.away}
     ev = None
     for e in cache.get("data") or []:
         ct = _ts(e.get("commence_time"))
-        if {_norm(e.get("home_team")), _norm(e.get("away_team"))} == want and ct \
+        if {club(e.get("home_team")), club(e.get("away_team"))} == want and ct \
                 and abs((ct - game.kickoff).total_seconds()) <= 3 * 3600:
             ev = e
             break
     if ev is None:
         return None
-    if _norm(ev.get("home_team")) != _norm(game.home):
-        # harmless for pricing (it is team-relative), logged because it is the
-        # bug class that once inverted the NBA scanner
+    if club(ev.get("home_team")) != game.home:
+        # harmless for pricing (it is team-relative); logged because a neutral-
+        # site game or a swapped feed is the bug class that inverted nba_scanner
         log.info(f"  {game.slug}: odds feed has {ev.get('home_team')} at home, PM has {game.home}")
     books = {b["key"]: b for b in ev.get("bookmakers") or []}
     snap = cache["fetched_at_dt"]
@@ -412,7 +560,7 @@ def sharp_for(game: Game, cache: dict) -> Sharp | None:
 class Cand:
     family: str
     line: float | None         # the token's own line: team -x → -x, total x → x
-    side: str                  # full team name, 'Over' or 'Under'
+    side: str                  # canonical club, 'Over' or 'Under'
     question: str
     condition_id: str
     token_id: str
@@ -442,7 +590,7 @@ def _haircut(family: str, dist: float) -> float:
 
 
 def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
-    """Every full-match token whose Gamma book passes the quality gates, priced.
+    """Every full-game token whose Gamma book passes the quality gates, priced.
     With no sharp line at all the fair value is PM's own mid — used only to pick
     the cheapest token to hold when a bet is forced."""
     out: list[Cand] = []
@@ -544,6 +692,18 @@ def verify(cands: list[Cand], n: int = VERIFY_N) -> list[Cand]:
     return [c for c in top if c.verified]
 
 
+def decide(best: Cand | None, fresh: bool, mins: float) -> str | None:
+    """'edge', 'forced' or None — the rule, apart from the network."""
+    if best is None:
+        return None
+    th = EDGE_MIN_EXACT if best.source == "sharp_exact" else EDGE_MIN_MODEL
+    if fresh and best.source != "pm_mid" and best.ev >= th:
+        return "edge"
+    if mins <= FORCE_MIN:
+        return "forced"
+    return None
+
+
 # ── the database ─────────────────────────────────────────────────────────────
 
 def _conn():
@@ -561,27 +721,32 @@ def ensure_strategy(conn) -> int:
             cur.execute("""
                 INSERT INTO research_hypotheses (title, description, rationale, source, created_by)
                 VALUES (%s, %s, %s, 'agent', 'agent') RETURNING id""", (
-                "H-NFL-SHARP — one bet on every NFL game, the best-EV token against the sharp line",
-                "On every Polymarket NFL game, the cheapest full-match token against the "
-                "de-vigged Pinnacle line (key-number model for alternates) returns more than "
-                "the fee. Edge bets (EV >= 1.5% exact / 3% model) and forced bets (the rule "
-                "that every game is bet) are measured separately.",
-                "PM NFL books are deep and one tick wide, so any edge is a lag or an "
-                "alternate-line mispricing, not a wide book. Soccer says PM's mid sits on "
-                "Pinnacle; this measures whether NFL does too. Verdict gate: n >= 200 edge "
-                "bets, net yield CI clear of zero, and positive CLV against the Pinnacle close."))
+                "H-NBA-SHARP — one bet on every NBA game, the best-EV token against the sharp line",
+                "On every Polymarket NBA regular-season and play-off game, the cheapest full-game "
+                "token against the de-vigged Pinnacle line (nba_model for alternates) returns "
+                "more than the fee. Edge bets (EV >= 1.5% exact / 3% model) and forced bets "
+                "(the rule that every game is bet) are measured separately.",
+                "The NFL board measured PM's ask −3.98% and bid +0.60% against Pinnacle on exact "
+                "lines (927 tokens). The NBA is the sport where late injury and rest news moves "
+                "the sharp line most, so a lag between Pinnacle and PM is the one reason to "
+                "expect a different answer. Verdict gate: n >= 200 edge bets, net yield CI "
+                "clear of zero, positive pm_clv."))
             hyp = cur.fetchone()[0]
             cur.execute("""
-                INSERT INTO strategies (hypothesis_id, name, rules, source, run_status, theory)
-                VALUES (%s, %s, %s::jsonb, 'agent', 'running', %s) RETURNING id""", (
+                INSERT INTO strategies (hypothesis_id, name, rules, source, run_status, theory,
+                                        owner_id)
+                VALUES (%s, %s, %s::jsonb, 'agent', 'running', %s,
+                        (SELECT owner_id FROM strategies WHERE name = %s))
+                RETURNING id""", (
                 hyp, STRATEGY_NAME, json.dumps({
-                    "venue": "polymarket", "sport": "nfl", "phase": "paper-only",
+                    "venue": "polymarket", "sport": "nba", "phase": "paper-only",
                     "self_settling": True, "obs_version": OBS_VERSION,
-                    "fair_value": "pinnacle de-vigged; nfl_model (key numbers) for alternates",
+                    "fair_value": "pinnacle de-vigged; nba_model for alternates",
+                    "season_types": sorted(BET_SEASON_TYPES),
                     "edge_min_exact_pct": EDGE_MIN_EXACT, "edge_min_model_pct": EDGE_MIN_MODEL,
                     "force_min": FORCE_MIN, "stake_u": STAKE_U,
-                }), "Bet every NFL game on Polymarket, choosing the market with the best "
-                    "price against the sharp line."))
+                }), "Bet every NBA game on Polymarket, choosing the market with the best "
+                    "price against the sharp line.", OWNER_FROM))
             sid = cur.fetchone()[0]
     log.info(f"created strategy '{STRATEGY_NAME}' id={sid}")
     return sid
@@ -599,7 +764,7 @@ def bet_games(conn, sid: int) -> dict[str, dict]:
 
 def last_snapshot_written(conn) -> dict[str, datetime]:
     with conn.cursor() as cur:
-        cur.execute("""SELECT game_slug, max(odds_snapshot_at) FROM nfl_candidates
+        cur.execute("""SELECT game_slug, max(odds_snapshot_at) FROM nba_candidates
                         WHERE observed_at > now() - interval '3 days' GROUP BY 1""")
         return {s: t for s, t in cur.fetchall()}
 
@@ -622,7 +787,7 @@ def write_candidates(conn, game: Game, sh: Sharp | None, cands: list[Cand], now:
         return
     with conn.cursor() as cur:
         psycopg2.extras.execute_values(cur, """
-            INSERT INTO nfl_candidates (obs_version, game_slug, kickoff, minutes_to_ko, home_team,
+            INSERT INTO nba_candidates (obs_version, game_slug, kickoff, minutes_to_ko, home_team,
                 away_team, market_type, line, side, condition_id, token_id, pm_bid, pm_ask,
                 pm_liquidity, fair, fair_source, fair_book, anchor_mu, anchor_total,
                 anchor_disagree, fee_pp, ev_pct, odds_snapshot_at, chosen, paper_trade_id,
@@ -635,7 +800,7 @@ def write_trade(conn, sid: int, game: Game, sh: Sharp | None, c: Cand, kind: str
     mins = (game.kickoff - now).total_seconds() / 60
     a = sh.anchor if sh else None
     meta = {"game_slug": game.slug, "home": game.home, "away": game.away, "token_id": c.token_id,
-            "side": c.side, "line": c.line, "family": c.family, "sport": "nfl"}
+            "side": c.side, "line": c.line, "family": c.family, "sport": "nba"}
     src = {"kind": kind, "fair_source": c.source, "book": sh.book if sh else None,
            "fair_raw": round(c.fair_raw, 5), "fair": round(c.fair, 5), "ev_pct": round(c.ev, 3),
            "fee_pp": round(taker_fee_pp(c.ask), 3), "dist_pts": c.dist,
@@ -648,7 +813,7 @@ def write_trade(conn, sid: int, game: Game, sh: Sharp | None, c: Cand, kind: str
     fair_txt = (f"fair {c.fair:.3f} ({1 / c.fair:.2f}) from {c.source}"
                 + (f" [{sh.book}]" if sh else " — NO sharp line, PM mid used"))
     reasoning = (
-        f"NFL {kind.upper()} — {game.title}, kick-off {game.kickoff:%Y-%m-%d %H:%M}Z "
+        f"NBA {kind.upper()} — {game.title}, tip-off {game.kickoff:%Y-%m-%d %H:%M}Z "
         f"({mins:.0f} min out). {c.label} [{c.family}]: CLOB ask {c.ask:.3f} ({1 / c.ask:.2f}), "
         f"bid {c.bid:.3f}, depth ${c.depth_usd or 0:,.0f}; {fair_txt}; "
         f"net EV {c.ev:+.2f}% after a {taker_fee_pp(c.ask):.2f}pp fee. {stake}u, PAPER.")
@@ -657,11 +822,11 @@ def write_trade(conn, sid: int, game: Game, sh: Sharp | None, c: Cand, kind: str
             cur.execute("""
                 INSERT INTO pm_markets (platform, external_id, title, market_type, category,
                                         resolution_time, status, raw_metadata, ingested_at)
-                VALUES ('polymarket', %s, %s, %s, 'nfl', %s, 'active', %s::jsonb, now())
+                VALUES ('polymarket', %s, %s, %s, 'nba', %s, 'active', %s::jsonb, now())
                 ON CONFLICT (platform, external_id) DO UPDATE
                    SET title = EXCLUDED.title, resolution_time = EXCLUDED.resolution_time,
                        raw_metadata = COALESCE(pm_markets.raw_metadata, '{}'::jsonb) || EXCLUDED.raw_metadata
-                RETURNING id""", (c.condition_id, c.question, f"nfl_{c.family}", game.kickoff,
+                RETURNING id""", (c.condition_id, c.question, f"nba_{c.family}", game.kickoff,
                                   json.dumps(meta)))
             mid = cur.fetchone()[0]
             cur.execute("""
@@ -694,9 +859,20 @@ def _odds_needed(games: list[Game], bets: dict, cache: dict | None, now: datetim
     return None
 
 
+def may_fetch(why: str | None, left: int | None) -> bool:
+    """Whether this cycle may spend credits. `left` is the shared pool."""
+    if why is None:
+        return False
+    if left is None:
+        return True
+    if left < FLOOR_CREDITS:
+        return False
+    return not (left < RESERVE_CREDITS and why == "edge")
+
+
 def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     now = datetime.now(timezone.utc)
-    games = fetch_pm_games(now)
+    listed = [g for g in fetch_pm_games(now) if g.kickoff <= now + timedelta(minutes=HORIZON_MIN)]
     conn = _conn()
     sid = None if dry_run else ensure_strategy(conn)
     if dry_run:
@@ -706,22 +882,38 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             sid = r[0] if r else -1
     bets = bet_games(conn, sid)
 
+    # Out of scope BEFORE anything is priced or fetched: a preseason game must
+    # not spend a credit. A game already bet stays in, for its close.
+    unbet = [g for g in listed if g.slug not in bets]
+    sched = espn_schedule(unbet) if unbet else {}
+    games, skipped = [], {}
+    for g in listed:
+        st = None if g.slug in bets else season_type(g, sched)
+        if g.slug in bets or st in BET_SEASON_TYPES:
+            games.append(g)
+            continue
+        why = "preseason" if st == 1 else "ESPN unavailable" if sched is None \
+            else "not on ESPN" if st is None else f"season type {st}"
+        skipped[why] = skipped.get(why, 0) + 1
+
     cache = load_cache()
     why = _odds_needed(games, bets, cache, now)
     if why and allow_fetch:
-        low = cache and cache.get("remaining") is not None and cache["remaining"] < RESERVE_CREDITS
-        if low and why == "edge":
-            log.info(f"odds snapshot stale but {cache['remaining']} credits left — saving them for forced bets")
-        else:
+        left = pool_remaining()
+        if may_fetch(why, left):
             cache = fetch_odds() or cache
+        else:
+            log.info(f"odds snapshot needed ({why}) but the shared key has {left} credits — "
+                     f"not spending them (reserve {RESERVE_CREDITS}, floor {FLOOR_CREDITS})")
     age = (now - cache["fetched_at_dt"]).total_seconds() / 60 if cache else None
-    snap_txt = "none" if age is None else f"{age:.0f} min old ({cache.get('remaining')} credits)"
-    log.info(f"{len(games)} NFL games listed in the next {HORIZON_MIN // 60}h · "
+    snap_txt = "none" if age is None else f"{age:.0f} min old ({pool_remaining()} credits in the pool)"
+    skip_txt = "".join(f" · {n} skipped ({k})" for k, n in sorted(skipped.items()))
+    log.info(f"{len(games)} NBA games in scope{skip_txt} · "
              f"{sum(g.slug in bets for g in games)} already bet · sharp snapshot {snap_txt}")
 
     written = last_snapshot_written(conn) if not dry_run else {}
-    todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake)
-    closes: list[tuple] = []        # (trade_id, fair, mid, book, entry, bid, ask)
+    todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake, new_snap)
+    closes: list[tuple] = []        # (trade_id, fair, mid, book, entry)
     for g in games:
         mins = (g.kickoff - now).total_seconds() / 60
         req = required_age_min(mins)
@@ -762,16 +954,12 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             log.info(f"  {g.title:<28} {mins:6.0f}m  nothing verified on the CLOB · {tag}")
             continue
 
-        kind, stake = None, 0.0
-        th = EDGE_MIN_EXACT if best.source == "sharp_exact" else EDGE_MIN_MODEL
-        if fresh and best.source != "pm_mid" and best.ev >= th:
-            kind, stake = "edge", STAKE_U
-        elif mins <= FORCE_MIN:
-            kind, stake = "forced", STAKE_U
+        kind = decide(best, fresh, mins)
+        stake = STAKE_U if kind else 0.0
         if kind and (best.depth_usd or 0) < stake * UNIT_USD:
             log.info(f"  {g.title}: {best.label} ask depth ${best.depth_usd or 0:.0f} < stake — skip this cycle")
             kind = None
-        log.info(f"  {g.title:<28} {mins:6.0f}m  best {best.label:<26} ask {best.ask:.3f} "
+        log.info(f"  {g.title:<28} {mins:6.0f}m  best {best.label:<30} ask {best.ask:.3f} "
                  f"fair {best.fair:.3f} {best.source:<11} EV {best.ev:+5.2f}%"
                  f"{'  → ' + kind.upper() + f' {stake}u' if kind else ''} · {tag}")
         todo.append((g, sh, cands, best if kind else None, kind, stake,
@@ -799,49 +987,34 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
                                   pm_closing_price = %s, pm_closing_at = now(), pm_clv = %s,
                                   pm_closing_bid = %s, pm_closing_ask = %s
                             WHERE id = %s AND closing_price IS NULL""",
-                        (round(fair, 5), round(fair / entry - 1, 5), f"{book}_close_nfl",
+                        (round(fair, 5), round(fair / entry - 1, 5), f"{book}_close_nba",
                          round(mid, 4), round(mid / entry - 1, 5), cbid, cask, tid))
-        log.info(f"  close pt#{tid}: sharp fair {fair:.3f} vs entry {entry:.3f} → CLV {fair / entry - 1:+.2%}")
+        log.info(f"  close pt#{tid}: sharp fair {fair:.3f} vs entry {entry:.3f} · "
+                 f"PM mid {mid:.3f} → pm_clv {mid / entry - 1:+.2%}")
     log.info(f"placed {placed} · closes {len(closes)}")
 
 
 # ── settlement ───────────────────────────────────────────────────────────────
 
-ESPN_NFL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+def _espn_finals(tipoffs: list[datetime]) -> dict[frozenset, dict[str, int]]:
+    """{frozenset(clubs): {club: score}} for FINISHED games on the ET days of
+    these tip-offs (and the day after: a late tip can finish past midnight ET).
 
-
-def _espn_finals() -> dict[tuple[str, str], tuple[int, int]]:
-    """{(home, away) normalised: (home_score, away_score)} for FINISHED games only.
-
-    ⚠️ The game STATE gates this, never a clock. On 2026-09-20 our 3h settle gate
-    had already passed on a 17-17 game heading to overtime and on a suspended
-    one — both would have graded as a result that had not happened. Only
-    STATUS_FINAL counts; everything else is simply absent from the map.
-
-    ⚠️ DO NOT SET A USER-AGENT — ESPN's edge serves library defaults and 403s
-    browser-shaped and custom agents (see agent/espn_stats.py)."""
-    try:
-        d = requests.get(ESPN_NFL, timeout=15).json()
-    except Exception as exc:                                        # noqa: BLE001
-        log.warning(f"espn scoreboard unavailable ({exc}) — no provisional grading this run")
-        return {}
-    out: dict[tuple[str, str], tuple[int, int]] = {}
-    for ev in d.get("events") or []:
-        for c in ev.get("competitions") or []:
-            if ((c.get("status") or {}).get("type") or {}).get("name") != "STATUS_FINAL":
+    ⚠️ The game STATE gates this, never a clock — only STATUS_FINAL counts, as
+    in nfl_agent (a game heading to overtime is not finished). Keyed on the
+    pair of clubs, never on home/away: a neutral-site game (Mexico City,
+    Paris, Berlin) may be designated differently by ESPN and Polymarket."""
+    days = set(_et_days(tipoffs))
+    days |= {(datetime.strptime(d, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d") for d in days}
+    out: dict[frozenset, dict[str, int]] = {}
+    for day in sorted(days):
+        for r in _espn_day(day) or []:
+            if r["status"] != "STATUS_FINAL":
                 continue
-            side = {}
-            for t in c.get("competitors") or []:
-                nm_ = ((t.get("team") or {}).get("displayName"))
-                sc = t.get("score")
-                if not nm_ or sc is None:
-                    continue
-                try:
-                    side[t.get("homeAway")] = (_norm(nm_), int(sc))
-                except (TypeError, ValueError):
-                    continue
-            if "home" in side and "away" in side:
-                out[(side["home"][0], side["away"][0])] = (side["home"][1], side["away"][1])
+            try:
+                out[r["teams"]] = {t: int(s) for t, s in r["scores"].items()}
+            except (TypeError, ValueError):
+                continue
     return out
 
 
@@ -849,24 +1022,22 @@ def grade(market_type: str, line, side: str, home: str, away: str,
           home_score: int, away_score: int) -> tuple[str, str] | None:
     """(result, human-readable basis) for a finished game, or None if ungradeable.
 
-    `line` is signed from the BOUGHT team's own side — Lions −7.5, Giants +6.5 —
-    which is how nfl_candidates stores it (db/051). Fails closed on a side that
-    does not name one of the two teams: a side error inverts the bet rather than
-    blunting it."""
+    `line` is signed from the BOUGHT team's own side — Celtics −7.5, Nets +6.5 —
+    which is how nba_candidates stores it. Fails closed on a side that does not
+    name one of the two clubs: a side error inverts the bet rather than
+    blunting it. Totals include overtime, as Polymarket's NBA totals do."""
     total = home_score + away_score
     if market_type == "totals":
         if line is None or side not in ("Over", "Under"):
             return None
         won = total > float(line) if side == "Over" else total < float(line)
-        sign = ">" if total > float(line) else "<"
-        return ("won" if won else "lost",
-                f"{away} {away_score} @ {home} {home_score} — total {total} {sign} {float(line):g}")
-    if _norm(side) == _norm(home):
-        mine, theirs, opp = home_score, away_score, away
-    elif _norm(side) == _norm(away):
-        mine, theirs, opp = away_score, home_score, home
-    else:
+        sign = ">" if total > float(line) else "<" if total < float(line) else "="
+        res = "won" if won else "void" if total == float(line) else "lost"
+        return (res, f"{away} {away_score} @ {home} {home_score} — total {total} {sign} {float(line):g}")
+    s, h, a = club(side), club(home), club(away)
+    if s is None or s not in (h, a):
         return None                                   # unknown side: fail closed
+    mine, theirs, opp = (home_score, away_score, away) if s == h else (away_score, home_score, home)
     if market_type == "moneyline":
         res = "won" if mine > theirs else "lost" if mine < theirs else "void"
         return (res, f"{side} {mine} — {opp} {theirs}")
@@ -880,40 +1051,31 @@ def grade(market_type: str, line, side: str, home: str, away: str,
 
 
 def provisional(conn, pending: list[dict], verdicts: dict) -> int:
-    """Grade from the SCORE the trades the venue has not resolved.
-
-    Display only: `result` and `payout_units` are never touched here, so no
-    yield, CLV or report number moves. Polymarket's own flag arrives 3.25h-6.0h
-    after kick-off (median 4.9h, n=15) while our settle gate opens at 3.0h — so
-    without this the record reads OPEN for hours on a game everyone has seen
-    finish, with the price already at 0.996.
-
+    """Grade from the SCORE the trades the venue has not resolved — display only:
+    `result` and `payout_units` are never touched (db/056, nfl_agent.provisional).
     Where the venue HAS resolved, the two are compared and a disagreement is
-    logged loudly: that is the rule_correct arm of db/039, free on every trade."""
+    logged loudly: the rule_correct arm, free on every trade."""
     unresolved = [p for p in pending
                   if not verdicts.get(p["external_id"]) and p.get("market_type")
                   and p.get("provisional_result") is None]
-    resolved = [p for p in pending if verdicts.get(p["external_id"])]
+    resolved = [p for p in pending if verdicts.get(p["external_id"]) and p.get("market_type")]
     if not (unresolved or resolved):
         return 0
-    finals = _espn_finals()                       # network first, no txn open
+    finals = _espn_finals([p["kickoff"] for p in unresolved + resolved])   # network, no txn open
     if not finals:
         return 0
 
     def graded(p):
-        sc = finals.get((_norm(p["home_team"]), _norm(p["away_team"])))
+        sc = finals.get(frozenset((p["home_team"], p["away_team"])))
         if not sc:
             return None
-        return grade(p["market_type"], p["line"], p["side"],
-                     p["home_team"], p["away_team"], sc[0], sc[1])
+        return grade(p["market_type"], p["line"], p["side"], p["home_team"], p["away_team"],
+                     sc[p["home_team"]], sc[p["away_team"]])
 
-    # the audit: our grading against the venue's own verdict, where both exist
     for p in resolved:
         g = graded(p)
-        if not g:
-            continue
         v = verdicts[p["external_id"]]
-        if p["pm_token_id"] not in v:
+        if not g or p["pm_token_id"] not in v:
             continue
         pay = v[p["pm_token_id"]]
         theirs = "won" if pay == 1.0 else "lost" if pay == 0.0 else "void"
@@ -943,12 +1105,12 @@ def settle() -> int:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
             SELECT pt.id, pt.pm_token_id, pt.stake_units, pt.entry_price, pm.external_id,
-                   pt.provisional_result,
+                   pt.provisional_result, pm.resolution_time AS kickoff,
                    c.market_type, c.line, c.side, c.home_team, c.away_team
               FROM paper_trades pt
               JOIN strategies s ON s.id = pt.strategy_id
               JOIN pm_markets pm ON pm.id = pt.market_id
-              LEFT JOIN nfl_candidates c ON c.paper_trade_id = pt.id AND c.chosen
+              LEFT JOIN nba_candidates c ON c.paper_trade_id = pt.id AND c.chosen
              WHERE s.name = %s AND pt.result IS NULL
                AND pm.resolution_time < now() - interval '3 hours'""", (STRATEGY_NAME,))
         pending = [dict(r) for r in cur.fetchall()]
@@ -963,7 +1125,7 @@ def settle() -> int:
         if any(t.get("winner") for t in toks):
             verdicts[cid] = {str(t["token_id"]): (1.0 if t.get("winner") else 0.0) for t in toks}
         elif d.get("closed") and toks and all(abs((_f(t.get("price")) or 0) - 0.5) < 0.01 for t in toks):
-            verdicts[cid] = {str(t["token_id"]): 0.5 for t in toks}      # a tie resolved 50-50
+            verdicts[cid] = {str(t["token_id"]): 0.5 for t in toks}      # resolved 50-50
         else:
             verdicts[cid] = None
     n = 0
@@ -978,7 +1140,7 @@ def settle() -> int:
             cur.execute("""UPDATE paper_trades SET result = %s, payout_units = %s, resolved_at = now()
                             WHERE id = %s AND result IS NULL""", (result, round(payout, 4), p["id"]))
         n += 1
-    log.info(f"settled {n} of {len(pending)} finished NFL trades")
+    log.info(f"settled {n} of {len(pending)} finished NBA trades")
     provisional(conn, pending, verdicts)
     return n
 
@@ -990,17 +1152,17 @@ def report() -> None:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
             SELECT pt.id, pt.placed_at, pt.outcome, pt.entry_price, pt.stake_units, pt.result,
-                   pt.payout_units, pt.confidence AS kind, pt.clv, pt.pm_clv,
+                   pt.payout_units, pt.confidence AS kind, pt.pm_clv,
                    (pt.sharp_consensus_sources->>'ev_pct')::float AS ev,
                    pt.sharp_consensus_sources->>'fair_source' AS src
               FROM paper_trades pt JOIN strategies s ON s.id = pt.strategy_id
              WHERE s.name = %s ORDER BY pt.placed_at""", (STRATEGY_NAME,))
         rows = [dict(r) for r in cur.fetchall()]
     if not rows:
-        print("no NFL trades yet")
+        print("no NBA trades yet")
         return
     print(f"{'':8}{'n':>4}{'settled':>9}{'won':>5}{'stake':>8}{'net P&L':>9}{'yield':>8}"
-          f"{'avg EV':>8}{'avg CLV':>9}")
+          f"{'avg EV':>8}{'pm_clv':>9}")
     for kind in ("edge", "forced", None):
         sub = [r for r in rows if kind is None or r["kind"] == kind]
         if not sub:
@@ -1011,16 +1173,17 @@ def report() -> None:
         fee = sum(float(r["stake_units"]) * FEE_RATE * (1 - float(r["entry_price"])) for r in st)
         pnl = sum(float(r["payout_units"] or 0) - float(r["stake_units"]) for r in st) - fee
         evs = [r["ev"] for r in sub if r["ev"] is not None]
-        clvs = [float(r["clv"]) for r in sub if r["clv"] is not None]
+        clvs = [float(r["pm_clv"]) for r in sub if r["pm_clv"] is not None]
         print(f"{(kind or 'ALL'):<8}{len(sub):>4}{len(st):>9}{sum(r['result'] == 'won' for r in st):>5}"
               f"{stake:>8.1f}{pnl:>+9.2f}{(100 * pnl / stake if stake else 0):>+7.1f}%"
               f"{(sum(evs) / len(evs) if evs else 0):>+7.2f}%"
               f"{(100 * sum(clvs) / len(clvs) if clvs else float('nan')):>+8.2f}%")
-    print("\nCLV vs the sharp close says whether EDGE bets beat the line (tens of bets suffice); "
-          "a P&L CI at ~2.0 odds needs thousands. FORCED measures the cost of TAKING, not a price.")
+    print("\npm_clv = Polymarket's own mid at the close against the entry ask, price against "
+          "price (the NFL agent's `clv` is model-vs-ask and is not CLV). A P&L CI at ~2.0 odds "
+          "needs thousands of bets; FORCED measures the cost of TAKING, not a price.")
     print("\nlast 20:")
     for r in rows[-20:]:
-        clv_txt = "" if r["clv"] is None else "CLV {:+.2%}".format(float(r["clv"]))
+        clv_txt = "" if r["pm_clv"] is None else "pm_clv {:+.2%}".format(float(r["pm_clv"]))
         ev = r["ev"] if r["ev"] is not None else 0.0
         print(f"  pt#{r['id']:<6} {r['placed_at']:%m-%d %H:%M} {r['kind']:<6} {r['src'] or '':<11} "
               f"EV {ev:+5.2f}%  {float(r['stake_units']):.2f}u @ "
@@ -1034,16 +1197,16 @@ def main() -> None:
     ap.add_argument("--settle", action="store_true")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [nfl] %(message)s",
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [nba] %(message)s",
                         datefmt="%Y-%m-%d %H:%M:%S", force=True)
     if args.report:
         report()
         return
-    lock = open(os.path.join(HERE, ".nfl_agent.lock"), "w")
+    lock = open(os.path.join(HERE, ".nba_agent.lock"), "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        log.info("another nfl_agent run holds the lock — exiting")
+        log.info("another nba_agent run holds the lock — exiting")
         return
     if args.settle:
         settle()
