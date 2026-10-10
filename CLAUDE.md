@@ -2039,7 +2039,9 @@ whichever club is listed first. Short names are weighted 0.9 and **two clubs
 tied for one ESPN team are both left out**; five hand overrides, each with its
 reason, cover the rest.
 
-- **Teams** is a tab (desktop and the phone bar), between Home and Lab.
+- **Teams** was a tab between Home and Lab; it left the menu on 2026-10-10
+  (the user's call). `/teams` and the club pages stay, reached from the nav
+  search and the Game Center.
 - The nav search suggests clubs as you type: `/api/teams` (the listed clubs
   plus every spelling we hold: canonical, ESPN, Polymarket, the database's
   aliases), fetched on the first focus only, matched on whole names and word
