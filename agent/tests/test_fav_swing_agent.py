@@ -52,12 +52,42 @@ def test_a_goal_that_did_not_stand_cancels_the_clock():
     assert sw.step(p, 0, 0, 46, T0 + timedelta(minutes=6)) == "hold"
 
 
-def test_a_second_goal_restarts_the_clock():
+def test_a_second_goal_does_not_restart_the_clock():
     p = _pos()
     sw.step(p, 1, 0, 40, T0)
     assert sw.step(p, 1, 1, 43, T0 + timedelta(minutes=3)) == "regoal"
-    assert sw.step(p, 1, 1, 46, T0 + timedelta(minutes=6)) == "hold"     # 3 min since the equaliser
-    assert sw.step(p, 1, 1, 48, T0 + timedelta(minutes=8)) == "sell_due"
+    assert p["goal_minute"] == 40 and (p["goal_home_goals"], p["goal_away_goals"]) == (1, 1)
+    assert sw.step(p, 1, 1, 44, T0 + timedelta(minutes=4)) == "hold"
+    assert sw.step(p, 1, 1, 45, T0 + timedelta(minutes=5)) == "sell_due"   # 5 min since the FIRST goal
+
+
+def test_dortmund_werder_sells_at_two_nil():
+    """pt#6333, 2026-10-09: the feed saw 1-0 at 20:11:15, 2-0 at 20:16:14 (0.4s
+    before the clock ran out), 2-1 at 20:18:15, 2-2 at 20:23:19. The old rule
+    restarted the clock on every goal and never sold."""
+    t = datetime(2026, 10, 9, 20, 11, 15, 211977, tzinfo=timezone.utc)
+    p = _pos()
+    assert sw.step(p, 1, 0, 81, t) == "goal"
+    assert sw.step(p, 2, 0, 86, t + timedelta(seconds=299.55)) == "regoal"
+    assert sw.step(p, 2, 0, 87, t + timedelta(seconds=359.19)) == "sell_due"
+    assert p["goal_minute"] == 81 and (p["goal_home_goals"], p["goal_away_goals"]) == (2, 0)
+
+
+def test_a_goal_after_the_clock_ran_out_is_still_a_sale():
+    p = _pos()
+    sw.step(p, 1, 0, 40, T0)
+    assert sw.step(p, 1, 0, 45, T0 + timedelta(minutes=5)) == "sell_due"   # book not clean, no sale yet
+    assert sw.step(p, 1, 1, 46, T0 + timedelta(minutes=6)) == "sell_due"
+
+
+def test_a_return_to_the_entry_score_still_cancels_after_a_further_goal():
+    p = _pos()
+    sw.step(p, 1, 0, 40, T0)
+    sw.step(p, 2, 0, 42, T0 + timedelta(minutes=2))
+    sw.step(p, 1, 0, 43, T0 + timedelta(minutes=3))                      # the second did not stand
+    assert p["status"] == "goal_pending" and p["goal_minute"] == 40
+    assert sw.step(p, 0, 0, 44, T0 + timedelta(minutes=4)) == "reversed"
+    assert p["status"] == "open" and p["goal_seen_at"] is None
 
 
 def test_exit_waits_for_a_clean_book_then_forces():
