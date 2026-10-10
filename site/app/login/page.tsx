@@ -32,6 +32,7 @@ import { AppShell } from '../components/AppShell'
 import { takeSignupEmail } from '../lib/signupEmail'
 import { supabaseBrowser } from '../lib/supabaseBrowser'
 import { invalidateSession } from '../lib/useSession'
+import { LAB_TOTAL_GAMES, labCount } from '../lib/labData'
 
 const GOOGLE_ON = process.env.NEXT_PUBLIC_AUTH_GOOGLE === '1'
 const MAGIC_ON = process.env.NEXT_PUBLIC_AUTH_MAGIC_LINK === '1'
@@ -46,7 +47,7 @@ function safeNext(raw: string | null): string {
 
 /** What the account is for. Every line is something that exists today. */
 const REASONS: { k: string; v: string }[] = [
-  { k: 'Lab', v: 'Three theories a day, replayed over 111,475 real matches against Pinnacle’s close.' },
+  { k: 'Lab', v: `Three theories a day, replayed over ${labCount(LAB_TOTAL_GAMES)} real matches against the sharp close.` },
   { k: 'Wallet', v: 'Three traders a day, every fill rebuilt into completed round trips.' },
   { k: 'Watchlist', v: 'The fixtures you star, kept.' },
 ]

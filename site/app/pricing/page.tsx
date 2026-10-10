@@ -19,6 +19,7 @@ import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import { useSession } from '../lib/useSession'
 import { PRICING, QUOTA_RESET_TEXT } from '../lib/planTerms'
+import { LAB_TOTAL_GAMES, labCount } from '../lib/labData'
 
 // From planTerms, the same constants the server and Stripe read. This page
 // used to type its own 19 and 190, and nothing kept the two in step.
@@ -39,7 +40,7 @@ const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
   { k: 'Insights — what our research found, misses included', free: '✓', pro: '✓', href: '/insights' },
   // The agent's paper record left this table on 2026-09-13. It is the
   // operator's own and private now, and it was never what a plan sells.
-  { k: 'Lab — test a betting idea on 111,475 real games', free: '3 a day', pro: 'Unlimited', href: '/lab' },
+  { k: `Lab — test a betting idea on ${labCount(LAB_TOTAL_GAMES)} real games`, free: '3 a day', pro: 'Unlimited', href: '/lab' },
   { k: 'Wallet — any Polymarket trader’s full record', free: '3 a day', pro: 'Unlimited', href: '/wallet' },
   { k: 'Watchlist', free: 'This browser', pro: 'Every device' },
 ]

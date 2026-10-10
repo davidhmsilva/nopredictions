@@ -13,6 +13,7 @@ import { QUOTA_RESET_TEXT } from '../lib/planTerms'
 import { clarify, type LabQuestion } from '../lib/labQuestions'
 import { Clarify } from './Clarify'
 import { InplayResult, type InplayApiResult } from './InplayResult'
+import { LAB_FOOTBALL_MATCHES, LAB_SEASONS_TEXT, LAB_TOTAL_GAMES, labCount } from '../lib/labData'
 
 // ── types mirrored from the API route ───────────────────────────────────────
 
@@ -32,6 +33,8 @@ interface Stats {
   maxDrawdown: number
   firstMatch: string | null
   lastMatch: string | null
+  nBetfair?: number
+  firstBetfair?: string | null
 }
 
 interface Verdict {
@@ -53,6 +56,30 @@ interface MonthRow {
   pnl: number
 }
 
+interface VenueArm {
+  n: number
+  wins: number
+  avgOdds: number | null
+  yieldPct: number
+  ci95Pct: number
+  pValue: number | null
+  pinYieldPct: number | null
+  pinAvgOdds: number | null
+}
+
+interface VenueRow {
+  venue: string
+  name: string
+  listed: number
+  paid: VenueArm | null
+  mid: VenueArm | null
+  agreePct: number | null
+  compared: number
+  dropped: number
+  firstMatch: string | null
+  lastMatch: string | null
+}
+
 interface ApiResult {
   ok: boolean
   error?: string
@@ -65,6 +92,7 @@ interface ApiResult {
   stats?: Stats
   seasons?: SeasonRow[]
   monthly?: MonthRow[]
+  venues?: VenueRow[]
   caveats?: string[]
 }
 
@@ -116,6 +144,95 @@ function EquityCurve({ monthly }: { monthly: MonthRow[] }) {
   )
 }
 
+// ── the same bets at the exchanges ───────────────────────────────────────────
+//
+// The verdict above is the sharp close's (Pinnacle, else Betfair), over
+// every season. This is the question a prediction-market user brings: those
+// bets, on the games Polymarket and Kalshi listed, at the price a taker would
+// actually have paid there. The last column is the SAME games at the sharp
+// close, because the exchanges only start in 2024-25 and a yield over twelve
+// seasons is not comparable with one over two.
+
+function pct(v: number | null, digits = 1) {
+  if (v == null) return '—'
+  return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}%`
+}
+
+function VenuePanel({ venues, oddsFmt }: { venues: VenueRow[]; oddsFmt: ReturnType<typeof useOddsFormat> }) {
+  if (venues.length === 0) return null
+  const thin = venues.some(v => (v.paid?.n ?? 0) < 200)
+  return (
+    <div className="bt-venues">
+      <div className="bt-label">THE SAME BETS AT THE EXCHANGES</div>
+      <p className="bt-text">
+        Every selection above that Polymarket or Kalshi also listed, priced where a
+        trader could actually have bought it, fee included. The last column is those
+        same games at the sharp close — Pinnacle&rsquo;s, or Betfair&rsquo;s where Pinnacle is
+        gone — so the two numbers are comparable.
+      </p>
+      <table className="bt-table bt-venue-table">
+        <thead>
+          <tr>
+            <th>EXCHANGE</th>
+            <th>BETS</th>
+            <th>AVG ODDS</th>
+            <th>YIELD ± 95% CI</th>
+            <th>AT THE MID</th>
+            <th>SHARP CLOSE, SAME GAMES</th>
+          </tr>
+        </thead>
+        <tbody>
+          {venues.map(v => (
+            <tr key={v.venue}>
+              <td>{v.name}</td>
+              <td>
+                {(v.paid?.n ?? 0).toLocaleString('en-US')}
+                <span className="bt-venue-sub"> of {v.listed.toLocaleString('en-US')} listed</span>
+              </td>
+              <td>{oddsText(v.paid?.avgOdds ?? null, oddsFmt)}</td>
+              <td className={(v.paid?.yieldPct ?? 0) >= 0 ? 'bt-pos' : 'bt-neg'}>
+                {v.paid ? `${pct(v.paid.yieldPct)} ± ${v.paid.ci95Pct.toFixed(1)}` : '—'}
+              </td>
+              <td>{pct(v.mid?.yieldPct ?? null)}</td>
+              <td>{pct(v.paid?.pinYieldPct ?? null)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <ul className="bt-venue-notes">
+        <li>
+          <strong>Paid</strong> is the ask at kick-off on Kalshi, and the last price a taker
+          actually paid in the hour before kick-off on Polymarket, plus that
+          exchange&rsquo;s fee at the time. Bets with no such price are left out, which is
+          why a game can be listed and not counted.
+        </li>
+        <li>
+          <strong>At the mid</strong> is the middle of the book. Nobody buying gets it, so
+          read it as a ceiling, not a result.
+        </li>
+        {venues.map(v =>
+          v.agreePct != null ? (
+            <li key={`a-${v.venue}`}>
+              {v.name} settled {v.agreePct.toFixed(1)}% of {v.compared.toLocaleString('en-US')}{' '}
+              games the way our results say
+              {v.firstMatch && v.lastMatch
+                ? `, ${v.firstMatch.slice(0, 7)} to ${v.lastMatch.slice(0, 7)}`
+                : ''}
+              .
+            </li>
+          ) : null,
+        )}
+        {thin && (
+          <li>
+            Under 200 bets on an exchange is descriptive only, the same rule as the verdict
+            above.
+          </li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
 // ── what a test gives you ────────────────────────────────────────────────────
 //
 // Shown in place of the empty terminal. A first-time visitor has no idea what
@@ -123,10 +240,10 @@ function EquityCurve({ monthly }: { monthly: MonthRow[] }) {
 // verdict that is usually no — is more convincing than a promise.
 
 const DATA_FACTS: { v: string; k: string }[] = [
-  { v: '111,475', k: 'real games' },
+  { v: labCount(LAB_TOTAL_GAMES), k: 'real games' },
   { v: '22', k: 'football leagues + NBA' },
-  { v: '2012–2026', k: 'seasons covered' },
-  { v: 'Pinnacle', k: 'closing odds' },
+  { v: LAB_SEASONS_TEXT, k: 'seasons covered' },
+  { v: 'Pinnacle + Betfair', k: 'closing odds' },
 ]
 
 const OUTPUT_FACTS: { k: string; v: string }[] = [
@@ -134,6 +251,7 @@ const OUTPUT_FACTS: { k: string; v: string }[] = [
   { k: 'Yield ± 95% CI', v: 'Profit per unit staked, with the interval. The interval is the part that decides it.' },
   { k: 'p-value', v: 'The odds a result this good came from luck alone.' },
   { k: 'CLV', v: 'Whether the price moved your way after you bet. Positive yield without it is usually luck.' },
+  { k: 'Exchange price', v: 'The same bets at Polymarket and Kalshi, on the games they listed, at what a taker paid there.' },
   { k: 'Equity curve', v: 'The run of it — including the drawdown you would have had to sit through.' },
 ]
 
@@ -288,7 +406,7 @@ export default function LabPage() {
     timers.current.push(setTimeout(() => pushLine('translating to a testable spec…'), 2200))
     timers.current.push(
       setTimeout(
-        () => pushLine('scanning 111,475 games · 22 football leagues + NBA…'),
+        () => pushLine(`scanning ${labCount(LAB_TOTAL_GAMES)} games · 22 football leagues + NBA…`),
         5200,
       ),
     )
@@ -330,8 +448,13 @@ export default function LabPage() {
       pushLine(
         isNbaMarket(data.spec?.market ?? '')
           ? 'dataset   NBA · 10,006 games · 2014-15 → 2021-22 · consensus close'
-          : 'dataset   football · 101,469 matches · 2012-2026 · Pinnacle close',
+          : `dataset   football · ${labCount(LAB_FOOTBALL_MATCHES)} matches · ${LAB_SEASONS_TEXT} · sharp close (Pinnacle, Betfair where it is missing)`,
       )
+      if ((s.nBetfair ?? 0) > 0) {
+        pushLine(
+          `priced    ${labCount(s.nBetfair!)} of ${labCount(s.n)} at the Betfair close, net of 5% commission — no Pinnacle price for those games`,
+        )
+      }
       pushLine(
         `backtest   n=${s.n.toLocaleString('en-US')} · yield ${s.yieldPct >= 0 ? '+' : ''}${s.yieldPct.toFixed(2)}% · p=${s.pValue != null ? s.pValue.toFixed(3) : 'n/a'}${s.clvPct != null ? ` · CLV ${s.clvPct >= 0 ? '+' : ''}${s.clvPct.toFixed(2)}%` : ''}`,
       )
@@ -341,6 +464,12 @@ export default function LabPage() {
           : data.verdict!.code === 'INSUFFICIENT_SAMPLE' || data.verdict!.code === 'NO_MATCHES'
             ? 'lp-term-warn'
             : 'lp-term-warn'
+      for (const v of data.venues ?? []) {
+        if (!v.paid) continue
+        pushLine(
+          `${v.venue.padEnd(10)} n=${v.paid.n.toLocaleString('en-US')} of ${v.listed.toLocaleString('en-US')} listed · yield ${v.paid.yieldPct >= 0 ? '+' : ''}${v.paid.yieldPct.toFixed(2)}% at the price paid${v.paid.pinYieldPct != null ? ` · Pinnacle same games ${v.paid.pinYieldPct >= 0 ? '+' : ''}${v.paid.pinYieldPct.toFixed(2)}%` : ''}`,
+        )
+      }
       pushLine(`${data.verdict!.code === 'EDGE_FOUND' ? '✓' : '✗'} ${data.verdict!.label}`, cls)
       setResult(data)
       setPhase('done')
@@ -441,7 +570,7 @@ export default function LabPage() {
             <h2>{gate === 'signed_out' ? 'This one needs an account' : "That is today's three"}</h2>
             <p>
               {gate === 'signed_out'
-                ? 'Replaying a theory over 111,475 games costs us a model call, so it sits behind a free account. Three a day, no card.'
+                ? `Replaying a theory over ${labCount(LAB_TOTAL_GAMES)} games costs us a model call, so it sits behind a free account. Three a day, no card.`
                 : `Free accounts get three Lab tests a day. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit.`}
             </p>
             <div className="tp-gate-actions">
@@ -628,6 +757,8 @@ export default function LabPage() {
                   </div>
                 )}
 
+                <VenuePanel venues={result!.venues ?? []} oddsFmt={oddsFmt} />
+
                 <EquityCurve monthly={result!.monthly ?? []} />
 
                 {(result!.seasons?.length ?? 0) > 1 && (
@@ -681,7 +812,9 @@ export default function LabPage() {
         )}
 
         <div className="np-note bt-foot">
-          Backtests run against closing odds — Pinnacle for football, consensus for the NBA.
+          Backtests run against closing odds — Pinnacle for football (the Betfair Exchange
+          close, net of commission, where Pinnacle is missing: our source stopped publishing
+          it during 2025-26), consensus for the NBA.
           Flat 1u stakes, minimum 200 selections before any verdict.{' '}
           <strong>A backtest is not an edge.</strong> It is the first filter, and most
           theories that survive it still die out of sample.
