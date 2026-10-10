@@ -36,10 +36,17 @@ import { OddsToggle } from './OddsToggle'
 import { SportBar } from './SportBar'
 import { GameCard } from './GameCard'
 import { VenueLogo } from './VenueLogo'
-import { LiveState, money, odds } from './boardParts'
+import { LiveState, money, Shown } from './boardParts'
 import { IconAll, IconClock, IconDrop, IconInsights, IconLive, IconStar, IconVenues } from './icons'
 import { formatName, useMounted, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
-import { columnsFor, hasPrice, volumeByVenue, type BoardColumn, type BoardRow } from '../lib/boardRow'
+import {
+  columnsFor,
+  hasPrice,
+  shownPrice,
+  volumeByVenue,
+  type BoardColumn,
+  type BoardRow,
+} from '../lib/boardRow'
 import { VENUE_NAME, type Venue } from '../lib/venues'
 import { useSession } from '../lib/useSession'
 import { useWatchlist } from '../lib/useWatchlist'
@@ -49,14 +56,13 @@ import { localDate, shiftDay, todayLocal } from '../lib/localDay'
 // ── one price, across both exchanges ─────────────────────────────────────────
 
 function PriceCell({ row, col, f }: { row: BoardRow; col: BoardColumn; f: OddsFormat }) {
-  const pick = row.best[col.key]
-  const cls = `sc-c-odd np-num${col.divider ? ' sc-c-o25' : ''}`
-  if (!pick || pick.ask == null) {
-    return <td className={`${cls} is-empty`}>—</td>
-  }
+  const s = shownPrice(row, col.key)
+  const cls = `sc-c-odd np-num${col.divider ? ' sc-c-o25' : ''}${s.kind === 'closed' ? ' is-empty' : ''}`
   return (
     <td className={cls}>
-      <span className="sc-odd">{odds(pick.ask, f)}</span>
+      <span className="sc-odd">
+        <Shown s={s} f={f} />
+      </span>
     </td>
   )
 }
@@ -208,22 +214,24 @@ function FixtureCell({
  *  US game on the mixed home board shows its two sides by name rather than
  *  the soccer columns it sits under. */
 function MobileOdds({ r, f }: { r: BoardRow; f: OddsFormat }) {
-  const cols = columnsFor(r).filter((c) => {
-    const a = r.best[c.key]?.ask
-    return a != null && a > 0.01 && a < 0.99
-  })
+  // A phone line carries prices only: a row of locks under every finished
+  // game is clutter where there is no column to keep in step with.
+  const cols = columnsFor(r)
+    .map((c) => ({ c, s: shownPrice(r, c.key) }))
+    .filter(({ s }) => s.kind === 'price')
   if (!cols.length) return null
   return (
     <span className="sc-modds">
-      {cols.map((c) => {
-        const pick = r.best[c.key]
+      {cols.map(({ c, s }) => {
         const label =
           r.sport === 'soccer' ? c.label : c.key === 'away' ? r.left : c.key === 'home' ? r.right : c.label
         return (
           <span key={c.key} className="sc-modd">
             <em>{label}</em>
             <span className="sc-modd-p">
-              <b className="np-num">{odds(pick?.ask ?? null, f)}</b>
+              <b className="np-num">
+                <Shown s={s} f={f} />
+              </b>
             </span>
           </span>
         )
@@ -275,16 +283,18 @@ export function topSaving(r: BoardRow): number {
 }
 
 function sortRows(rows: BoardRow[], key: SortKey): BoardRow[] {
-  if (key === 'default') return rows
+  if (key === 'default') return rows // rankRows already puts finished games last
   const out = rows.slice()
   switch (key) {
     case 'saving':
-      return out.sort((a, b) => topSaving(b) - topSaving(a))
+      out.sort((a, b) => topSaving(b) - topSaving(a))
+      break
     case 'kickoff':
-      return out.sort(
-        (a, b) => new Date(a.kickoff ?? 0).getTime() - new Date(b.kickoff ?? 0).getTime()
-      )
+      out.sort((a, b) => new Date(a.kickoff ?? 0).getTime() - new Date(b.kickoff ?? 0).getTime())
+      break
   }
+  // Whatever the sort, a finished game has no price left: it goes to the end.
+  return [...out.filter((r) => !r.finished), ...out.filter((r) => r.finished)]
 }
 
 /** "Starting soon" is the next two hours. */
