@@ -1,0 +1,725 @@
+{
+  "wallet": "0x54a2c4cfc4332d831acc3f5a860d6540982c1d43",
+  "name": "Oliveira39",
+  "pseudonym": "Vigorous-Idiom",
+  "profile_image": "",
+  "generated_at": "2026-10-09T18:47:02+00:00",
+  "coverage": {
+    "rows": 7559,
+    "complete": true,
+    "first_ts": 1768663546,
+    "last_ts": 1791334229,
+    "days_span": 262,
+    "days_active": 213,
+    "markets": 2034,
+    "events": 1235,
+    "tokens": 2161,
+    "metadata_missing": 0,
+    "unhandled": {},
+    "unmatched_lots": 0,
+    "unmatched_proceeds": 0
+  },
+  "totals": {
+    "fills": 6660,
+    "buys": 5456,
+    "sells": 1204,
+    "redeems": 792,
+    "deployed": 184998.45997399997,
+    "sell_proceeds": 142140.15312900065,
+    "redeem_proceeds": 141064.82234899985,
+    "open_value": 11.852600000003733,
+    "pnl": 98218.36810400082,
+    "pnl_high": 98218.36810400082,
+    "yield_pct": 53.09145174387106,
+    "yield_high_pct": 53.09145174387106,
+    "realized_pnl": 138839.4691401874,
+    "marked_pnl": -40621.101036187014,
+    "rebates": 749.8280999999997,
+    "rewards": 2387.6516,
+    "fees": 1033.580199746352,
+    "median_ticket": 1.7758135,
+    "p90_ticket": 53.8475,
+    "max_ticket": 9318.04,
+    "buy_vwap": 0.14641944343467156,
+    "sell_vwap": 0.2972165844202521,
+    "fills_per_active_day": 31.267605633802816,
+    "current_value": 0.0
+  },
+  "reconciliation": {
+    "lb_profit": 98114.467531,
+    "basis": "gross of fees, rebates excluded",
+    "reconstructed": 99251.94830374718,
+    "reconstructed_high": 99251.94830374718,
+    "tolerance": 981.14467531,
+    "inside_bracket": false
+  },
+  "exposure": {
+    "peak_cost_basis": 48667.18296540057,
+    "median_cost_basis": 24334.487938827962,
+    "cash_floor": -1047.1816589999828,
+    "final_cash": 98206.51550400043,
+    "turnover": 3.801297891137909
+  },
+  "hold": {
+    "median_min": 22.966666666666665,
+    "p90_min": 68924.56666666667,
+    "under_10min_pct": 39.0546528803545,
+    "over_1day_pct": 37.6957163958641
+  },
+  "exits": {
+    "sell_pct": 29.497274379164143,
+    "redeem_pct": 21.7595396729255,
+    "merge_pct": 0.0,
+    "resolved_pct": 48.743185947910355,
+    "open_pct": 0.0,
+    "expired_worthless_pnl": -40629.604827917356
+  },
+  "timing": {
+    "prematch": {
+      "lots": 58,
+      "cost": 3079.7406379999998,
+      "pnl": -325.90164199999987,
+      "return_pct": -10.58211324612199,
+      "share_of_cost": 1.6647385272465687
+    },
+    "in_match": {
+      "lots": 4940,
+      "cost": 143117.9288020003,
+      "pnl": 86139.39851700007,
+      "return_pct": 60.18770620707594,
+      "share_of_cost": 77.36168659031776
+    },
+    "whistle": {
+      "lots": 989,
+      "cost": 24339.452619999982,
+      "pnl": 4904.770372920012,
+      "return_pct": 20.15152291834908,
+      "share_of_cost": 13.156570397083682
+    },
+    "settle": {
+      "lots": 617,
+      "cost": 14461.337914000022,
+      "pnl": 7500.100856079997,
+      "return_pct": 51.863118756246955,
+      "share_of_cost": 7.8170044853521725
+    },
+    "unknown": {
+      "lots": 0,
+      "cost": 0,
+      "pnl": 0,
+      "return_pct": 0.0,
+      "share_of_cost": 0.0
+    }
+  },
+  "entry_bands": [
+    {
+      "label": "0.00\u20130.05",
+      "lo": 0.0,
+      "hi": 0.05,
+      "lots": 1757,
+      "cost": 12789.993428999987,
+      "pnl": 21472.603548742947,
+      "return_pct": 167.8859623184484,
+      "share_of_pnl": 21.862105798791298
+    },
+    {
+      "label": "0.05\u20130.10",
+      "lo": 0.05,
+      "hi": 0.1,
+      "lots": 1400,
+      "cost": 15245.472347000017,
+      "pnl": 8390.586657818174,
+      "return_pct": 55.03658048003519,
+      "share_of_pnl": 8.542787688076434
+    },
+    {
+      "label": "0.10\u20130.20",
+      "lo": 0.1,
+      "hi": 0.2,
+      "lots": 1643,
+      "cost": 32871.301016,
+      "pnl": 28716.970973962347,
+      "return_pct": 87.36183262105888,
+      "share_of_pnl": 29.2378824127425
+    },
+    {
+      "label": "0.20\u20130.40",
+      "lo": 0.2,
+      "hi": 0.4,
+      "lots": 989,
+      "cost": 43556.07049600002,
+      "pnl": 14133.45093728299,
+      "return_pct": 32.44886597054465,
+      "share_of_pnl": 14.389824642899233
+    },
+    {
+      "label": "0.40\u20130.60",
+      "lo": 0.4,
+      "hi": 0.6,
+      "lots": 594,
+      "cost": 41225.82819999998,
+      "pnl": 14311.780826193475,
+      "return_pct": 34.71556897962691,
+      "share_of_pnl": 14.5713893464806
+    },
+    {
+      "label": "0.60\u20130.80",
+      "lo": 0.6,
+      "hi": 0.8,
+      "lots": 200,
+      "cost": 34854.35702900001,
+      "pnl": 10121.969460999999,
+      "return_pct": 29.040757953383487,
+      "share_of_pnl": 10.305576906228083
+    },
+    {
+      "label": "0.80\u20130.90",
+      "lo": 0.8,
+      "hi": 0.9,
+      "lots": 21,
+      "cost": 4455.437457000001,
+      "pnl": 1071.005699,
+      "return_pct": 24.038171545138127,
+      "share_of_pnl": 1.0904332047809433
+    },
+    {
+      "label": "0.90\u20130.95",
+      "lo": 0.9,
+      "hi": 0.95,
+      "lots": 0,
+      "cost": 0,
+      "pnl": 0,
+      "return_pct": 0.0,
+      "share_of_pnl": 0.0
+    },
+    {
+      "label": "0.95\u20131.01",
+      "lo": 0.95,
+      "hi": 1.01,
+      "lots": 0,
+      "cost": 0,
+      "pnl": 0,
+      "return_pct": 0.0,
+      "share_of_pnl": 0.0
+    }
+  ],
+  "moves": [
+    {
+      "label": "loss < -0.05",
+      "lots": 194,
+      "cost": 8055.0971578834915,
+      "pnl": -2403.4076743661326
+    },
+    {
+      "label": "flat -0.05..+0.02",
+      "lots": 548,
+      "cost": 26176.993184363746,
+      "pnl": -1885.1164926795848
+    },
+    {
+      "label": "+0.02..+0.10",
+      "lots": 162,
+      "cost": 12329.820826169027,
+      "pnl": 3261.5474501316035
+    },
+    {
+      "label": "+0.10..+0.30",
+      "lots": 536,
+      "cost": 39387.91251657587,
+      "pnl": 29705.796431783176
+    },
+    {
+      "label": "> +0.30",
+      "lots": 1306,
+      "cost": 35570.8134092492,
+      "pnl": 79052.95265088957
+    }
+  ],
+  "months": [
+    {
+      "partial": false,
+      "month": "2026-01",
+      "deployed": 7355.656357000002,
+      "pnl": 9699.246162999982,
+      "yield_pct": 131.86105620295467,
+      "lots": 477,
+      "events": 93,
+      "prematch_share": 0.36557112914077367,
+      "mean_entry": 0.17724481026039163,
+      "median_hold_min": 12.566666666666666
+    },
+    {
+      "partial": false,
+      "month": "2026-02",
+      "deployed": 21104.57087400002,
+      "pnl": 4234.958945000047,
+      "yield_pct": 20.066548475606986,
+      "lots": 1239,
+      "events": 243,
+      "prematch_share": 0.18577523435125384,
+      "mean_entry": 0.1650398137240935,
+      "median_hold_min": 50.2
+    },
+    {
+      "partial": false,
+      "month": "2026-03",
+      "deployed": 21164.35886400001,
+      "pnl": 12066.534894999953,
+      "yield_pct": 57.01346765351251,
+      "lots": 1256,
+      "events": 219,
+      "prematch_share": 0.5907802064946123,
+      "mean_entry": 0.3083332489290055,
+      "median_hold_min": 6823.483333333334
+    },
+    {
+      "partial": false,
+      "month": "2026-04",
+      "deployed": 28955.997120999968,
+      "pnl": 17044.532875000034,
+      "yield_pct": 58.863567376993224,
+      "lots": 1335,
+      "events": 227,
+      "prematch_share": 0.016404201106081488,
+      "mean_entry": 0.4211636401975482,
+      "median_hold_min": 65.6
+    },
+    {
+      "partial": false,
+      "month": "2026-05",
+      "deployed": 20769.258366999944,
+      "pnl": 6964.113750000002,
+      "yield_pct": 33.530873500351895,
+      "lots": 999,
+      "events": 223,
+      "prematch_share": 0.0,
+      "mean_entry": 0.25540697744770946,
+      "median_hold_min": 19.166666666666668
+    },
+    {
+      "partial": false,
+      "month": "2026-06",
+      "deployed": 10693.448672999995,
+      "pnl": 1158.727879,
+      "yield_pct": 10.835867028806941,
+      "lots": 625,
+      "events": 96,
+      "prematch_share": 0.0,
+      "mean_entry": 0.32088923306690365,
+      "median_hold_min": 22755.533333333333
+    },
+    {
+      "partial": false,
+      "month": "2026-07",
+      "deployed": 24059.939243999972,
+      "pnl": 29306.00952499997,
+      "yield_pct": 121.80417094074024,
+      "lots": 282,
+      "events": 30,
+      "prematch_share": 0.0,
+      "mean_entry": 0.4419299086947795,
+      "median_hold_min": 4.058333333333334
+    },
+    {
+      "partial": false,
+      "month": "2026-08",
+      "deployed": 12364.308469000001,
+      "pnl": 9755.511890000007,
+      "yield_pct": 78.90058642955397,
+      "lots": 147,
+      "events": 59,
+      "prematch_share": 0.0,
+      "mean_entry": 0.40472431855993457,
+      "median_hold_min": 126.53333333333333
+    },
+    {
+      "partial": false,
+      "month": "2026-09",
+      "deployed": 33006.100443,
+      "pnl": 9350.870774000005,
+      "yield_pct": 28.33073476870896,
+      "lots": 157,
+      "events": 36,
+      "prematch_share": 0.0,
+      "mean_entry": 0.5808893081933292,
+      "median_hold_min": 5.4
+    },
+    {
+      "partial": true,
+      "month": "2026-10",
+      "deployed": 5524.821562000001,
+      "pnl": -1362.1385919999996,
+      "yield_pct": -24.65488842877491,
+      "lots": 87,
+      "events": 9,
+      "prematch_share": 52.1982210762303,
+      "mean_entry": 0.24374593436010247,
+      "median_hold_min": 5.175000000000001
+    }
+  ],
+  "days": {
+    "n": 189,
+    "winning": 94,
+    "losing": 95,
+    "best": 19774.586526200088,
+    "worst": -6738.878408000003,
+    "worst_losing_streak": 7
+  },
+  "universe": [
+    {
+      "label": "NBA",
+      "lots": 1820,
+      "cost": 25922.953078999948,
+      "pnl": 19439.72592000006,
+      "return_pct": 74.99039889767838,
+      "share_of_pnl": 19.792352790280546
+    },
+    {
+      "label": "MLS",
+      "lots": 610,
+      "cost": 22218.651525999965,
+      "pnl": 26849.68039700001,
+      "return_pct": 120.84297899708665,
+      "share_of_pnl": 27.336720122014064
+    },
+    {
+      "label": "FIFA World Cup",
+      "lots": 247,
+      "cost": 18169.33198399996,
+      "pnl": 18897.875910999966,
+      "return_pct": 104.00974525448468,
+      "share_of_pnl": 19.240673894102645
+    },
+    {
+      "label": "UEFA Nations League",
+      "lots": 83,
+      "cost": 15421.494017999989,
+      "pnl": 2034.711240000003,
+      "return_pct": 13.193995585804368,
+      "share_of_pnl": 2.0716198805558634
+    },
+    {
+      "label": "Serie A",
+      "lots": 98,
+      "cost": 10490.237207999993,
+      "pnl": 2584.519866999995,
+      "return_pct": 24.63738250865296,
+      "share_of_pnl": 2.631401760069295
+    },
+    {
+      "label": "Europa League",
+      "lots": 129,
+      "cost": 8706.418981,
+      "pnl": 632.9184569999995,
+      "return_pct": 7.269561209737507,
+      "share_of_pnl": 0.6443992801120706
+    },
+    {
+      "label": "DFB-Pokal",
+      "lots": 89,
+      "cost": 8089.972982,
+      "pnl": 5618.930048999993,
+      "return_pct": 69.4554859639455,
+      "share_of_pnl": 5.720854619627059
+    },
+    {
+      "label": "College Basketball",
+      "lots": 279,
+      "cost": 7810.277327000002,
+      "pnl": -5544.069790000002,
+      "return_pct": -70.98428849426695,
+      "share_of_pnl": -5.644636433105447
+    },
+    {
+      "label": "Premier League",
+      "lots": 205,
+      "cost": 6568.8088199999975,
+      "pnl": 1500.0279609999977,
+      "return_pct": 22.83561604705065,
+      "share_of_pnl": 1.5272377152628627
+    },
+    {
+      "label": "Conference League",
+      "lots": 174,
+      "cost": 6076.412323999999,
+      "pnl": 1317.2998160000009,
+      "return_pct": 21.678907647479143,
+      "share_of_pnl": 1.3411949734342543
+    },
+    {
+      "label": "MLB",
+      "lots": 518,
+      "cost": 5278.509274999998,
+      "pnl": 348.51740200000194,
+      "return_pct": 6.602572503768162,
+      "share_of_pnl": 0.3548393327315
+    },
+    {
+      "label": "LaLiga",
+      "lots": 194,
+      "cost": 5154.090674999996,
+      "pnl": 1732.8741329999984,
+      "return_pct": 33.62133579460163,
+      "share_of_pnl": 1.7643075999441558
+    },
+    {
+      "label": "Bundesliga",
+      "lots": 156,
+      "cost": 4812.744475999999,
+      "pnl": 2055.616002,
+      "return_pct": 42.711928967990374,
+      "share_of_pnl": 2.0929038444452472
+    },
+    {
+      "label": "Saudi Pro League",
+      "lots": 241,
+      "cost": 3510.6548420000063,
+      "pnl": 1241.5184889999941,
+      "return_pct": 35.36429939357712,
+      "share_of_pnl": 1.2640390112014421
+    },
+    {
+      "label": "NHL",
+      "lots": 87,
+      "cost": 3352.8624840000016,
+      "pnl": 649.7440140000002,
+      "return_pct": 19.37878505607091,
+      "share_of_pnl": 0.6615300442703437
+    },
+    {
+      "label": "Ligue 1",
+      "lots": 138,
+      "cost": 3302.0278869999975,
+      "pnl": 4610.576353999997,
+      "return_pct": 139.62863161003946,
+      "share_of_pnl": 4.694209894750052
+    }
+  ],
+  "market_types": [
+    {
+      "label": "moneyline",
+      "lots": 1941,
+      "cost": 68325.781632,
+      "pnl": 26139.546055999934,
+      "return_pct": 38.25722213729879,
+      "share_of_pnl": 26.613704300525242
+    },
+    {
+      "label": "spreads",
+      "lots": 1270,
+      "cost": 59605.19834300003,
+      "pnl": 32886.65790899996,
+      "return_pct": 55.17414390562485,
+      "share_of_pnl": 33.48320537577804
+    },
+    {
+      "label": "totals",
+      "lots": 3148,
+      "cost": 56002.82611899996,
+      "pnl": 37447.411766,
+      "return_pct": 66.86700361590376,
+      "share_of_pnl": 38.12668901844132
+    },
+    {
+      "label": "both_teams_to_score",
+      "lots": 210,
+      "cost": 702.9184430000005,
+      "pnl": 2106.4878100000024,
+      "return_pct": 299.6774136427092,
+      "share_of_pnl": 2.1446984415069066
+    },
+    {
+      "label": "baseball_team_first_five_total",
+      "lots": 35,
+      "cost": 361.73543700000005,
+      "pnl": -361.73543700000005,
+      "return_pct": -99.99999999999999,
+      "share_of_pnl": -0.36829713625151195
+    }
+  ],
+  "concentration": {
+    "top1_pct": 8.069840242720485,
+    "top5_pct": 33.90243887756431,
+    "top10_pct": 51.72814324933835,
+    "profitable_events_pct": 49.878542510121456,
+    "drop_top200_pnl": -8139.662989857126,
+    "drop_top200_yield_pct": -4.399854458789057
+  },
+  "sweeps": {
+    "lots": 1200,
+    "events": 392,
+    "cost": 9426.915114085596,
+    "pnl": 64783.965131564364,
+    "return_pct": 687.2233848246375,
+    "share_of_pnl": 65.95911374027956,
+    "share_of_cost": 5.095672210141896,
+    "median_ticket": 0.6887924999999999,
+    "median_hold_min": 9389.933333333334,
+    "examples": [
+      {
+        "title": "TSV Fortuna 95 D\u00fcsseldorf vs. SC Freiburg: O/U 5.5",
+        "outcome": "Over",
+        "shares": 6410.0,
+        "entry": 0.14500000000000002,
+        "exit": 1.0,
+        "pnl": 5480.55,
+        "hold_min": 129.43333333333334,
+        "kind": "redeem"
+      },
+      {
+        "title": "Spread: Pistons (-7.5)",
+        "outcome": "Pistons",
+        "shares": 4287.0,
+        "entry": 0.02,
+        "exit": 1.0,
+        "pnl": 4201.26,
+        "hold_min": 306.9,
+        "kind": "redeem"
+      },
+      {
+        "title": "FC Metz vs. AJ Auxerre: O/U 3.5",
+        "outcome": "Over",
+        "shares": 2999.0,
+        "entry": 0.01,
+        "exit": 1.0,
+        "pnl": 2969.01,
+        "hold_min": 67452.26666666666,
+        "kind": "redeem"
+      },
+      {
+        "title": "Knicks vs. Raptors: O/U 225.5",
+        "outcome": "Under",
+        "shares": 2840.0,
+        "entry": 0.07,
+        "exit": 1.0,
+        "pnl": 2641.2,
+        "hold_min": 20975.383333333335,
+        "kind": "redeem"
+      },
+      {
+        "title": "76ers vs. Pacers: O/U 235.5",
+        "outcome": "Under",
+        "shares": 1750.0,
+        "entry": 0.11,
+        "exit": 1.0,
+        "pnl": 1557.5,
+        "hold_min": 110570.53333333334,
+        "kind": "redeem"
+      },
+      {
+        "title": "FK Bod\u00f8/Glimt vs. Sandefjord Fotball: O/U 4.5",
+        "outcome": "Over",
+        "shares": 1493.99,
+        "entry": 0.08,
+        "exit": 1.0,
+        "pnl": 1374.4708,
+        "hold_min": 165.81666666666666,
+        "kind": "redeem"
+      }
+    ]
+  },
+  "bootstrap": {
+    "events": 1235,
+    "yield_pct": 53.09145174387062,
+    "ci_lo": 32.654282398978225,
+    "ci_hi": 74.94634805818451,
+    "p_le_zero": 0.0
+  },
+  "sport": {
+    "football_pct": 76.53245407442789,
+    "unknown_pct": 0.0
+  },
+  "trust": "unreconciled",
+  "archetypes": [
+    {
+      "key": "sweeper",
+      "label": "Stale-order sweeper",
+      "confidence": "high",
+      "evidence": [
+        "1,200 lots entered at \u22640.15 and exited at \u22653\u00d7 carry 66% of all profit on 5.1% of the capital",
+        "median sweep ticket $0.69, median hold 6.5 days, across 392 events"
+      ]
+    },
+    {
+      "key": "inplay_scalper",
+      "label": "In-play short-horizon trader",
+      "confidence": "high",
+      "evidence": [
+        "98.3% of capital goes in after kick-off, 1.7% before",
+        "median hold 23.0 min, 39% of round trips close inside 10 minutes"
+      ]
+    },
+    {
+      "key": "post_whistle",
+      "label": "Post-whistle settlement buyer",
+      "confidence": "medium",
+      "evidence": [
+        "21.0% of capital is deployed after minute 110 \u2014 when the result is already public",
+        "that capital returns +20.2% (whistle) / +51.9% (post-settlement)"
+      ]
+    },
+    {
+      "key": "systematic",
+      "label": "Systematic / automated",
+      "confidence": "high",
+      "evidence": [
+        "6,660 fills across 1,235 events, 31 fills per active day",
+        "median ticket $1.78 \u2014 size is uniform, which is what a script looks like"
+      ]
+    }
+  ],
+  "narrative": {
+    "headline": "\u26a0\ufe0f THIS RECONSTRUCTION DOES NOT RECONCILE with Polymarket's own profit figure for the wallet, so the numbers below are wrong by an unknown amount \u2014 most likely it exits through an activity type the feed does not publish, such as a merge. Read the shape, not the totals. Oliveira39 deployed $184,998 across 1,235 events in 262 days and finished $98,218 \u2014 a yield of +53.09% on money at risk. 98% of that capital went in after kick-off, the median position was held 23.0 min, and the median ticket was $1.78.",
+    "sections": [
+      {
+        "title": "What it does",
+        "paragraphs": [
+          "**Archetype: Stale-order sweeper, In-play short-horizon trader, Post-whistle settlement buyer, Systematic / automated.**",
+          "\u2014 *Stale-order sweeper* (high confidence): 1,200 lots entered at \u22640.15 and exited at \u22653\u00d7 carry 66% of all profit on 5.1% of the capital; median sweep ticket $0.69, median hold 6.5 days, across 392 events.",
+          "\u2014 *In-play short-horizon trader* (high confidence): 98.3% of capital goes in after kick-off, 1.7% before; median hold 23.0 min, 39% of round trips close inside 10 minutes.",
+          "\u2014 *Post-whistle settlement buyer* (medium confidence): 21.0% of capital is deployed after minute 110 \u2014 when the result is already public; that capital returns +20.2% (whistle) / +51.9% (post-settlement).",
+          "\u2014 *Systematic / automated* (high confidence): 6,660 fills across 1,235 events, 31 fills per active day; median ticket $1.78 \u2014 size is uniform, which is what a script looks like.",
+          "It trades 2,034 markets over 1,235 fixtures \u2014 6,660 fills, 31 per active day over 213 days with activity. It buys at an average of 0.146 and sells at 0.297.",
+          "Where it plays: NBA (14% of capital, +75%), MLS (12% of capital, +121%), FIFA World Cup (10% of capital, +104%), UEFA Nations League (8% of capital, +13%).",
+          "Market types: moneyline 37%, spreads 32%, totals 30%, both_teams_to_score 0%."
+        ]
+      },
+      {
+        "title": "Where the money comes from",
+        "paragraphs": [
+          "**The money is made in play**: $143,118 deployed there returned $86,139 (+60.2%), which is 88% of all profit on 77% of the capital.",
+          "Return falls with the entry price: +168% in the 0.00\u20130.05 band against +24% in 0.80\u20130.90. That is a wallet paid for taking prices nobody else wanted, not for being right more often.",
+          "In-play, the modal trade goes nowhere: the flat -0.05..+0.02 bucket is 548 lots and $26,177 of capital for -$1,885. The > +0.30 bucket is 1,306 lots and $79,053. The tail pays for the bleed \u2014 any copy of this has to be sized for that, because most positions lose the spread.",
+          "Exits: 29% sold back into the book, 22% redeemed at settlement, 49% simply left to resolve (-$40,630 of that expired worthless)."
+        ]
+      },
+      {
+        "title": "How it evolved",
+        "paragraphs": [
+          "Across 9 complete months the book grew from $7,356 to $33,006 of monthly turnover, and the yield is **flat** \u2014 +54.8% over the first 4 month(s) against +56.0% over the last 5. Yield roughly constant across the life of the wallet.",
+          "2026-10 is still in progress ($5,525 deployed, -24.7%) and is excluded from the trend.",
+          "**Regime change in 2026-09**: the average entry price moved 0.40 \u2192 0.58. It started buying a different kind of position; the earlier record does not describe the current one.",
+          "Best month 2026-01 ($9,699, +131.9%), worst 2026-06 ($1,159, +10.8%).",
+          "Day to day it wins 94 of 189 sessions \u2014 best $19,775, worst -$6,739, longest losing streak 7 days. Peak open book $48,667; the cumulative cash floor is -$1,047, so it never needed much more than its first stake \u2014 it funded itself out of its own winnings."
+        ]
+      },
+      {
+        "title": "Is the edge real?",
+        "paragraphs": [
+          "Bootstrapped over 1,235 events (resampled by event, not by lot, because lots inside one fixture are the same bet taken repeatedly): yield +53.09%, 95% CI [+32.65%, +74.95%], p(\u22640) = 0.0000. The interval clears zero \u2014 the edge in this wallet's own record is real.",
+          "Concentration: top event 8% of profit, top 5 34%, top 10 52%; 50% of events profitable. Drop the 200 best individual lots and the rest of the book LOSES $8,140 (-4.40%) \u2014 the entire result is those 200 trades. The result does not depend on a handful of bets.",
+          "Reconciliation: Polymarket says $98,114 all-time, counted before fees; on the same basis (P&L plus $1,034 of fees paid) we reconstruct $99,252 \u2014 a gap of -$1,137 (1.2%). **That gap is large enough to matter \u2014 read the numbers as approximate.**"
+        ]
+      },
+      {
+        "title": "What is not established",
+        "paragraphs": [
+          "\u26a0\ufe0f -$40,621 of the P&L is unsold positions marked at settlement or at last trade \u2014 a mark, not money.",
+          "\u26a0\ufe0f Selection bias on the wallet itself. You are reading it because someone pointed at it. The statistics describe the edge in its own record; they cannot tell you how many identically-shaped wallets blew up unseen.",
+          "\u26a0\ufe0f `lb-api` 'volume' is SHARES, not dollars, and its windowed figures do not reconcile. Only `window=all` is used here.",
+          "\u26a0\ufe0f Capacity: the median ticket is $1.78 and the largest is $9,318. This strategy is bounded by what other people leave resting on the book \u2014 it does not scale by adding money."
+        ]
+      }
+    ]
+  }
+}
