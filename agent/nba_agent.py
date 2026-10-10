@@ -781,7 +781,8 @@ def write_candidates(conn, game: Game, sh: Sharp | None, cands: list[Cand], now:
                      round(sh.anchor.T, 2) if sh and sh.anchor.T is not None else None,
                      round(sh.anchor.ml_resid_pp, 2) if sh else None,
                      round(taker_fee_pp(c.ask), 3), round(c.ev, 3),
-                     sh.snapshot_at if sh else None, c is chosen, trade_id if c is chosen else None))
+                     sh.snapshot_at if sh else None, c is chosen, trade_id if c is chosen else None,
+                     round(c.fair_raw, 5), c.depth_usd))
     if not rows:
         return
     with conn.cursor() as cur:
@@ -789,7 +790,8 @@ def write_candidates(conn, game: Game, sh: Sharp | None, cands: list[Cand], now:
             INSERT INTO nba_candidates (obs_version, game_slug, kickoff, minutes_to_ko, home_team,
                 away_team, market_type, line, side, condition_id, token_id, pm_bid, pm_ask,
                 pm_liquidity, fair, fair_source, fair_book, anchor_mu, anchor_total,
-                anchor_disagree, fee_pp, ev_pct, odds_snapshot_at, chosen, paper_trade_id)
+                anchor_disagree, fee_pp, ev_pct, odds_snapshot_at, chosen, paper_trade_id,
+                fair_raw, ask_depth_usd)
             VALUES %s""", rows)
 
 
@@ -923,7 +925,8 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
                 hit = [c for c in candidates(g, sh) if c.token_id == b["pm_token_id"]]
                 if hit and hit[0].source != "pm_mid":
                     c = hit[0]
-                    closes.append((b["id"], c.fair_raw, 0.5 * (c.bid + c.ask), sh.book, float(b["entry_price"])))
+                    closes.append((b["id"], c.fair_raw, 0.5 * (c.bid + c.ask), sh.book,
+                                   float(b["entry_price"]), c.bid, c.ask))
             continue
         if req is None:
             continue
@@ -978,13 +981,14 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             write_candidates(conn, g, sh, cands, now, chosen, tid)
         elif chosen:
             write_candidates(conn, g, sh, [chosen], now, chosen, tid)
-    for tid, fair, mid, book, entry in closes:
+    for tid, fair, mid, book, entry, cbid, cask in closes:
         with conn.cursor() as cur:
             cur.execute("""UPDATE paper_trades SET closing_price = %s, clv = %s, clv_source = %s,
-                                  pm_closing_price = %s, pm_closing_at = now(), pm_clv = %s
+                                  pm_closing_price = %s, pm_closing_at = now(), pm_clv = %s,
+                                  pm_closing_bid = %s, pm_closing_ask = %s
                             WHERE id = %s AND closing_price IS NULL""",
                         (round(fair, 5), round(fair / entry - 1, 5), f"{book}_close_nba",
-                         round(mid, 4), round(mid / entry - 1, 5), tid))
+                         round(mid, 4), round(mid / entry - 1, 5), cbid, cask, tid))
         log.info(f"  close pt#{tid}: sharp fair {fair:.3f} vs entry {entry:.3f} · "
                  f"PM mid {mid:.3f} → pm_clv {mid / entry - 1:+.2%}")
     log.info(f"placed {placed} · closes {len(closes)}")
