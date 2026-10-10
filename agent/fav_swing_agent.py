@@ -16,10 +16,15 @@ THE RULE (the user's, 2026-09-29)
     Entry is allowed from the first poll that carries stats: the agent goes in
     the moment the favourite is pressing, not at a fixed minute.
   * Buy "Will <team> win?" Yes at the CLOB ask, 1u, paper. Once per fixture.
-  * ANY goal starts a STABILISE_S clock. Every further score change restarts
-    it; a score back at the entry score cancels it (a goal that did not stand —
-    the sweep audit saw phantom goals last up to ~4 minutes). When it runs out,
-    sell at the CLOB bid.
+  * ANY goal starts a STABILISE_S clock. Only a score back at the entry score
+    cancels it (a goal that did not stand — the sweep audit saw phantom goals
+    last up to ~4 minutes). A further goal does NOT restart it: 1-0 → 2-0
+    confirms the first goal rather than casting doubt on it. When the clock
+    runs out, sell at the CLOB bid.
+    Until 2026-10-10 every score change restarted the clock. Dortmund v Werder
+    Bremen (pt#6333) led 2-0 and finished 2-2, with goals at 80', 85', 88' and
+    90+2'. Each goal restarted the clock, so it never sold. The 2-0 reached
+    the feed 0.4s before the 1-0 clock ran out.
   * No goal: held to the end and settled by the market's winner.
 
 The P&L is net of Polymarket's taker fee on the way in AND on the way out:
@@ -204,7 +209,10 @@ def entry_book_verdict(book: dict | None) -> str | None:
 
 def step(pos: dict, home_goals: int, away_goals: int, minute: int, now: datetime) -> str:
     """Advance one open position by one poll. Mutates `pos`; returns the action:
-    'hold', 'goal', 'reversed', 'regoal' or 'sell_due'."""
+    'hold', 'goal', 'reversed', 'regoal' or 'sell_due'.
+
+    goal_seen_at / goal_minute are the FIRST goal (the clock's start);
+    goal_home_goals / goal_away_goals are the last score seen while it runs."""
     entry = (pos["entry_home_goals"], pos["entry_away_goals"])
     score = (home_goals, away_goals)
     pos["last_seen_at"], pos["last_minute"] = now, minute
@@ -220,11 +228,11 @@ def step(pos: dict, home_goals: int, away_goals: int, minute: int, now: datetime
                    goal_home_goals=None, goal_away_goals=None,
                    goals_reversed=pos.get("goals_reversed", 0) + 1)
         return "reversed"
+    due = (now - pos["goal_seen_at"]).total_seconds() >= STABILISE_S
     if score != (pos["goal_home_goals"], pos["goal_away_goals"]):
-        pos.update(goal_seen_at=now, goal_minute=minute,
-                   goal_home_goals=home_goals, goal_away_goals=away_goals)
-        return "regoal"
-    return "sell_due" if (now - pos["goal_seen_at"]).total_seconds() >= STABILISE_S else "hold"
+        pos.update(goal_home_goals=home_goals, goal_away_goals=away_goals)    # the clock keeps running
+        return "sell_due" if due else "regoal"
+    return "sell_due" if due else "hold"
 
 
 def exit_book_ok(book: dict | None, waited_s: float) -> bool:
@@ -277,7 +285,7 @@ def enter(conn, sid: int, c: dict) -> int:
         f"{fav['team']} to win at {ask:.3f} ({1 / ask:.2f}). It was "
         f"{1 / fav['ko_price']:.2f} at kick-off, the score is level, and it is pressing: "
         f"{c['fav_pressure']:.0f} vs {c['dog_pressure']:.0f} ({c['source']}). "
-        f"EXIT: sold at the bid {STABILISE_S // 60} minutes after any goal; held to the "
+        f"EXIT: sold at the bid {STABILISE_S // 60} minutes after the first goal; held to the "
         f"end if none. 1u, PAPER."
     )
     with conn.cursor() as cur:
