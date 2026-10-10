@@ -45,7 +45,6 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -53,8 +52,6 @@ from typing import Iterable, Optional
 
 import requests
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "ingest"))
 
 log = logging.getLogger("venue_open")
 
@@ -301,6 +298,13 @@ def sport_board_rows(sport: str, board: dict, now: datetime) -> list[dict]:
 
 # ── the database ─────────────────────────────────────────────────────────────
 
+def _db_url() -> str:
+    """Supavisor's transaction port (6543), not the session port: a short job
+    holds no backend between transactions, and the 15 session slots are the
+    daemons' (EMAXCONNSESSION on 2026-10-03)."""
+    return os.environ["DATABASE_URL"].replace(":5432/", ":6543/")
+
+
 COLS = ("venue", "market_key", "sport", "competition", "event_key", "event_title",
         "home", "away", "family", "line", "outcome", "kickoff", "kickoff_source",
         "listed_at", "first_seen_at", "first_bid", "first_ask",
@@ -360,9 +364,8 @@ def dedupe(rows: list[dict]) -> list[dict]:
 def write(rows: list[dict], now: datetime) -> int:
     import psycopg2.extras
     import db_txn
-    from db_pool import ingest_url
 
-    conn = db_txn.connect(ingest_url())
+    conn = db_txn.connect(_db_url())
     try:
         with conn.cursor() as cur:
             psycopg2.extras.execute_values(cur, UPSERT, [to_record(r, now) for r in rows],
@@ -425,8 +428,7 @@ SELECT venue, sport,
 
 def report() -> None:
     import db_txn
-    from db_pool import ingest_url
-    conn = db_txn.connect(ingest_url())
+    conn = db_txn.connect(_db_url())
     try:
         with conn.cursor() as cur:
             cur.execute(REPORT)
