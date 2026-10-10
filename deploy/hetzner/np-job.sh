@@ -74,6 +74,9 @@ case "$job" in
     exec python lab_strategy_runner.py --once >> lab_runner.log 2>&1 ;;
   lab-settle)
     exec python lab_strategy_runner.py --settle >> lab_runner.log 2>&1 ;;
+  venue-open)
+    # where each market opened on the venue, and its last quote before kick-off
+    exec python venue_open_recorder.py --once >> venue_open_recorder.log 2>&1 ;;
 
   # ── by hand: any agent script with the server's env and venv ────────────────
   py)
