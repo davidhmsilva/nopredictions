@@ -1,0 +1,12 @@
+# close_maker_agent.py --settle — :25 and :55
+[Unit]
+Description=NOPREDICTIONS timer close-maker-settle
+
+[Timer]
+OnCalendar=*:25,55
+Persistent=true
+AccuracySec=1s
+Unit=np-job@close-maker-settle.service
+
+[Install]
+WantedBy=timers.target

@@ -30,6 +30,8 @@ dos passos abaixo existe por causa disto.
 | `np-soccer-live-settle.timer` | `soccer_live_recorder.py --settle`, :10 e :40 | */30 |
 | `np-lab-runner.timer` | `lab_strategy_runner.py --once`, 5 em 5 min | */5 |
 | `np-lab-settle.timer` | `lab_strategy_runner.py --settle`, :20 e :50 | cron_guard --gap 25 |
+| `np-close-maker.timer` | `close_maker_agent.py --once` (Close Forecast), 5 em 5 min | novo 2026-10-10 |
+| `np-close-maker-settle.timer` | `close_maker_agent.py --settle`, :25 e :55 | novo 2026-10-10 |
 
 Todos os comandos, flags, `AF_COUNTER_NAME` e ficheiros de log vivem num só sítio:
 [`np-job.sh`](np-job.sh). Os timers só dizem *quando*.

@@ -77,6 +77,11 @@ case "$job" in
   venue-open)
     # where each market opened on the venue, and its last quote before kick-off
     exec python venue_open_recorder.py --once >> venue_open_recorder.log 2>&1 ;;
+  close-maker)
+    # Close Forecast: paper maker bids where close_model expects the price to shorten (db/073)
+    exec python close_maker_agent.py --once >> close_maker_agent.log 2>&1 ;;
+  close-maker-settle)
+    exec python close_maker_agent.py --settle >> close_maker_agent.log 2>&1 ;;
 
   # ── by hand: any agent script with the server's env and venv ────────────────
   py)
