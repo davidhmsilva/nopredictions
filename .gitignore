@@ -100,3 +100,6 @@ agent/.soccer_live_settle.lock
 # nfl_live_recorder: raw in-play recordings (large, machine-local) and its lock
 agent/data/nfl_live/
 agent/.nfl_live_recorder.lock
+
+# close_model.py team-state cache, rebuilt every 6h
+agent/data/close_model_teams.json

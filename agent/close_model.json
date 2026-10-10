@@ -1,0 +1,67 @@
+{
+ "version": 1,
+ "trained_at": "2026-10-10T12:36:00+00:00",
+ "hypothesis": "H-STATS-CLOSE",
+ "features": [
+  "l0",
+  "x_gd_f",
+  "x_gd_s",
+  "x_sot_f",
+  "x_sot_s",
+  "x_sh_s",
+  "x_mres",
+  "x_rest",
+  "is_home"
+ ],
+ "coef": [
+  1.024774,
+  -0.014018,
+  0.003825,
+  0.029451,
+  -0.04024,
+  0.008623,
+  -0.092819,
+  -0.002658,
+  -0.018374
+ ],
+ "intercept": 0.01255,
+ "alpha": {
+  "gd_f": 0.2,
+  "gd_s": 0.06,
+  "sot_f": 0.2,
+  "sot_s": 0.06,
+  "sh_s": 0.06,
+  "mres": 0.1
+ },
+ "min_games": 8,
+ "rest_cap": 14,
+ "seasons": [
+  2012,
+  2025
+ ],
+ "n_rows": 198050,
+ "leagues": [
+  "BEL-JPL",
+  "ENG-CH",
+  "ENG-CON",
+  "ENG-L1",
+  "ENG-L2",
+  "ENG-PR",
+  "ESP-L2",
+  "ESP-LL",
+  "FRA-L1",
+  "FRA-L2",
+  "GER-BL1",
+  "GER-BL2",
+  "GRE-SL",
+  "ITA-SA",
+  "ITA-SB",
+  "NED-ED",
+  "POR-PL",
+  "SCO-CH",
+  "SCO-L1",
+  "SCO-L2",
+  "SCO-PR",
+  "TUR-SL"
+ ]
+}

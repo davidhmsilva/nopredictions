@@ -107,9 +107,29 @@ export interface AgentTrade {
   } | null
 }
 
+/** A resting paper bid of a maker agent (db/073, close_maker_agent.py). Prices
+ *  are probabilities; the page turns them into odds. Unfilled bids are kept
+ *  after kick-off, because filled-vs-unfilled is how adverse selection shows. */
+export interface AgentOrder {
+  id: number
+  created_at: string
+  kickoff: string
+  title: string | null
+  team: string | null
+  league: string
+  status: 'resting' | 'filled' | 'expired' | 'cancelled'
+  bid_price: number
+  market_mid: number | null
+  model_q: number
+  close_mid: number | null
+  payout: number | null
+}
+
 export interface AgentDetail {
   agent: AgentSummary
   trades: AgentTrade[]
+  /** Maker agents only: their bids, newest first. Empty for every other agent. */
+  orders: AgentOrder[]
   /** Cumulative P&L after each settled bet, with its date, thinned to at most
    *  CURVE_POINTS. */
   curve: { t: string; pl: number }[]
@@ -271,6 +291,28 @@ export async function listAgents(userId: string): Promise<{ agents: AgentSummary
   return { agents: await summaries(userId), limits: await limitsFor(userId) }
 }
 
+/** A maker agent's bids. Called only after the owner check in summaries(); an
+ *  agent with no row in close_maker_orders gets an empty list, and so does a
+ *  database the migration has not reached yet. */
+async function ordersOf(id: number): Promise<AgentOrder[]> {
+  const sql = getSql()
+  try {
+    return await sql<AgentOrder[]>`
+      select o.id, o.created_at, o.kickoff, o.title, o.team_name as team, o.league, o.status,
+             o.bid_price::float8 as bid_price,
+             case o.side when 'home' then o.p_home when 'away' then o.p_away end::float8 as market_mid,
+             o.model_q::float8 as model_q, o.close_mid::float8 as close_mid, o.payout::float8 as payout
+        from public.close_maker_orders o
+       where o.strategy_id = ${id}
+       order by o.created_at desc, o.id desc
+       limit ${TRADES_SHOWN}
+    `
+  } catch (err) {
+    if ((err as { code?: string }).code === '42P01') return []      // relation does not exist
+    throw err
+  }
+}
+
 /** One agent with its latest trades and its whole curve, or null when it does
  *  not exist or is not this user's — the two are deliberately the same answer.
  *  Numerics are cast to float8 because postgres.js hands `numeric` back as a
@@ -327,6 +369,7 @@ export async function getAgent(userId: string, id: number): Promise<AgentDetail 
   const running = cumulative(settled.map((r) => r.pl))
   return {
     agent,
+    orders: await ordersOf(id),
     trades: trades.map(({ ctx_home, ctx_away, entry_minute, goals_at_entry, target_line, pressure_index, ...t }) => ({
       ...t,
       context:
