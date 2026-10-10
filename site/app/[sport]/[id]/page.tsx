@@ -14,6 +14,14 @@ import { SPORT_META, isSportKey } from '../../lib/sportsMeta'
 // form — so a search for "Giants vs Rams odds" has something to find. The
 // browser then refreshes it every minute.
 
+/** Regenerated at most every two minutes; the browser refreshes the prices.
+ *  Before 2026-10-10 every hit re-rendered it (14% of the site's CPU). */
+export const revalidate = 120
+
+export function generateStaticParams() {
+  return []
+}
+
 const valid = (p: { sport: string; id: string }) => isSportKey(p.sport) && /^\d{4,14}$/.test(p.id)
 
 async function load(p: { sport: string; id: string }) {

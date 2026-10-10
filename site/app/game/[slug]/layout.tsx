@@ -5,6 +5,17 @@ import { loadFixture } from '../../lib/matchcontext'
 import { getBoard } from '../../lib/scoutCache'
 import { within } from '../../lib/deadline'
 
+/** The page shell, its title and its structured data are regenerated at most
+ *  every two minutes; the prices on it are loaded by the browser. Before
+ *  2026-10-10 every hit re-rendered it: 33% of the site's CPU, mostly crawlers
+ *  following the sitemap. */
+export const revalidate = 120
+
+export function generateStaticParams() {
+  return []
+}
+
+
 // The soccer Game Center's page is a client component and cannot export
 // metadata, so the title, the description and the event's structured data
 // live here. They come from the board the page was clicked from (cached, no
@@ -35,7 +46,8 @@ async function fixture(slug: string): Promise<Fx | null> {
       },
     }
   }
-  const fx = await within(loadFixture(slug), 2500)
+  // A cacheable read (10 min): a `no-store` fetch here made the route dynamic.
+  const fx = await within(loadFixture(slug, 600), 2500)
   return fx
     ? {
         home: fx.home,

@@ -13,6 +13,15 @@ import { TeamView } from './TeamView'
  *  board's cache; a board that is slow costs that panel, never the page. */
 export const revalidate = 1800
 
+/** No club is built at deploy time; each is rendered on its first visit and
+ *  then served from the cache for `revalidate`. Without this, Next renders a
+ *  dynamic segment on every request whatever `revalidate` says, and a crawler
+ *  walking the sitemap cost ~1.6s of CPU per club per hit (Observability,
+ *  2026-10-01→07: 28% of the site's CPU). */
+export function generateStaticParams() {
+  return []
+}
+
 async function load(slug: string): Promise<TeamPageData | null> {
   const id = idOfSlug(slug)
   if (id == null) return null
