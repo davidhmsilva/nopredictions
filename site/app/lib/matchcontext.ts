@@ -41,8 +41,9 @@ export interface Fixture {
   kickoff: string | null
 }
 
-export async function loadFixture(slug: string): Promise<Fixture | null> {
-  const main = await fetchEvent(slug)
+/** `revalidateS`: pass it from a cached page (see gamecenter's getJson). */
+export async function loadFixture(slug: string, revalidateS?: number): Promise<Fixture | null> {
+  const main = await fetchEvent(slug, revalidateS)
   if (!main) return null
   const title = String(main.title ?? '')
   const teams = extractTeams(title)

@@ -149,10 +149,13 @@ export interface GameData {
   notes: string[]
 }
 
-async function getJson(url: string, timeoutMs = 10000): Promise<unknown> {
+/** `revalidateS` makes the read cacheable. A cached page (ISR) must pass it:
+ *  a `no-store` fetch inside one throws, and a caller that swallows errors
+ *  then renders the page empty. Live callers leave it out. */
+async function getJson(url: string, timeoutMs = 10000, revalidateS?: number): Promise<unknown> {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(timeoutMs),
-    cache: 'no-store',
+    ...(revalidateS ? { next: { revalidate: revalidateS } } : { cache: 'no-store' as const }),
   })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
@@ -195,8 +198,8 @@ const GROUP_ORDER = [
 
 // ── Polymarket ───────────────────────────────────────────────────────────────
 
-export async function fetchEvent(slug: string): Promise<Record<string, unknown> | null> {
-  const direct = (await getJson(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`)) as unknown[]
+export async function fetchEvent(slug: string, revalidateS?: number): Promise<Record<string, unknown> | null> {
+  const direct = (await getJson(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`, 10000, revalidateS)) as unknown[]
   if (Array.isArray(direct) && direct.length) return direct[0] as Record<string, unknown>
   return null
 }

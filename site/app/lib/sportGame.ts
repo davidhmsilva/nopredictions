@@ -38,7 +38,10 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
   try {
-    const r = await fetch(url, { ...init, signal: ctrl.signal, cache: 'no-store' })
+    // Cacheable, not `no-store`: the US Game Center is an ISR page, and a
+    // `no-store` fetch inside one throws and leaves the page empty. Every
+    // caller is behind the 60s unstable_cache below anyway.
+    const r = await fetch(url, { ...init, signal: ctrl.signal, next: { revalidate: 30 } })
     if (!r.ok) throw new Error(`${new URL(url).host} ${r.status}`)
     return (await r.json()) as T
   } finally {
