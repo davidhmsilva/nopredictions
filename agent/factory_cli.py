@@ -9,6 +9,16 @@ factory_cli.py — the strategy factory from the command line.
     python factory_cli.py run [--dry-run]              # paper entries off the live tape (cron, 1/min)
     python factory_cli.py settle                       # settle, forward stats, promotion (cron)
 
+Factory v2 (pre-match, factory/v2/): families of information first, CLV before
+yield, a power gate, and a holdout only `v2 confirm` reads.
+
+    python factory_cli.py v2 build [--refresh]         # the pre-match tape (cached)
+    python factory_cli.py v2 families                  # ~50 family tests, train → validation
+    python factory_cli.py v2 search [--run clv:pin_raw ...] [--target 0.01] [--k 10]
+    python factory_cli.py v2 prereg                    # families + search → reports/factory_v2_prereg_*.json
+    python factory_cli.py v2 confirm --prereg <path>   # reads the holdout once, appends the ledger
+    python factory_cli.py v2 ledger                    # every read of the holdout so far
+
 A grid writes every spec it tested to reports/factory_grid_<date>.csv and
 registers only the ones that passed (FDR on train, positive on the held-out test).
 """
@@ -252,6 +262,38 @@ def cmd_settle(args):
     log.info(f"settled {n} paper trades")
 
 
+def cmd_v2(args):
+    from factory.v2 import protocol, tape
+    if args.v2cmd == "ledger":
+        rows = protocol.ledger()
+        if not rows:
+            print("the holdout has never been read")
+        for e in rows:
+            print(f"round {e['round']} · {e['at']} · {e['prereg']} · {e['items']} items · {e['passed']} pass · git {e['git']}")
+        return
+    df = tape.load(refresh=getattr(args, "refresh", False))
+    if args.v2cmd == "build":
+        print(tape.summary(df).to_string())
+        return
+    runs = [tuple(r.split(":")) for r in args.run] if getattr(args, "run", None) else None
+    if args.v2cmd == "families":
+        protocol.print_families(protocol.run_families(df))
+    elif args.v2cmd == "search":
+        res = protocol.run_search(df, runs, args.target, args.k)
+        protocol.print_search(res)
+        print(f"\nevery spec → {protocol.search_csv(res)}")
+    elif args.v2cmd == "prereg":
+        fam = protocol.run_families(df)
+        protocol.print_families(fam)
+        res = protocol.run_search(df, runs, args.target, args.k)
+        protocol.print_search(res)
+        print(f"\nevery spec → {protocol.search_csv(res)}")
+        items = protocol.prereg_items(fam, res)
+        print(f"preregistered for the holdout: {len(items)} items → {protocol.write_prereg(items, args.note)}")
+    elif args.v2cmd == "confirm":
+        protocol.print_confirm(protocol.confirm(df, args.prereg))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -269,11 +311,26 @@ def main():
     r = sub.add_parser("run")
     r.add_argument("--dry-run", action="store_true")
     sub.add_parser("settle")
+    v2 = sub.add_parser("v2", help="factory v2, pre-match")
+    v2s = v2.add_subparsers(dest="v2cmd", required=True)
+    v2b = v2s.add_parser("build")
+    v2b.add_argument("--refresh", action="store_true")
+    v2s.add_parser("families")
+    for name in ("search", "prereg"):
+        p = v2s.add_parser(name)
+        p.add_argument("--run", action="append", help="objective:execution, e.g. clv:pin_raw (repeatable)")
+        p.add_argument("--target", type=float, help="largest MDE a spec may have and still be tested")
+        p.add_argument("--k", type=int, default=10, help="specs taken from train to validation, per run")
+        if name == "prereg":
+            p.add_argument("--note", default="")
+    v2c = v2s.add_parser("confirm")
+    v2c.add_argument("--prereg", required=True)
+    v2s.add_parser("ledger")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [factory] %(message)s",
                         datefmt="%Y-%m-%d %H:%M:%S", force=True)
     {"universes": cmd_universes, "build": cmd_build, "grid": cmd_grid, "backtest": cmd_backtest,
-     "leaderboard": cmd_leaderboard, "run": cmd_run, "settle": cmd_settle}[args.cmd](args)
+     "leaderboard": cmd_leaderboard, "run": cmd_run, "settle": cmd_settle, "v2": cmd_v2}[args.cmd](args)
 
 
 if __name__ == "__main__":
