@@ -60,6 +60,7 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -792,6 +793,120 @@ def _halftime_scores(fixture_ids: list[int]) -> dict[int, tuple[int, int]]:
     return out
 
 
+# ── Polymarket's own resolution (2026-10-11) ─────────────────────────────────
+# From 2026-09-14 every entry was on an ESPN fixture (the api-football key
+# refuses), and _halftime_scores never sends ESPN ids, so neither first-half
+# arm settled a single one of them: 196 trades were resolved by hand, one
+# wrongly. pt#6081, Gent v Standard: 1-0 on our tape at 46', 1-1 at the break
+# after a 45+3' equaliser, booked won. The market we bought IS the settlement:
+# its CLOB winner flag is what pays, needs no key, and exists for every row
+# that has a book. Checked against score.halftime before the switch: 0
+# disagreements over 1,148 s17 fixtures and 1,271 s18 fixtures.
+#
+# A Kalshi-bought trade (s17 obs_version 7) is paid on Polymarket's resolution
+# of the same question: one half-time score settles both.
+
+CLOB_MARKET = "https://clob.polymarket.com/markets/"
+PM_VERDICT_WORKERS = 2
+PM_VERDICT_TRIES = 5
+
+
+def _pm_verdicts(condition_ids) -> dict[str, dict[str, bool]]:
+    """Per market: {token_id: paid} once RESOLVED, {} while it is not.
+
+    A market that could not be read is ABSENT, which is a third state and not
+    "unresolved": at 4 workers the CLOB refused 121 of 400 requests with a 429,
+    and reading that as "never resolved" would close a row with no outcome.
+    Only a winner flag is a result. A 50-50 is read as unresolved, so a trade on
+    one stays open for a person to look at — the failure that cannot invert a
+    result.
+    """
+    def one(cid: str):
+        for attempt in range(PM_VERDICT_TRIES):
+            try:
+                r = requests.get(CLOB_MARKET + cid, timeout=10)
+                if r.status_code == 429 or r.status_code >= 500:
+                    time.sleep(0.5 * 2 ** attempt)
+                    continue
+                if r.status_code != 200:
+                    return cid, None
+                d = r.json()
+            except Exception:                               # noqa: BLE001
+                time.sleep(0.5 * 2 ** attempt)
+                continue
+            toks = d.get("tokens") or []
+            if not toks:
+                return cid, None
+            if not any(t.get("winner") for t in toks):
+                return cid, {}
+            return cid, {str(t.get("token_id")): bool(t.get("winner")) for t in toks}
+        return cid, None
+
+    cids = sorted({c for c in condition_ids if c})
+    if not cids:
+        return {}
+    with ThreadPoolExecutor(PM_VERDICT_WORKERS) as ex:
+        return {cid: v for cid, v in ex.map(one, cids) if v is not None}
+
+
+def _verdict_of(verdicts: dict, market) -> tuple[bool | None, bool]:
+    """(paid, may_close). paid is None until the market is resolved; may_close
+    says the market was READ and is genuinely unresolved, the only state in
+    which a stale untraded row may be closed with no outcome. A market that
+    was not read, or whose tokens do not include ours, is never closed on."""
+    v = verdicts.get(market[0])
+    if v is None:
+        return None, False
+    if not v:
+        return None, True
+    return v.get(market[1]), False
+
+
+def _pay_trade(cur, trade_id: int, won: bool) -> None:
+    # payout_units is GROSS by project convention: lost = 0, won = stake *
+    # entry_odds, read back off the trade.
+    cur.execute(
+        """UPDATE paper_trades
+              SET result = %s,
+                  payout_units = CASE WHEN %s
+                                      THEN stake_units * entry_odds
+                                      ELSE 0 END,
+                  resolved_at = now()
+            WHERE id = %s AND result IS NULL""",
+        ("won" if won else "lost", won, trade_id),
+    )
+
+
+def _side_markets(conn, fixture_ids: list[int]) -> dict[tuple[int, str], tuple[str, str]]:
+    """(fixture, favourite side) -> (condition_id, token_id) the agent priced.
+
+    Keyed on the SIDE, not the fixture: with no pre-kickoff favourite the side
+    is re-read live and can change mid-half, and each row carries the market
+    of its own favourite (26 fixtures had two). A key with two markets is
+    ambiguous and left out.
+    """
+    if not fixture_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT DISTINCT fixture_id, fav_side, condition_id, token_id
+                 FROM fav_ht_observations
+                WHERE fixture_id = ANY(%s) AND fav_side IS NOT NULL
+                  AND token_id IS NOT NULL""",
+            (fixture_ids,),
+        )
+        seen: dict[tuple[int, str], set] = {}
+        for fid, side, cid, tok in cur.fetchall():
+            seen.setdefault((fid, side), set()).add((cid, str(tok)))
+    return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
+
+
+def _market_of(r: dict, markets: dict):
+    if r.get("token_id"):
+        return r.get("condition_id"), str(r["token_id"])
+    return markets.get((r["fixture_id"], r["fav_side"]))
+
+
 def _close_rows_without_a_favourite(conn) -> int:
     """Close, with no API call, every row that has no favourite to judge.
 
@@ -836,7 +951,8 @@ def settle(conn) -> int:
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            """SELECT id, fixture_id, minute, fav_side, paper_trade_id
+            """SELECT id, fixture_id, minute, fav_side, paper_trade_id,
+                      condition_id, token_id
                  FROM fav_ht_observations
                 WHERE settled_at IS NULL
                   AND fav_side IS NOT NULL
@@ -857,19 +973,54 @@ def settle(conn) -> int:
             (fixture_ids,),
         )
         last_seen: dict[int, datetime] = dict(cur.fetchall())
+    markets = _side_markets(conn, fixture_ids)
 
-    # Every api-football call FIRST, with no transaction open. This loop used
-    # to sit inside the write cursor, which is how a read transaction came to
-    # be held for eight minutes while Python did HTTP — see db_txn.py.
+    # Every network call FIRST, with no transaction open. This loop used to
+    # sit inside the write cursor, which is how a read transaction came to be
+    # held for eight minutes while Python did HTTP — see db_txn.py.
+    #
+    # A row with a Polymarket market settles on that market's resolution and
+    # nothing else, trades included (2026-10-11). score.halftime is asked only
+    # for fixtures Polymarket never listed, which only research rows are.
     horizon = datetime.now(timezone.utc) - timedelta(hours=SETTLE_API_MAX_AGE_H)
     traded = {r["fixture_id"] for r in pending if r["paper_trade_id"]}
     live = {fid for fid in fixture_ids if last_seen.get(fid) and last_seen[fid] >= horizon}
-    api_cache = _halftime_scores(sorted(live | traded))
+    verdicts = _pm_verdicts(m[0] for m in (_market_of(r, markets) for r in pending) if m)
+    no_market = {r["fixture_id"] for r in pending if not _market_of(r, markets)}
+    api_cache = _halftime_scores(sorted((live | traded) & no_market))
 
     settled = unsettleable = 0
     with conn.cursor() as cur:
         for r in pending:
             fid = r["fixture_id"]
+            market = _market_of(r, markets)
+            if market:
+                paid, may_close = _verdict_of(verdicts, market)
+                if paid is None:
+                    if not may_close or fid in live or fid in traded:
+                        continue              # not resolved, or not read: ask next run
+                    cur.execute(
+                        """UPDATE fav_ht_observations
+                              SET ht_source = 'no_pm', settled_at = now()
+                            WHERE id = %s""",
+                        (r["id"],),
+                    )
+                    unsettleable += 1
+                    continue
+                # The token is "<favourite> leading at halftime?" Yes, so it
+                # paid exactly when the favourite led. No score is claimed.
+                with db_txn.atomic(conn):
+                    cur.execute(
+                        """UPDATE fav_ht_observations
+                              SET fav_led_at_ht = %s, ht_source = 'pm', settled_at = now()
+                            WHERE id = %s""",
+                        (paid, r["id"]),
+                    )
+                    if r["paper_trade_id"]:
+                        _pay_trade(cur, r["paper_trade_id"], paid)
+                settled += 1
+                continue
+
             ht = api_cache.get(fid)
             src = "api"
 
@@ -911,24 +1062,121 @@ def settle(conn) -> int:
                         WHERE id = %s""",
                     (ht[0], ht[1], won, src, r["id"]),
                 )
-
-                # payout_units is GROSS by project convention: lost = 0,
-                # won = stake * entry_odds, read back off the trade.
                 if r["paper_trade_id"]:
-                    cur.execute(
-                        """UPDATE paper_trades
-                              SET result = %s,
-                                  payout_units = CASE WHEN %s
-                                                      THEN stake_units * entry_odds
-                                                      ELSE 0 END,
-                                  resolved_at = now()
-                            WHERE id = %s AND result IS NULL""",
-                        ("won" if won else "lost", won, r["paper_trade_id"]),
-                    )
+                    _pay_trade(cur, r["paper_trade_id"], won)
             settled += 1
     if unsettleable:
-        log.info(f"closed {unsettleable} rows the API never answered (no outcome)")
+        log.info(f"closed {unsettleable} rows nothing ever resolved (no outcome)")
     return settled
+
+
+def backfill_from_pm(conn, dry_run: bool = False) -> dict:
+    """Polymarket's resolution for what settle() could not reach (2026-10-11).
+
+    Two things, and nothing else is touched:
+      * rows already CLOSED with no outcome (`no_api`), which since 2026-09-14
+        is nearly every row with a book — the calibration arm went blind;
+      * every trade whose result is missing or disagrees with the market it
+        bought. The disagreement is pt#6081; the before-state is returned.
+    A row that already carries an outcome is never rewritten.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """SELECT id, fixture_id, fav_side, condition_id, token_id, ht_source
+                 FROM fav_ht_observations
+                WHERE settled_at IS NOT NULL AND fav_led_at_ht IS NULL
+                  AND fav_side IS NOT NULL"""
+        )
+        closed = cur.fetchall()
+        cur.execute(
+            """SELECT o.paper_trade_id AS id, o.condition_id, o.token_id,
+                      p.result, p.payout_units::float8 AS payout_units,
+                      p.resolved_at
+                 FROM fav_ht_observations o
+                 JOIN paper_trades p ON p.id = o.paper_trade_id
+                WHERE o.entered"""
+        )
+        trades = cur.fetchall()
+    markets = _side_markets(conn, sorted({r["fixture_id"] for r in closed}))
+    return _backfill(conn, "fav_ht_observations", "fav_led_at_ht", "ht_source",
+                     closed, trades, lambda r: _market_of(r, markets), dry_run)
+
+
+def _backfill(conn, table: str, outcome_col: str, source_col: str,
+              closed: list[dict], trades: list[dict], market_of,
+              dry_run: bool) -> dict:
+    """The half of backfill_from_pm both arms share. `market_of(row)` is each
+    arm's own reading of which (condition_id, token_id) a row priced."""
+    keyed = [(r, market_of(r)) for r in closed]
+    verdicts = _pm_verdicts([m[0] for _, m in keyed if m] +
+                            [t["condition_id"] for t in trades if t["token_id"]])
+
+    fill: dict[bool, list[int]] = {True: [], False: []}
+    before_src: dict[str, int] = {}
+    for r, m in keyed:
+        paid = verdicts.get(m[0], {}).get(m[1]) if m else None
+        if paid is None:
+            continue
+        fill[paid].append(r["id"])
+        before_src[str(r[source_col])] = before_src.get(str(r[source_col]), 0) + 1
+
+    changes = []
+    for t in trades:
+        paid = verdicts.get(t["condition_id"], {}).get(str(t["token_id"])) if t["token_id"] else None
+        if paid is None:
+            continue
+        want = "won" if paid else "lost"
+        if t["result"] != want:
+            changes.append({"id": t["id"], "result_before": t["result"],
+                            "payout_before": t["payout_units"], "result_after": want,
+                            "resolved_before": t["resolved_at"].isoformat() if t["resolved_at"] else None})
+
+    summary = {"rows_filled": {"paid": len(fill[True]), "not_paid": len(fill[False])},
+               "rows_by_previous_source": before_src,
+               "rows_left_without_outcome": len(closed) - len(fill[True]) - len(fill[False]),
+               "trades_changed": changes,
+               "row_ids": {"paid": fill[True], "not_paid": fill[False]}}
+    if dry_run:
+        return summary
+
+    with conn.cursor() as cur:
+        for paid, ids in fill.items():
+            for i in range(0, len(ids), 5000):
+                cur.execute(
+                    f"""UPDATE {table}
+                           SET {outcome_col} = %s, {source_col} = 'pm_repair'
+                         WHERE id = ANY(%s) AND {outcome_col} IS NULL""",
+                    (paid, ids[i:i + 5000]),
+                )
+        for c in changes:
+            # A trade that was already resolved keeps its resolution time, so the
+            # P&L curve stays in event order; only the verdict moves.
+            cur.execute(
+                """UPDATE paper_trades
+                      SET result = %s,
+                          payout_units = CASE WHEN %s THEN stake_units * entry_odds
+                                              ELSE 0 END,
+                          resolved_at = coalesce(resolved_at, now())
+                    WHERE id = %s""",
+                (c["result_after"], c["result_after"] == "won", c["id"]),
+            )
+    return summary
+
+
+def write_backfill_report(arm: str, summary: dict, dry_run: bool) -> None:
+    """Log the counts; on a real run keep the before-state in reports/."""
+    log.info(f"{arm} backfill{' (dry run)' if dry_run else ''}: rows filled "
+             f"{summary['rows_filled']}, previous source {summary['rows_by_previous_source']}, "
+             f"left without outcome {summary['rows_left_without_outcome']}")
+    for c in summary["trades_changed"]:
+        log.info(f"  pt#{c['id']}: {c['result_before']} -> {c['result_after']}")
+    if dry_run:
+        return
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "reports",
+                        f"pm_settle_repair_{datetime.now(timezone.utc):%Y-%m-%d}_{arm}.json")
+    with open(path, "w") as f:
+        json.dump(summary, f, indent=1, default=str)
+    log.info(f"before-state -> {os.path.normpath(path)}")
 
 
 def report(conn) -> None:
@@ -1127,7 +1375,19 @@ def main() -> None:
     ap.add_argument("--interval", type=int, default=CYCLE_S, help="seconds between cycles")
     ap.add_argument("--settle", action="store_true", help="backfill outcomes and exit")
     ap.add_argument("--report", action="store_true", help="what has been collected")
+    ap.add_argument("--backfill-pm", action="store_true",
+                    help="outcomes from Polymarket for rows closed without one; "
+                         "trades checked against the market (honours --dry-run)")
     args = ap.parse_args()
+
+    if args.backfill_pm:
+        conn = _conn()
+        try:
+            write_backfill_report("s18", backfill_from_pm(conn, dry_run=args.dry_run),
+                                  args.dry_run)
+        finally:
+            conn.close()
+        return
 
     if args.settle or args.report:
         conn = _conn()

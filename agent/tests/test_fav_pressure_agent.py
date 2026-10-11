@@ -439,6 +439,12 @@ class _Cur:
         self.conn.params.append(params)
         if sql.lstrip().startswith("UPDATE"):
             self.rowcount, self._rows = 0, []
+        elif "JOIN paper_trades" in sql:
+            self._rows = self.conn.trades
+        elif "settled_at IS NOT NULL" in sql:
+            self._rows = self.conn.closed
+        elif "token_id IS NOT NULL" in sql:
+            self._rows = self.conn.markets
         elif "SELECT id, fixture_id" in sql:
             self._rows = self.conn.pending
         else:
@@ -451,8 +457,9 @@ class _Cur:
 class _Conn:
     autocommit = True                   # db_txn.atomic reads it
 
-    def __init__(self, pending, tape):
+    def __init__(self, pending, tape, markets=(), closed=(), trades=()):
         self.pending, self.tape, self.sql, self.params = pending, tape, [], []
+        self.markets, self.closed, self.trades = list(markets), list(closed), list(trades)
 
     def cursor(self, cursor_factory=None):
         return _Cur(self)
@@ -530,3 +537,154 @@ def test_the_outcome_is_the_half_time_score_read_from_the_favourites_side(monkey
     sent = list(zip(conn.sql, conn.params))
     assert [p for s, p in sent if "SET ht_home_goals" in s] == [(0, 1, True, "api", 1)]
     assert [p for s, p in sent if "UPDATE paper_trades" in s] == [("won", True, 5977)]
+
+
+# ── settlement: Polymarket's own resolution (2026-10-11) ─────────────────────
+# From 09-14 every entry was an ESPN fixture and score.halftime never covers
+# one, so nothing settled them; 196 trades were resolved by hand and pt#6081
+# (Gent v Standard, 1-1 at the break after a 45+3' equaliser) was booked won.
+# The market bought is the settlement.
+
+def _pm_row(fid=-401878987, side="home", trade=6081, token="tok-gent-yes", cid="c-gent"):
+    return {"id": 1, "fixture_id": fid, "minute": 21, "fav_side": side,
+            "paper_trade_id": trade, "condition_id": cid, "token_id": token}
+
+
+def test_a_row_with_a_market_settles_on_its_resolution_and_never_asks_the_api(monkeypatch):
+    asked: list[list[int]] = []
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: asked.append(list(ids)) or {})
+    monkeypatch.setattr(fa, "_pm_verdicts",
+                        lambda cids: {"c-gent": {"tok-gent-yes": False, "tok-gent-no": True}})
+    conn = _Conn(pending=[_pm_row()], tape=[(-401878987, _recent())])
+    assert fa.settle(conn) == 1
+    sent = list(zip(conn.sql, conn.params))
+    assert [p for s, p in sent if "SET fav_led_at_ht" in s] == [(False, 1)]
+    assert any("'pm'" in s for s, _ in sent if "SET fav_led_at_ht" in s)
+    assert [p for s, p in sent if "UPDATE paper_trades" in s] == [("lost", False, 6081)]
+    assert asked == [[]]                # a fixture with a market is never put to the API
+
+
+def test_a_trade_waits_for_the_market_even_when_the_api_would_answer(monkeypatch):
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: {7: (1, 0)})
+    monkeypatch.setattr(fa, "_pm_verdicts", lambda cids: {})     # not resolved yet
+    from datetime import datetime, timedelta, timezone
+    stale = datetime.now(timezone.utc) - timedelta(hours=fa.SETTLE_API_MAX_AGE_H + 1)
+    conn = _Conn(pending=[_pm_row(fid=7)], tape=[(7, stale)])
+    assert fa.settle(conn) == 0
+    assert [s for s in conn.sql
+            if s.lstrip().startswith("UPDATE") and "fav_side IS NULL" not in s] == []
+
+
+def test_an_untraded_row_never_resolved_is_closed_with_no_outcome(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    stale = datetime.now(timezone.utc) - timedelta(hours=fa.SETTLE_API_MAX_AGE_H + 1)
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: {})
+    monkeypatch.setattr(fa, "_pm_verdicts", lambda cids: {"c-gent": {}})   # read, unresolved
+    conn = _Conn(pending=[_pm_row(trade=None)], tape=[(-401878987, stale)])
+    assert fa.settle(conn) == 0
+    assert any("'no_pm'" in s for s in conn.sql)
+    assert not any("SET fav_led_at_ht" in s for s in conn.sql)
+
+
+def test_a_market_that_could_not_be_read_never_closes_a_row(monkeypatch):
+    # The CLOB refused 121 of 400 requests at 4 workers. A refusal is not an
+    # unresolved market, and must not close a stale row with no outcome.
+    from datetime import datetime, timedelta, timezone
+    stale = datetime.now(timezone.utc) - timedelta(hours=fa.SETTLE_API_MAX_AGE_H + 1)
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: {})
+    monkeypatch.setattr(fa, "_pm_verdicts", lambda cids: {})                # nothing read
+    conn = _Conn(pending=[_pm_row(trade=None)], tape=[(-401878987, stale)])
+    assert fa.settle(conn) == 0
+    assert [s for s in conn.sql
+            if s.lstrip().startswith("UPDATE") and "fav_side IS NULL" not in s] == []
+
+
+def test_a_row_without_a_token_takes_the_market_of_its_own_favourite(monkeypatch):
+    # With no pre-kickoff favourite the side is re-read live and can flip: each
+    # side has its own "<team> leading at halftime?" market.
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: {})
+    monkeypatch.setattr(fa, "_pm_verdicts",
+                        lambda cids: {"c-home": {"t-home": False}, "c-away": {"t-away": True}})
+    conn = _Conn(pending=[_pm_row(side="away", trade=None, token=None, cid=None)],
+                 tape=[(-401878987, _recent())],
+                 markets=[(-401878987, "home", "c-home", "t-home"),
+                          (-401878987, "away", "c-away", "t-away")])
+    assert fa.settle(conn) == 1
+    assert [p for s, p in zip(conn.sql, conn.params) if "SET fav_led_at_ht" in s] == [(True, 1)]
+
+
+def test_a_side_with_two_markets_is_ambiguous_and_falls_back_to_the_api(monkeypatch):
+    asked: list[list[int]] = []
+    monkeypatch.setattr(fa, "_halftime_scores", lambda ids: asked.append(list(ids)) or {})
+    monkeypatch.setattr(fa, "_pm_verdicts", lambda cids: {"c1": {"t1": True}})
+    conn = _Conn(pending=[_pm_row(fid=7, trade=None, token=None, cid=None)],
+                 tape=[(7, _recent())],
+                 markets=[(7, "home", "c1", "t1"), (7, "home", "c2", "t2")])
+    assert fa.settle(conn) == 0
+    assert asked == [[7]]
+
+
+def test_pm_verdicts_reads_only_resolved_markets(monkeypatch):
+    bodies = {
+        "a": {"closed": True, "tokens": [{"token_id": 11, "winner": True, "price": 1},
+                                         {"token_id": 12, "winner": False, "price": 0}]},
+        "b": {"closed": False, "tokens": [{"token_id": 21, "winner": False, "price": 0.6},
+                                          {"token_id": 22, "winner": False, "price": 0.4}]},
+        "c": {"closed": True, "tokens": [{"token_id": 31, "winner": False, "price": 0.5},
+                                         {"token_id": 32, "winner": False, "price": 0.5}]},
+    }
+
+    def fake_get(url, timeout=None):
+        cid = url.rsplit("/", 1)[-1]
+        if cid == "boom":
+            raise IOError("down")
+        return _Resp(bodies[cid])
+
+    monkeypatch.setattr(fa.requests, "get", fake_get)
+    monkeypatch.setattr(fa.time, "sleep", lambda s: None)
+    out = fa._pm_verdicts(["a", "b", "c", "boom", None, "a"])
+    # open and 50-50 are READ and unresolved; a market that errored is absent
+    assert out == {"a": {"11": True, "12": False}, "b": {}, "c": {}}
+
+
+def test_pm_verdicts_retries_a_rate_limit_instead_of_reporting_it(monkeypatch):
+    replies = [_Resp({}, status=429), _Resp({}, status=429),
+               _Resp({"tokens": [{"token_id": 1, "winner": True}, {"token_id": 2, "winner": False}]})]
+    monkeypatch.setattr(fa.requests, "get", lambda url, timeout=None: replies.pop(0))
+    monkeypatch.setattr(fa.time, "sleep", lambda s: None)
+    assert fa._pm_verdicts(["a"]) == {"a": {"1": True, "2": False}}
+    replies[:] = [_Resp({}, status=429)] * fa.PM_VERDICT_TRIES
+    assert fa._pm_verdicts(["a"]) == {}          # still refused: absent, never "unresolved"
+
+
+def test_backfill_fills_closed_rows_and_corrects_the_trade_the_market_contradicts(monkeypatch):
+    from datetime import datetime, timezone
+    monkeypatch.setattr(fa, "_pm_verdicts",
+                        lambda cids: {"c-gent": {"tok-gent-yes": False}, "c-x": {"t-x": True}})
+    resolved = datetime(2026, 9, 19, 10, 9, tzinfo=timezone.utc)
+    conn = _Conn(
+        pending=[], tape=[],
+        closed=[{"id": 10, "fixture_id": -401878987, "fav_side": "home", "condition_id": "c-gent",
+                 "token_id": "tok-gent-yes", "ht_source": "no_api"},
+                {"id": 11, "fixture_id": 5, "fav_side": "home", "condition_id": None,
+                 "token_id": None, "ht_source": "no_api"}],          # no market: left alone
+        trades=[{"id": 6081, "condition_id": "c-gent", "token_id": "tok-gent-yes",
+                 "result": "won", "payout_units": 3.448, "resolved_at": resolved},
+                {"id": 7000, "condition_id": "c-x", "token_id": "t-x",
+                 "result": None, "payout_units": None, "resolved_at": None},
+                {"id": 7001, "condition_id": "c-x", "token_id": "t-x",
+                 "result": "won", "payout_units": 2.0, "resolved_at": resolved}],
+    )
+    dry = fa.backfill_from_pm(conn, dry_run=True)
+    assert not [s for s in conn.sql if s.lstrip().startswith("UPDATE")]
+    assert dry["rows_filled"] == {"paid": 0, "not_paid": 1}
+    assert dry["rows_left_without_outcome"] == 1
+    assert [(c["id"], c["result_before"], c["result_after"]) for c in dry["trades_changed"]] == \
+        [(6081, "won", "lost"), (7000, None, "won")]
+
+    fa.backfill_from_pm(conn)
+    sent = list(zip(conn.sql, conn.params))
+    assert [p for s, p in sent if "SET fav_led_at_ht" in s] == [(False, [10])]
+    assert [p for s, p in sent if "UPDATE paper_trades" in s] == \
+        [("lost", False, 6081), ("won", True, 7000)]
+    assert all("coalesce(resolved_at" in s for s, _ in sent if "UPDATE paper_trades" in s)
