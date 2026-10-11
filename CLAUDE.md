@@ -114,6 +114,8 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── nba_model.py                   ← NBA margin/total model anchored on Pinnacle ✅ NEW
 │   ├── close_model.py                 ← forecasts where a 1X2 price will CLOSE (H-STATS-CLOSE) ✅ NEW 2026-10-10
 │   ├── close_maker_agent.py           ← Close Forecast: paper maker bids on PM from that forecast ✅ NEW
+│   ├── factory/v2/                    ← Factory v2, pre-match: families, CLV, power gate, locked holdout ✅ NEW 2026-10-10
+│   ├── pm_prematch_flow.py            ← who moves PM's 1X2 in the 96h before KO, and are they right (H-PM-FLOW) ✅ NEW
 │   ├── espn_stats.py                  ← free live stats, no key — fallback ✅ NEW
 │   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
@@ -2595,6 +2597,7 @@ about who wins, but something the price has not absorbed yet, and the close
 absorbs it. Reading of the coefficients (correlated, indicative): the price
 1-3 days out chases recent results against the price (`mres` −) and is slow to
 credit a recent rise in shots on target (`sot_f` + against `sot_s` −).
+⚠️ That CLV is `o0/o1 − 1`, raw odds against raw odds. Valued at the de-vigged close, the same bets are −1.47%: the move is real and the margin is still paid. See [Factory v2](#factory-v2--pre-match-families-first-clv-a-locked-holdout-2026-10-10).
 
 Transfermarkt (rest in all competitions, Europe before/after, games in 14
 days, XI value depletion and strength) on the 37k matches it covers: move R²
@@ -2690,6 +2693,150 @@ tier-2 away longshots after steam +35.8% → −56.2%). The calibration arm agre
 0.5, 1 favourite HT). ⚠️ The in-play tapes span obs_versions whose pressure
 axis changed (xG estimated from 09-11): a spec filtering on `pressure_*`
 mixes two scales; `obs_version` is a feature so it can be pinned.
+
+## Factory v2 — pre-match: families first, CLV, a locked holdout (2026-10-10)
+
+Built on an audit of v1. That audit found v1 structurally blind, not the market empty.
+- **The bar was impossible.** Judged on realised yield with BH across thousands of specs, a spec needed **+11pp (pre-match) to +38pp (in-play)** to pass, against edges of 1-5pp.
+- **More specs made it worse.**
+- **The winner's curse was measured.** The top-10 specs by train z went +11.6pp on train to −12.6pp on test. v1's 42 explore bots are **−9.0% over 943 forward trades**.
+
+`agent/factory/v2/`, `python factory_cli.py v2 …`, `tests/test_factory_v2.py` (19 cases).
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python factory_cli.py v2 build [--refresh]        # tape: 398k rows, cached (factory/cache/v2_prematch.pkl)
+python factory_cli.py v2 families                 # 48 family tests, train → validation
+python factory_cli.py v2 search [--run clv:pin_raw] [--target 0.01] [--k 10]
+python factory_cli.py v2 prereg --note "…"        # families + search → reports/factory_v2_prereg_*.json
+python factory_cli.py v2 confirm --prereg <path>  # the ONLY reader of the holdout; appends the ledger
+python factory_cli.py v2 ledger
+```
+
+| | v1 | v2 |
+|---|---|---|
+| unit of test | a filter (~200 bets) | a **family** of information first, one clustered regression on ~50-100k rows, the price as a control |
+| objective | realised yield | **CLV at the de-vigged close** (per-bet SE 15.6× smaller), yield as confirmation |
+| de-vig | proportional | **power** (proportional overstates longshots and manufactures the bias being tested) |
+| what is tested | everything with n ≥ 40/200 | only specs whose **MDE ≤ target** (1pp CLV / 3pp yield). The rest are refused, not "rejected" |
+| ranking | raw train z | **empirical-Bayes posterior** within the template |
+| splits | train/test | train → validation (Bonferroni over top-K) → **holdout read only by `confirm`**, every read in `factory/v2/holdout_ledger.jsonl` (committed) |
+| execution | PM taker | `pin_raw` · `pm_taker` · `pm_maker_loose` · `pm_maker_strict`. `check()` refuses CLV on a maker fill, because the answer is fixed by construction |
+
+Splits are fixed in code:
+- 1x2: train 2012-18, validation 2019-21, holdout 2022+.
+- ou25: train 2019-20, validation 2021, holdout 2022+ (our Pinnacle O/U data starts in 2019).
+
+**First run, 2026-10-10.**
+- **The move is predictable, confirmed on all three periods.**
+  - `team_state` predicts pre-close → close: train χ²/df 154 (p 1e-228), validation γ +1.51 (R² gain 4.0%), holdout γ +0.92 (p 1e-124).
+  - `model_score` (close_model's walk-forward prediction): holdout γ +0.84, p 3e-130.
+  - Holdout ledger round 1: **18 of 19 families confirmed.** Tier, league, season phase and goals average also predict the move.
+- **⚠️ Those families may carry a de-vig artefact.** The tier, league and price-level families on `move` can reflect different margins at the two snapshots. `pin_raw` cannot benefit from that, because its entry is the raw odds.
+- **The favourite–longshot bias does not survive a power de-vig.** `price_level` on sides, `close_bias`: train p=0.048, validation p=0.15.
+  - v1's "+1.0% on home favourites @1.2-1.6" was at least partly the proportional de-vig of its proxy price.
+  - Heavy home favourites @1.01-1.3: +2.30% train, −2.53% validation.
+- **No spec passes, and the reason is size.**
+
+  | decile of predicted move | move | Pinnacle cost | PM taker cost | CLV @ pin_raw | CLV @ pm_taker |
+  |---|--:|--:|--:|--:|--:|
+  | bottom | −0.84pp | 1.04pp | 1.60pp | −6.24% | −7.69% |
+  | top 10% | +0.85pp | 1.01pp | 1.60pp | −0.66% | −2.17% |
+  | **top 1%** | **+1.45pp** | 0.99pp | — | **+1.62%** | **+0.29%** |
+
+  (train+validation, home/away). The model sorts monotonically. Only the top 1% clears Pinnacle's margin. On train it has 140-320 bets, with an MDE of 1.5-3pp, so the power gate refuses it: **not enough data yet, not a no.** close_maker_agent is its forward test.
+  ⚠️ The q97-q99 thresholds were added after seeing that decile table, so validation is not independent for them. The holdout is their test.
+- **close_model's "+1.19% CLV" reproduces as +1.10% `beat_close`.** That is raw odds over raw odds. Valued at the de-vigged close, the same 3,256 bets are **−1.47%**: the price moved the right way, and the bet still paid the margin. Quote `clv`, never `beat_close`, as value.
+- **Maker strict fill (the close reaches the bid): −4.7% yield.** Adverse selection, consistent with [[finding-maker-adverse-selection]].
+- **`team_state` on `close_bias` passes the holdout (γ +0.99, p 4e-4) and is worth nothing.** R² 0.03%, top decile +0.26pp. Its sign says the close slightly overprices teams on recent good results.
+
+**Entry timing — enter 24-48h before kick-off? (ledger round 2, the operator's hypothesis)**
+
+Football-Data collects its pre-close odds on Friday afternoons for weekend games and on Tuesday afternoons for midweek games. That makes the tape a natural experiment, with `hours_before` in `tape.entry_hours`: Saturday ≈ 24h, Sunday ≈ 48h, Monday ≈ 72h.
+- **The total move grows with the lead time, but sublinearly:** |move| 1.9pp at <12h, 2.3pp at ~24h, 2.5pp at ~48h, 2.6pp at ~72h. This is also the check that the collection-time estimate is right.
+- **The PREDICTABLE part grows faster.** corr(model, move) is 0.09 / 0.16 / 0.19 / 0.22. With league fixed effects, the model's strength rises +0.364 per extra day (p 1e-12): 1.05 at 24h, 1.41 at 48h. Sunday beats Saturday within the league in 6 of 8 leagues.
+- **On the holdout, the mechanism holds and the money does not.**
+
+  | preregistered (Bonferroni α 0.01) | train+validation | holdout 2022+ |
+  |---|--:|--:|
+  | family `entry_timing` (model × days) | +0.364/day, p 1e-12 | **γ +0.70, p 1e-6 ✓** |
+  | model top 1% · ≥36h · CLV @ pin_raw | +3.65% (n=326) | **−0.11% (n=290) ✗** |
+  | same · CLV @ pm_taker | +2.69% | −0.33% ✗ |
+  | model top 5% · ≥36h · CLV @ pin_raw | +0.79% (n=1,556) | −0.86% ✗ |
+  | model top 1% · 12-36h · CLV @ pin_raw | +1.22% (n=545) | −0.95% ✗ |
+
+  Read it as: entering at 48h rather than 24h buys a more predictable move. With this model (team state), that move gets a bet from about −2 to −3% (a random entry, the cost) to about breakeven, and no further.
+  - The dev tail (+3.65%) was a hand-picked threshold on data already seen. The holdout is what caught it.
+  - What could still pay at 24-48h: cheaper execution, information beyond team stats, or a venue that is slower than Pinnacle at T-48h. Polymarket's own T-48/T-24 prices against Pinnacle's price at the same moment have not been measured yet. The PS snapshot IS that moment for Sunday games, and Stage J prices-history can supply PM's price at it.
+
+⚠️ **The holdout is not virgin.** v1's test period, pinnacle_audit and close_model all read 2022+. It checks the protocol; forward data is the clean confirmation.
+⚠️ The ledger's `git` field reads `+dirty` when factory/v2 had uncommitted changes. Round 1 was dirty.
+
+Next, by the same rules: entries earlier than the pre-close (bigger moves, from Stage J's PM T-24h and the venue open recorder), PM's own prices instead of the proxy, and in-play universes on calibration.
+
+## Who moves Polymarket before kick-off — H-PM-FLOW (2026-10-11)
+
+The operator's question: not "does PM lag Pinnacle at 24-48h", but "does PM MOVE then, WHO moves it, someone with their own line, and how do we get to the fair line?" `agent/pm_prematch_flow.py`.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python pm_prematch_flow.py --fetch      # every TAKER fill in [KO−96h, KO], ~40 min, resumable (factory/cache/pm_flow/, 515MB)
+python pm_prematch_flow.py --report     # --save also writes reports/pm_flow_wallets_<date>.csv
+```
+
+**Data.**
+- The sample: 4,289 fixtures with a coherent close, ≥ $30k of 1X2 volume, 2025-09 → 2026-09, from Stage J's `venue_market_history`. That is 12,867 markets, **3.23M taker fills, $727M, 164,732 wallets**.
+- 🔑 Data API `/trades` pages by **`start`/`end`**. `offset` stops at 10,000, below the in-play volume of one big match.
+- A No-token fill is the mirror of a Yes fill.
+
+**1. Does it move at 24-48h? Yes, and the moves carry nothing about the close.**
+
+| window | markets | mean move | taker USD share | corr with the rest of the move to the close |
+|---|--:|--:|--:|--:|
+| 72→48h | 3,469 | 1.00pp | 1.3% | +0.035 |
+| **48→24h** | 5,057 | **0.98pp** | **3.0%** | **−0.017** |
+| 24→6h | 8,047 | 1.34pp | 15.7% | +0.008 |
+| 6→1h | 11,931 | 1.04pp | 22.2% | −0.131 |
+| 1h→KO | 12,677 | 1.28pp | 56.9% | — |
+
+- A martingale: no momentum to follow and no reversal to fade.
+- 57% of pre-match taker USD trades in the last hour.
+
+**2. Who? Not the people who know.**
+- Wallets were chosen as "informed" (≥15 fixtures, CLV z ≥ 3) on one half of the period and judged on the other, in **both directions**:
+  - first → second: **+0.41pp CLV [+0.24, +0.58]**, $15.7M;
+  - second → first: **+0.54pp [+0.34, +0.74]**, $28.6M.
+- Takers as a whole: −0.17pp.
+- 🔑 The informed place **91% of their USD in the last 24h**. The 24-48h window belongs to small takers.
+- The largest informed taker is **swisstony** (`0x204f72f3…`): 3,539 fixtures, $38M, +0.48pp. `0x2c33…` (the 99%-maker benchmark) is in the set too.
+
+**3. Someone with another line? Yes, but who leads is not settled.**
+- At Football-Data's Pinnacle snapshot (median 26h before KO), PM and Pinnacle are **0.84pp apart**. They converge toward each other: PM closes ~0.5 of the gap and Pinnacle ~0.4.
+- ⚠️ **The lead–lag reading depends on the assumed snapshot hour.** Pinnacle→PM is 0.16 at 09:00 and 0.69 at 21:00. The gap is smallest at 12-15h, where the two converge about equally. Settling it needs timestamped Pinnacle prices, which we do not hold.
+- Wallets chosen as informed on Feb-Sep 2026 (no Pinnacle there), judged on Sep-Jan, trade **in the direction of Pinnacle's LATER move** more often than everyone else:
+
+  | after the snapshot | informed wallets | everyone else |
+  |---|--:|--:|
+  | 0-6h | 55.5% ±3.9 | 49.9% |
+  | 6-18h | 58.1% ±3.0 | 51.3% |
+  | later | 57.2% ±2.0 | 51.3% |
+
+  Copying Pinnacle live and anticipating it cannot be separated without Pinnacle timestamps.
+
+**4. How to get to the fair line from T-48 / T-24? Nothing we measure gets there early.**
+- Out of sample (fit before 2026-02-02, score after), on PM's move to its close:
+  - close_model's gap on PM's price: R² +0.21% (T-48) and +0.42% (T-24). The top 10% moved +0.38pp ±0.47 and +0.40pp ±0.41.
+  - Taker flow and informed flow from the previous 24h: negative R².
+- At the snapshot, the best estimate of the close is a **blend of the two venues**.
+
+**⚠️ Polymarket's soccer fee changed under the whole history.**
+- `fee_rate` was 0 until 2026-03, 3% from 2026-04, and **5% from 2026-07/08**. The informed edge was earned mostly fee-free: +0.50pp on $67M.
+- At 5%, informed takers make +0.83pp CLV against a 1.05pp fee, so they are negative against the close as takers.
+
+**What is open.**
+- Profile the informed wallets with `wallet_analyzer.py`: what they buy, maker share, timing relative to line-ups, copyability.
+- Timestamped Pinnacle prices, to settle who leads.
+- Buying PM below the PM/Pinnacle blend as a **maker**: no fee, so the cost is the half-spread. The expected move is ~0.5 × the gap, +0.76pp at 1-2pp gaps.
 
 ## Every in-play soccer market, every minute (2026-09-13)
 
