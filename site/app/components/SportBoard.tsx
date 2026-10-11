@@ -73,7 +73,8 @@ export function SportBoard({ sport, initial = null }: { sport: SportKey; initial
       <h1 className="sc-h1">{meta.label} odds</h1>
       <p className="sc-h1-sub">
         Every {meta.label} game on Polymarket and Kalshi, side by side, with the better price
-        on each. Open a game to see which app pays it.
+        on each and DraftKings&apos; line under it once it&apos;s posted. Open a game to see
+        which app pays it.
       </p>
     </div>
   )
@@ -88,7 +89,15 @@ export function SportBoard({ sport, initial = null }: { sport: SportKey; initial
           <b className="np-num">{c.kalshiPlaced}</b> of <b className="np-num">{c.kalshi}</b> and
           Polymarket on <b className="np-num">{c.polymarketPlaced}</b> of{' '}
           <b className="np-num">{c.polymarket}</b>. A market we can&apos;t match to a game with
-          both teams exactly is left out, never guessed. &ldquo;Traded&rdquo; adds Polymarket
+          both teams exactly is left out, never guessed. The small <b>DK</b> price is
+          DraftKings&apos; moneyline for the same side as ESPN shows it, before the game only
+          {c.sportsbook != null && (
+            <>
+              {' '}(on <b className="np-num">{c.sportsbook}</b> of these games)
+            </>
+          )}
+          . It is DraftKings&apos; own price, margin included, and never counts toward the better
+          price; hover it to see which pays more after the app&apos;s fee. &ldquo;Traded&rdquo; adds Polymarket
           dollars to Kalshi $1 contracts — close enough to rank on. Updated{' '}
           {mounted ? timeText(new Date(data.generatedAt)) : ''}.
         </p>

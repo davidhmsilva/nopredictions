@@ -6,8 +6,8 @@
  *  number two ways. */
 
 import { dayTimeText, priceText, timeText, useMounted, type OddsFormat } from '../lib/display'
-import type { BoardRow, ShownPrice } from '../lib/boardRow'
-import type { BestPick } from '../lib/venues'
+import { bookPrice, vsBookPct, type BoardRow, type ShownPrice } from '../lib/boardRow'
+import type { BestPick, OutcomeKey } from '../lib/venues'
 import { IconLock } from './icons'
 
 // ── writing numbers ──────────────────────────────────────────────────────────
@@ -23,6 +23,45 @@ export function Shown({ s, f }: { s: ShownPrice; f: OddsFormat }) {
   return (
     <span className="np-closed" role="img" aria-label={s.why} title={s.why}>
       <IconLock />
+    </span>
+  )
+}
+
+/** How a sportsbook is named where a price sits beside it. */
+const BOOK_SHORT: Record<string, string> = { DraftKings: 'DK', FanDuel: 'FD' }
+
+/** The sportsbook's price for the same side, small, under the exchange price.
+ *  The tooltip says which pays more once the app's fee is taken out; the
+ *  book's margin is already inside its own price. */
+export function BookLine({
+  r,
+  k,
+  f,
+  className,
+}: {
+  r: BoardRow
+  k: OutcomeKey
+  f: OddsFormat
+  className: string
+}) {
+  const p = bookPrice(r, k)
+  if (p == null || !r.sportsbook) return null
+  const name = r.sportsbook.book
+  const pct = vsBookPct(r, k)
+  // The card puts it beside the app price and the table under it, so the
+  // words never say where.
+  const vs =
+    pct == null
+      ? ''
+      : pct >= 0.5
+        ? ` The app price pays ${pct.toFixed(1)}% more, after the app's fee.`
+        : pct <= -0.5
+          ? ` ${name} pays ${(-pct).toFixed(1)}% more than the app price, after the app's fee.`
+          : ` About the same as the app price, after the app's fee.`
+  const owner = name.endsWith('s') ? `${name}'` : `${name}'s`
+  return (
+    <span className={className} title={`${owner} price, via ESPN.${vs}`}>
+      {BOOK_SHORT[name] ?? name} {priceText(p, f)}
     </span>
   )
 }

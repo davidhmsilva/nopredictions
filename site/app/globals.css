@@ -4926,6 +4926,12 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   border: 1px solid rgba(255,255,255,.3); border-radius: 6px;
 }
 .sc-c-odd.is-empty { color: var(--grey2); }
+/* The sportsbook's price for the same side, small and quiet under the app
+   price: a reference to compare against, never the price on offer. */
+.sc-book {
+  display: block; margin-top: 3px;
+  font-size: 10.5px; font-weight: 500; color: var(--grey2); white-space: nowrap; cursor: help;
+}
 /* A closed market: a lock where a price would be, never a bare dash. */
 .np-closed { display: inline-flex; align-items: center; justify-content: center; color: var(--grey2); cursor: help; }
 .np-closed svg { width: 14px; height: 14px; }
@@ -5002,6 +5008,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
 .gm-price b { font-size: 14.5px; font-weight: 650; color: var(--white); margin-left: auto; }
 .gm-price.is-best { border-color: rgba(255,255,255,.34); background: #20252d; }
 .gm-logo-gap { display: inline-block; width: 14px; }
+.gm-book { flex-shrink: 0; font-size: 11.5px; color: var(--grey2); white-space: nowrap; cursor: help; }
 
 .gm-foot {
   display: flex; align-items: center; gap: 10px;
@@ -5272,6 +5279,7 @@ th.sc-c-odd, th.sc-c-vol, th.sc-c-go { text-align: right; }
   .sc-modd-p { display: inline-flex; align-items: center; gap: 5px; }
   .sc-modd b { font-size: 14px; color: var(--white); font-weight: 650; }
   .sc-modd.is-best { border-color: rgba(255,255,255,.3); }
+  .sc-modd-book { font-size: 11px; color: var(--grey2); white-space: nowrap; }
 }
 
 /* Dropping odds, every sport: the chip holds 1 / X / 2 on soccer and a team

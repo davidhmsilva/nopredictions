@@ -15,7 +15,7 @@
  */
 
 import Link from 'next/link'
-import { LiveState, money, odds, Shown } from './boardParts'
+import { BookLine, LiveState, money, odds, Shown } from './boardParts'
 import { VenueLogo } from './VenueLogo'
 import { CLOSED_FT, CLOSED_NONE, columnsFor, outcomeLabel, shownPrice, type BoardRow } from '../lib/boardRow'
 import { useOddsFormat } from '../lib/display'
@@ -50,6 +50,7 @@ export function GameCard({ r, showLeague = true }: { r: BoardRow; showLeague?: b
             <div key={c.key} className={`gm-line${c.key === 'draw' ? ' is-draw' : ''}`}>
               <span className="gm-name">{outcomeLabel(r, c.key)}</span>
               {score != null && <b className="gm-score np-num">{score}</b>}
+              <BookLine r={r} k={c.key} f={f} className="gm-book np-num" />
               <span className="gm-price">
                 <b className="np-num">
                   <Shown s={shownPrice(r, c.key)} f={f} />
