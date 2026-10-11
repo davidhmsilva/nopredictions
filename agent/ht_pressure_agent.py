@@ -1045,12 +1045,38 @@ def _first_half_goals_api(fixture_id: int) -> tuple[int | None, int | None]:
         return None, None
 
 
+def _fixture_markets(conn, fixture_ids: list[int]) -> dict[int, tuple[str, str]]:
+    """fixture -> (condition_id, token_id) of its "1st Half O/U 0.5" Over, when
+    the fixture has exactly one. The outcome is a fact about the fixture, so a
+    row recorded before the market was found settles on it too."""
+    if not fixture_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT DISTINCT fixture_id, condition_id, token_id
+                 FROM ht_pressure_observations
+                WHERE fixture_id = ANY(%s) AND token_id IS NOT NULL""",
+            (fixture_ids,),
+        )
+        seen: dict[int, set] = {}
+        for fid, cid, tok in cur.fetchall():
+            seen.setdefault(fid, set()).add((cid, str(tok)))
+    return {fid: next(iter(v)) for fid, v in seen.items() if len(v) == 1}
+
+
+def _market_of(r: dict, markets: dict):
+    if r.get("token_id"):
+        return r.get("condition_id"), str(r["token_id"])
+    return markets.get(r["fixture_id"])
+
+
 def settle(conn) -> int:
     import fav_pressure_agent as fav    # local: fav imports this module at its top
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
-            """SELECT id, fixture_id, minute, paper_trade_id, entered
+            """SELECT id, fixture_id, minute, paper_trade_id, entered,
+                      condition_id, token_id
                  FROM ht_pressure_observations
                 WHERE settled_at IS NULL
                   AND observed_at < now() - interval '35 minutes'
@@ -1071,23 +1097,30 @@ def settle(conn) -> int:
             (fixture_ids,),
         )
         last_seen: dict[int, datetime] = dict(cur.fetchall())
+    markets = _fixture_markets(conn, fixture_ids)
 
-    # Every api-football call FIRST, with no transaction open. Fetching inside
-    # the write loop is how a read transaction came to be held for eight
-    # minutes while Python did HTTP — see db_txn.py.
+    # Every network call FIRST, with no transaction open. Fetching inside the
+    # write loop is how a read transaction came to be held for eight minutes
+    # while Python did HTTP — see db_txn.py.
     #
-    # The OUTCOME is score.halftime — status-gated, batched, the favourite
-    # arm's own function (2026-09-13). It used to be the /fixtures/events goal
-    # count, which reads an EMPTY list as "no goal": leagues without event
-    # coverage, and every ESPN (negative) id, came back as 0 goals under source
-    # 'api' — 11,426 rows over 278 fixtures disagreed with the half-time score.
-    # Nor is there a tape fallback any more: the minute sits at 45 through the
-    # break and into the second half, so a tape that "reached 43'" proves
-    # nothing about the half-time score.
+    # A row with a Polymarket market settles on that market's resolution and
+    # nothing else, trades included (2026-10-11, see fav._pm_verdicts): from
+    # 09-14 every entry was an ESPN fixture, which score.halftime never covers.
+    #
+    # For fixtures Polymarket never listed the OUTCOME is score.halftime —
+    # status-gated, batched, the favourite arm's own function (2026-09-13). It
+    # used to be the /fixtures/events goal count, which reads an EMPTY list as
+    # "no goal": leagues without event coverage, and every ESPN (negative) id,
+    # came back as 0 goals under source 'api' — 11,426 rows over 278 fixtures
+    # disagreed with the half-time score. Nor is there a tape fallback any
+    # more: the minute sits at 45 through the break and into the second half,
+    # so a tape that "reached 43'" proves nothing about the half-time score.
     horizon = datetime.now(timezone.utc) - timedelta(hours=fav.SETTLE_API_MAX_AGE_H)
     traded = {r["fixture_id"] for r in pending if r["paper_trade_id"]}
     live = {fid for fid in fixture_ids if last_seen.get(fid) and last_seen[fid] >= horizon}
-    ht_cache = fav._halftime_scores(sorted(live | traded))
+    verdicts = fav._pm_verdicts(m[0] for m in (_market_of(r, markets) for r in pending) if m)
+    no_market = {r["fixture_id"] for r in pending if not _market_of(r, markets)}
+    ht_cache = fav._halftime_scores(sorted((live | traded) & no_market))
     # The minute of the first goal is display only, and asked only where the
     # half-time score says there was one.
     minute_cache = {fid: _first_half_goals_api(fid)[1]
@@ -1097,6 +1130,35 @@ def settle(conn) -> int:
     with conn.cursor() as cur:
         for r in pending:
             fid = r["fixture_id"]
+            market = _market_of(r, markets)
+            if market:
+                paid, may_close = fav._verdict_of(verdicts, market)
+                if paid is None:
+                    if not may_close or fid in live or fid in traded:
+                        continue              # not resolved, or not read: ask next run
+                    cur.execute(
+                        """UPDATE ht_pressure_observations
+                              SET goal_minute_source = 'no_pm', settled_at = now()
+                            WHERE id = %s""",
+                        (r["id"],),
+                    )
+                    unsettleable += 1
+                    continue
+                # The token is the Over, so it paid exactly when a goal came
+                # before the break. Only "none" pins the count.
+                with db_txn.atomic(conn):
+                    cur.execute(
+                        """UPDATE ht_pressure_observations
+                              SET ht_goals = %s, goal_before_ht = %s,
+                                  goal_minute_source = 'pm', settled_at = now()
+                            WHERE id = %s""",
+                        (None if paid else 0, paid, r["id"]),
+                    )
+                    if r["paper_trade_id"]:
+                        fav._pay_trade(cur, r["paper_trade_id"], paid)
+                settled += 1
+                continue
+
             ht_score = ht_cache.get(fid)
             if ht_score is None:
                 if fid in live or fid in traded:
@@ -1127,24 +1189,40 @@ def settle(conn) -> int:
                         WHERE id = %s""",
                     (ht_goals, won, goal_minute, src, r["id"]),
                 )
-
-                # payout_units is GROSS by project convention: lost = 0,
-                # won = stake * entry_odds. The odds are read back from the
-                # trade rather than recomputed, which is what stops the
-                # NET-style bug repaired across 38 rows in May coming back.
+                # The odds are read back from the trade rather than recomputed,
+                # which is what stops the NET-style bug repaired across 38 rows
+                # in May coming back.
                 if r["paper_trade_id"]:
-                    cur.execute(
-                        """UPDATE paper_trades
-                              SET result = %s,
-                                  payout_units = CASE WHEN %s
-                                                      THEN stake_units * entry_odds
-                                                      ELSE 0 END,
-                                  resolved_at = now()
-                            WHERE id = %s AND result IS NULL""",
-                        ("won" if won else "lost", won, r["paper_trade_id"]),
-                    )
+                    fav._pay_trade(cur, r["paper_trade_id"], won)
             settled += 1
     return settled
+
+
+def backfill_from_pm(conn, dry_run: bool = False) -> dict:
+    """Polymarket's resolution for rows closed with no outcome, and every trade
+    checked against the market it bought. See fav.backfill_from_pm."""
+    import fav_pressure_agent as fav
+
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """SELECT id, fixture_id, condition_id, token_id, goal_minute_source
+                 FROM ht_pressure_observations
+                WHERE settled_at IS NOT NULL AND goal_before_ht IS NULL"""
+        )
+        closed = cur.fetchall()
+        cur.execute(
+            """SELECT o.paper_trade_id AS id, o.condition_id, o.token_id,
+                      p.result, p.payout_units::float8 AS payout_units,
+                      p.resolved_at
+                 FROM ht_pressure_observations o
+                 JOIN paper_trades p ON p.id = o.paper_trade_id
+                WHERE o.entered"""
+        )
+        trades = cur.fetchall()
+    markets = _fixture_markets(conn, sorted({r["fixture_id"] for r in closed}))
+    return fav._backfill(conn, "ht_pressure_observations", "goal_before_ht",
+                         "goal_minute_source", closed, trades,
+                         lambda r: _market_of(r, markets), dry_run)
 
 
 def report(conn) -> None:
@@ -1420,7 +1498,20 @@ def main() -> None:
     ap.add_argument("--interval", type=int, default=CYCLE_S, help="seconds between cycles")
     ap.add_argument("--settle", action="store_true", help="backfill outcomes and exit")
     ap.add_argument("--report", action="store_true", help="what has been collected")
+    ap.add_argument("--backfill-pm", action="store_true",
+                    help="outcomes from Polymarket for rows closed without one; "
+                         "trades checked against the market (honours --dry-run)")
     args = ap.parse_args()
+
+    if args.backfill_pm:
+        import fav_pressure_agent as fav
+        conn = _conn()
+        try:
+            fav.write_backfill_report("s17", backfill_from_pm(conn, dry_run=args.dry_run),
+                                      args.dry_run)
+        finally:
+            conn.close()
+        return
 
     if args.settle or args.report:
         conn = _conn()

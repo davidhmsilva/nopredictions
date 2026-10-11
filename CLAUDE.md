@@ -892,7 +892,8 @@ settlement that trusted something other than the half-time score.
    fixtures** disagreed with `score.halftime`, 91% of them "no goal" where there
    was one. No s17 entry was affected; the calibration arm was.
 
-Fixed in both `settle()` functions:
+Fixed in both `settle()` functions (⚠️ superseded on 2026-10-11 for every row
+with a Polymarket market, see the next section):
 - The outcome comes **only** from `score.halftime`, via
   `fav_pressure_agent._halftime_scores` (batched, status-gated, never sends
   ESPN ids). `_first_half_goals_api` now only supplies the minute shown on the
@@ -909,6 +910,53 @@ unverifiable and left with no outcome (`'no_api'`). pt#5914 and pt#5977 → won.
 ⚠️ On the API path only rows whose **outcome** was wrong were repaired. s17
 `'api'` rows where the events count differs from the half-time score but the
 outcome agrees still carry the events count in `ht_goals`.
+
+## s17/s18 settle on Polymarket's resolution — fixed 2026-10-11
+
+From 2026-09-14 every s17/s18 entry was on an ESPN fixture (negative id),
+because the api-football key refuses. `_halftime_scores` never sends ESPN ids,
+so **neither `settle()` settled a single one of them.** 196 trades were
+resolved by hand in batches, and the observation rows were closed as `no_api`,
+so the calibration arm had no outcomes from 09-14. One hand resolution was
+wrong: **pt#6081, Gent v Standard, booked won.** Our tape read 1-0 at 46', but
+it was 1-1 at the break (equaliser at 45+3'), and Polymarket resolved No. On
+10-11, 57 trades were open and nothing would ever have closed them.
+
+🔑 **The market we bought is the settlement.** Its CLOB `winner` flag is what
+pays, needs no key, and exists for every row with a book. It was checked
+against `score.halftime` before the switch: 0 disagreements over 1,148 s17 and
+1,271 s18 fixtures.
+- A row with a market settles **only** on that market's resolution, and so
+  does its trade (`ht_source` / `goal_minute_source = 'pm'`). `score.halftime`
+  is asked only for fixtures Polymarket never listed, which means research rows.
+- The s17 token is the Over, so `ht_goals` is 0 when it did not pay and NULL
+  when it did: the market does not say how many goals came.
+- **s18 is keyed on (fixture, side), not the fixture.** With no pre-kickoff
+  favourite the side is re-read live and can flip mid-half, and each row
+  carries the market of its own favourite. 26 fixtures had two.
+- A Kalshi-bought s17 trade (obs_version 7) is paid on Polymarket's resolution
+  of the same question.
+- ⚠️ **A 429 is not "unresolved".** At 4 workers the CLOB refused 121 of 400
+  requests, and the first version read those as unresolved, which would have
+  closed stale rows with no outcome. `_pm_verdicts` now runs 2 workers with
+  backoff and returns three states: resolved, read and unresolved, and not
+  read. Only "read and unresolved" may close a stale untraded row (`no_pm`). A
+  50-50 is never read as a result.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python ht_pressure_agent.py --backfill-pm --dry-run    # counts, nothing written
+python fav_pressure_agent.py --backfill-pm             # writes reports/pm_settle_repair_<date>_s18.json
+```
+
+Repaired on 2026-10-11, tagged `'pm_repair'`, with the before-state in
+`reports/pm_settle_repair_2026-10-11_s17.json` / `_s18.json`:
+- s17: 15,879 closed rows filled. 40 open trades settled.
+- s18: 17,156 closed rows filled. 15 open trades settled, and pt#6081 moved
+  won → lost (its `resolved_at` was kept).
+- Two trades whose markets were not yet resolved stay open for the normal
+  settle.
+- Rows that already carried an outcome were not touched.
 
 ## s16 rows settled before the whistle, and never again — fixed 2026-09-14
 
