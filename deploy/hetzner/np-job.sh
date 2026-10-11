@@ -82,6 +82,9 @@ case "$job" in
     exec python close_maker_agent.py --once >> close_maker_agent.log 2>&1 ;;
   close-maker-settle)
     exec python close_maker_agent.py --settle >> close_maker_agent.log 2>&1 ;;
+  team-watch)
+    # weekly: is the market slow on clubs having a good season? CLV report -> reports/team_watch_<date>.md
+    exec python team_watch.py --report --save >> team_watch.log 2>&1 ;;
 
   # ── by hand: any agent script with the server's env and venv ────────────────
   py)
