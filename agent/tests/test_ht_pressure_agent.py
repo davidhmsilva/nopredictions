@@ -52,6 +52,8 @@ class _SettleCur:
             self._rows = self.conn.pending
         elif "max(observed_at)" in sql:
             self._rows = self.conn.last_seen
+        elif "token_id IS NOT NULL" in sql:
+            self._rows = getattr(self.conn, "markets", [])
         else:
             self._rows = []
 
@@ -110,6 +112,50 @@ def test_an_espn_id_is_closed_without_an_outcome_past_the_horizon(monkeypatch):
     assert ht.settle(conn) == 0
     assert conn.writes("'no_api'") == [(1,)]
     assert conn.writes("SET ht_goals") == []
+
+
+# ── settlement on Polymarket's resolution (2026-10-11) ───────────────────────
+# From 09-14 every entry was an ESPN fixture and score.halftime never covers
+# one. The Over we bought is the settlement: it paid iff a goal came first.
+
+def test_a_row_with_a_market_settles_on_the_over_and_never_asks_the_api(monkeypatch):
+    asked: list[list[int]] = []
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: asked.append(list(ids)) or {})
+    monkeypatch.setattr(fav, "_pm_verdicts", lambda cids: {"c1": {"t-over": False, "t-under": True}})
+    row = dict(_pending(-401841222, trade=42), condition_id="c1", token_id="t-over")
+    conn = _SettleConn([row], [(-401841222, _seen(minutes=50))])
+    assert ht.settle(conn) == 1
+    assert conn.writes("SET ht_goals") == [(0, False, 1)]    # no goal pins the count at 0
+    assert conn.writes("UPDATE paper_trades") == [("lost", False, 42)]
+    assert asked == [[]]
+
+
+def test_a_goal_before_the_break_claims_no_count(monkeypatch):
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: {})
+    monkeypatch.setattr(fav, "_pm_verdicts", lambda cids: {"c1": {"t-over": True}})
+    row = dict(_pending(-401841222, trade=42), condition_id="c1", token_id="t-over")
+    conn = _SettleConn([row], [(-401841222, _seen(minutes=50))])
+    assert ht.settle(conn) == 1
+    assert conn.writes("SET ht_goals") == [(None, True, 1)]
+    assert conn.writes("UPDATE paper_trades") == [("won", True, 42)]
+
+
+def test_a_traded_row_waits_while_the_market_is_unresolved(monkeypatch):
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: {7: (1, 0)})
+    monkeypatch.setattr(fav, "_pm_verdicts", lambda cids: {})
+    row = dict(_pending(7, trade=42), condition_id="c1", token_id="t-over")
+    conn = _SettleConn([row], [(7, _seen(hours=fav.SETTLE_API_MAX_AGE_H + 1))])
+    assert ht.settle(conn) == 0
+    assert conn.writes("UPDATE") == []
+
+
+def test_a_row_before_the_market_was_found_settles_on_the_fixtures_market(monkeypatch):
+    monkeypatch.setattr(fav, "_halftime_scores", lambda ids: {})
+    monkeypatch.setattr(fav, "_pm_verdicts", lambda cids: {"c1": {"t-over": True}})
+    conn = _SettleConn([_pending(-401841222)], [(-401841222, _seen(minutes=50))])
+    conn.markets = [(-401841222, "c1", "t-over")]
+    assert ht.settle(conn) == 1
+    assert conn.writes("SET ht_goals") == [(None, True, 1)]
 
 
 # ── PM market discovery ──────────────────────────────────────────────────────
