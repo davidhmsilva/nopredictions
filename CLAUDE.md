@@ -120,7 +120,8 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
 │   ├── live_tracker.py                ← rolling-window pressure signals ✅
 │   ├── pressure_agent.py              ← Live Pressure Overs + drives the HT arm ✅
-│   ├── ht_pressure_agent.py           ← Live Pressure HT Over 0.5 (first half) ✅
+│   ├── ht_pressure_agent.py           ← first-half observations (s17 archived 2026-10-12, still observing) ✅
+│   ├── ht_under_agent.py              ← Low Pressure HT Under 0.5, rides on those rows ✅ NEW
 │   ├── fav_pressure_agent.py          ← Favourite Pressing HT (replaced s18 on 2026-10-12) ✅
 │   ├── first_half_table.py            ← empirical P(goal before HT | 0-0 at m) ✅
 │   ├── favourite_ht_table.py          ← empirical P(fav leads at HT | 0-0 at m) ✅
@@ -432,7 +433,8 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Strategy 7 — Sim Model In-Play | ✅ NEW — same MC sim from in-play state |
 | Over Late Goals — observation | 🔬 Paper only, no orders. Fair value known, PM side unmeasured |
 | Live Pressure Overs (strategy 16) | 🔬 Paper only — the only agent still running. **obs_version 4** (book gates, db/037) |
-| Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 4** (min odds 1.75 + armed monitoring) |
+| Live Pressure HT Over 0.5 (strategy 17) | 🗄️ Archived 2026-10-12 (308 bets, −11.0% net, failed its gate). Still observes: the Under arm reads its rows |
+| Low Pressure HT Under 0.5 | 🔬 Paper only, first-half Under in quiet games, on s17's rows. db/076 |
 | Live Pressure Favourite HT (strategy 18) | 🗄️ Archived 2026-10-12 (154 bets, −11.4% net). Replaced by Favourite Pressing HT |
 | Favourite Pressing HT | 🔬 Paper only, favourite ahead at HT on its own pressure for the minute. **obs_version 5**, db/075 |
 | Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
@@ -523,6 +525,12 @@ The v1 rate was 9 entries in 13 days, so at that pace the gate is ~9 months away
 expect to have to widen the universe before it is reachable.
 
 ## Live Pressure HT Over 0.5 — first-half arm (paper, 2026-08-19)
+
+🗄️ **Archived 2026-10-12.** It passed its n ≥ 200 gate and failed it: 308 bets,
+−11.0% net, CI[−22,+0]. The arm still observes, but `strategy_id()` returns
+None for a retired strategy, so it buys nothing. Its rows feed
+[Low Pressure HT Under 0.5](#low-pressure-ht-under-05--the-other-side-of-the-same-rows-paper-2026-10-12).
+This section is its history.
 
 Same signal as Live Pressure Overs, one market over. The rule: a fixture is still
 **0-0**, the clock has passed **15 minutes**, and those first 15 minutes were
@@ -1424,6 +1432,49 @@ blacklist, the PM-listed cache and the stats carry-forward). This one is bounded
 on both ends by construction: consulted only inside 15-40' on a fixture still
 0-0, dropped by `prune()`, and never a substitute for a live reading anywhere it
 is recorded.
+
+## Low Pressure HT Under 0.5 — the other side of the same rows (paper, 2026-10-12)
+
+By the operator's decision, with rules he confirmed. `agent/ht_under_agent.py`
+decides on s17's rows inside `pressure_agent.py`, so it costs no api-football
+call. Its columns are `under_*` on `ht_pressure_observations`. Migration
+db/076, hypothesis `H-HT-UNDER-QUIET`.
+
+**The rule.** Buy the "1st Half O/U 0.5" **Under**, 1u, once per fixture, at
+the first poll where all of these hold:
+- the score is 0-0, between 15' and 40';
+- s17's `pressure_now` (both ends) is **below** the frozen ceiling for its
+  minute (`LOW_PRESS_BAR`): 15-19' **11.4** · 20-24' **13.6** · 25-29' **12.8**
+  · 30-34' **12.5** · 35-40' **13.2**. A match with no reading is never quiet;
+- both books are two-sided, with spread ≤ 6pp, ≥ $25 at the ask and an ask
+  ≤ 0.85.
+
+The price is the **Under's own CLOB ask**, read only when every other gate has
+passed; it is never 1 − the Over's bid. The order is a **taker** order: a
+resting Under bid fills the instant a goal kills it. It settles on Polymarket's
+resolution of the Under token.
+
+**Why.** On 1,379 clean-book fixtures the Over's ask sits 3.3pp above what
+happens, while the Under's is fair (+0.03pp). So the Under at the ask loses
+about the fee (−2.5%). In quiet games:
+- the bottom third of pressure made **+0.9% CI[−8,+10]**;
+- with this exact bar on v6-v7, **+4.1% on 279 fixtures**. That is in-sample,
+  because the bar was fitted on those rows.
+
+The ceiling is the 1/3 quantile on clean-book obs_version 6-7 rows. **Never
+refit it.** It fires on about 5.8 fixtures a day on ESPN-era rows.
+
+**Verdict.**
+- **Separation:** quiet versus pressing Under yield on forward observation
+  rows, about 1,000 fixtures a side for the ~9pp seen.
+- **Money:** +2% at odds of about 2.0 takes about 10,000 bets.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python ht_under_agent.py --report
+python ht_under_agent.py --settle        # also run by pressure_agent.py --settle
+python -m pytest tests/test_ht_under_agent.py -q
+```
 
 ## The site is two products now — SaaS + the agent (2026-09-06)
 
