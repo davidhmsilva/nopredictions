@@ -64,6 +64,17 @@ SELECT h.id, 'Low Pressure HT Under 0.5', 'agent',
  WHERE h.title LIKE 'H-HT-UNDER-QUIET —%'
    AND NOT EXISTS (SELECT 1 FROM strategies WHERE name = 'Low Pressure HT Under 0.5');
 
+-- s17 is archived the same day, by the operator's decision: it passed its n >= 200
+-- gate and failed it (308 bets, -11.0% net, CI[-22,+0]). From this code on,
+-- ht_pressure_agent.strategy_id() returns None for a retired strategy and the arm
+-- observes without buying, because the Under arm decides on its rows.
+UPDATE strategies
+   SET retired_at = now(), run_status = 'paused', is_public = false,
+       retirement_reason = 'archived 2026-10-12 by its owner: failed its own verdict gate '
+                           '(308 bets, -11.0% net, CI[-22,+0]). Still observing; its rows '
+                           'feed Low Pressure HT Under 0.5 (db/076).'
+ WHERE id = 17 AND retired_at IS NULL;
+
 COMMIT;
 
 -- One Under entry per fixture, the backstop under open_trades' own check.
