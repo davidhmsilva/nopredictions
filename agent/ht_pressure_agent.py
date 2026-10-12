@@ -318,6 +318,11 @@ def ht_over05_market(fixture: dict) -> dict | None:
             prices = json.loads(mkt.get("outcomePrices") or "[]")
         except (json.JSONDecodeError, TypeError):
             continue
+        # The Under is read off its own label, never assumed to be "the other
+        # index": a token on the wrong side inverts the Under arm's bet.
+        under = [token_ids[i] for i, name in enumerate(outcomes)
+                 if str(name).strip().lower().startswith("under")
+                 and i < len(token_ids) and token_ids[i]]
         for i, name in enumerate(outcomes):
             if not str(name).strip().lower().startswith("over"):
                 continue
@@ -326,6 +331,7 @@ def ht_over05_market(fixture: dict) -> dict | None:
             return {
                 "question": q,
                 "token_id": token_ids[i],
+                "under_token_id": under[0] if len(under) == 1 else None,
                 "condition_id": mkt.get("conditionId"),
                 "gamma_price": _f(prices[i]) if i < len(prices) else None,
             }
@@ -594,6 +600,7 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             continue
         row["condition_id"] = mkt["condition_id"]
         row["token_id"] = mkt["token_id"]
+        row["under_token_id"] = mkt.get("under_token_id")
 
         # The CLOB, not Gamma. Booking paper fills at prices nobody was quoting
         # is what turned the convergence trader's +141% paper into +3.4% real.
@@ -859,6 +866,10 @@ def _base_row(sig: PressureSignals) -> dict:
         # stays recoverable per entry (db/055, H-BEST-VENUE).
         "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
         "entry_ask": None, "entry_ticker": None,
+        # The Under arm (db/076, ht_under_agent) decides on this same row.
+        "under_token_id": None, "under_ask": None,
+        "under_would_enter": False, "under_entered": False,
+        "under_paper_trade_id": None, "under_skip_reason": None,
     }
 
 
@@ -881,6 +892,8 @@ _COLS = [
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
     "paper_trade_id", "skip_reason",
     "venue", "alt_venue_ask", "venue_saving_pp", "entry_ask", "entry_ticker",
+    "under_token_id", "under_ask", "under_would_enter", "under_entered",
+    "under_paper_trade_id", "under_skip_reason",
 ]
 
 
