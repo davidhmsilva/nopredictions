@@ -168,6 +168,18 @@ def test_the_trade_records_the_under_token_and_its_price():
     assert params[-1] == "t-under"
 
 
+def test_an_archived_s17_observes_and_never_buys():
+    class C(_Conn):
+        def cursor(self, cursor_factory=None):
+            cur = _Cur(self)
+            cur.fetchone = lambda: (17, "2026-10-12")      # (id, retired_at)
+            return cur
+    assert ht.strategy_id(C()) is None
+    conn = _Conn()
+    assert ht.open_trades(conn, None, [{"would_enter": True}]) == 0
+    assert conn.log == []                                  # not even a lookup
+
+
 def test_settle_pays_on_the_under_token_only(monkeypatch):
     monkeypatch.setattr(fav, "_pm_verdicts",
                         lambda cids: {"c1": {"t-over": False, "t-under": True}, "c2": {}})

@@ -909,22 +909,37 @@ def write(conn, rows: list[dict]) -> None:
     conn.commit()
 
 
-def strategy_id(conn) -> int:
+def strategy_id(conn) -> int | None:
+    """s17's id, or None once it is archived.
+
+    Archived 2026-10-12 (db/076): it failed its own verdict gate (308 bets,
+    -11.0% net, CI[-22,+0]). The arm keeps OBSERVING, because the Under arm
+    (ht_under_agent) decides on these rows and the calibration arm needs them;
+    it only stops buying.
+    """
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM strategies WHERE name = %s", (STRATEGY_NAME,))
+        cur.execute("SELECT id, retired_at FROM strategies WHERE name = %s", (STRATEGY_NAME,))
         got = cur.fetchone()
     if not got:
         raise SystemExit(f"strategy '{STRATEGY_NAME}' missing — apply db/033")
+    if got[1] is not None:
+        log.info(f"'{STRATEGY_NAME}' is archived — observing only, no trades")
+        return None
     return got[0]
 
 
-def open_trades(conn, sid: int, rows: list[dict]) -> int:
+def open_trades(conn, sid: int | None, rows: list[dict]) -> int:
     """One 1u paper position per qualifying fixture.
 
     The unique index on (fixture_id) WHERE entered is what stops the agent
     re-buying the same market every cycle while a team keeps pressing — there is
     only one line here, so a second entry would be a stake-size artifact.
+
+    `sid` is None when the strategy is archived: rows still carry would_enter
+    (the rule, for the record), and nothing is bought.
     """
+    if sid is None:
+        return 0
     opened = 0
     for r in rows:
         if not r["would_enter"]:
