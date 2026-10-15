@@ -98,14 +98,28 @@ export function HomeBoard({ initial = null }: { initial?: BoardRow[] | null }) {
   )
   const rows = ready ? live : (initial ?? [])
 
+  // 🔑 The hero sells the agent; the board underneath is the proof. It says
+  //    the agent HUNTS edges, never that it has found one: agents paper-trade,
+  //    and step 3 says so.
   const head = (
     <div className="sc-head">
-      <p className="sc-eyebrow">NOPREDICTIONS · Prediction-market research</p>
-      <h1 className="sc-h1">See if the price is wrong — before you trade it</h1>
+      <p className="sc-eyebrow">NOPREDICTIONS · AI trading agents</p>
+      <h1 className="sc-h1">Your own AI agent, hunting edges in prediction markets</h1>
       <p className="sc-h1-sub">
-        Polymarket and Kalshi side by side, the better price on every game. No tips — the
-        numbers, and you decide.
+        Tell it a strategy in plain English. It shows you whether that idea would have made
+        money, season by season, over a decade of real games. Then it watches every new game
+        on prediction markets and trades the ones that fit.
       </p>
+      <div className="sc-hero-cta">
+        <Link href="/lab" className="np-btn np-btn-primary">
+          Build your agent <span aria-hidden="true">→</span>
+        </Link>
+        <ol className="sc-hero-steps">
+          <li>Describe it</li>
+          <li>It backtests</li>
+          <li>It paper-trades the next games</li>
+        </ol>
+      </div>
     </div>
   )
 
