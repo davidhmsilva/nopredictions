@@ -110,6 +110,16 @@ def _open_token_ids(conn) -> set[str]:
     return {r[0] for r in cur.fetchall()}
 
 
+def _drift_strategy_id(conn) -> int | None:
+    """The 'Pre-Match Drift' strategy row (db/075), so positions carry their
+    strategy_id and the owner's Agents tab can find them. None if the migration
+    has not been applied — positions still open, just unlinked."""
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM strategies WHERE rules->>'kind' = 'drift' LIMIT 1")
+    row = cur.fetchone()
+    return int(row[0]) if row else None
+
+
 def _parse_kickoff(end_date: str | None) -> datetime | None:
     """PM endDate is approximate kickoff+90min; back off by 95min to estimate kickoff."""
     if not end_date:
@@ -133,7 +143,7 @@ def _team_from_question(question: str) -> str | None:
 
 def _insert_position(conn, *, token_id, condition_id, question, home, away,
                      outcome_key, kickoff_at, entry_yes_price, dc_fair,
-                     edge_pp, dry_run=False) -> bool:
+                     edge_pp, strategy_id=None, dry_run=False) -> bool:
     entry_no_price  = round(1.0 - entry_yes_price, 4)
     size_shares     = round(STAKE_USD / entry_no_price, 4)
     target_no_price = round(entry_no_price * (1 + TARGET_PCT), 4)
@@ -157,15 +167,15 @@ def _insert_position(conn, *, token_id, condition_id, question, home, away,
                   kickoff_at,
                   entry_yes_price, entry_no_price, dc_fair, edge_pp,
                   stake_usd, size_shares, target_no_price, stop_no_price,
-                  hard_close_minutes)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  hard_close_minutes, strategy_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT (token_id) WHERE status = 'open' DO NOTHING
                RETURNING id""",
             (token_id, condition_id, question, home, away, outcome_key,
              kickoff_at,
              entry_yes_price, entry_no_price, dc_fair, edge_pp,
              STAKE_USD, size_shares, target_no_price, stop_no_price,
-             HARD_CLOSE_MIN),
+             HARD_CLOSE_MIN, strategy_id),
         )
         row = cur.fetchone()
         conn.commit()
@@ -190,6 +200,7 @@ def scan(dry_run: bool = False) -> int:
     conn = None if dry_run else _conn()
     open_tokens = _open_token_ids(conn) if conn else set()
     national_teams = _load_national_teams(conn) if conn else set()
+    strategy_id = _drift_strategy_id(conn) if conn else None
     now = datetime.now(timezone.utc)
 
     n_entered = 0
@@ -317,6 +328,7 @@ def scan(dry_run: bool = False) -> int:
                 entry_yes_price=ask,
                 dc_fair=round(fair, 4),
                 edge_pp=edge_pp,
+                strategy_id=strategy_id,
                 dry_run=dry_run,
             )
             if entered:
