@@ -26,6 +26,14 @@ const HOME_ROWS = 10
 /** How long the list waits for a slow board before ranking what it has. */
 const WAIT_MS = 5000
 
+/** The three steps the hero leads on: describe a strategy, see it backtested,
+ *  trade the ones that fit. "Trade" is paper on Polymarket — no edge claimed. */
+const HERO_STEPS = [
+  { title: 'Describe it', body: 'Write a strategy in plain English.' },
+  { title: 'Backtest it', body: 'Replayed over a decade of real games.' },
+  { title: 'Trade', body: 'Take the ones that fit, on Polymarket at the best price.' },
+]
+
 /** What the site does besides the board, shown under the home page's list. */
 const MORE = [
   {
@@ -98,27 +106,31 @@ export function HomeBoard({ initial = null }: { initial?: BoardRow[] | null }) {
   )
   const rows = ready ? live : (initial ?? [])
 
-  // 🔑 The hero sells the agent; the board underneath is the proof. It says
-  //    the agent HUNTS edges, never that it has found one: agents paper-trade,
-  //    and step 3 says so.
+  // 🔑 The hero says what the product does, as three steps: describe a
+  //    strategy, see it backtested, trade the ones that fit. It never claims
+  //    an edge has been found — "Trade" is paper on Polymarket, and the board
+  //    underneath is the proof of the scanning, not of a win.
   const head = (
     <div className="sc-head">
       <p className="sc-eyebrow">NOPREDICTIONS · AI trading agents</p>
-      <h1 className="sc-h1">Your own AI agent, hunting edges in prediction markets</h1>
+      <h1 className="sc-h1">See if the price is wrong before you trade it</h1>
       <p className="sc-h1-sub">
-        Tell it a strategy in plain English. It shows you whether that idea would have made
-        money, season by season, over a decade of real games. Then it watches every new game
-        on prediction markets and trades the ones that fit.
+        Describe a strategy in plain English, watch it backtested over a decade of real games,
+        then trade the ones that fit — on Polymarket, at the best venue price.
       </p>
+      <ol className="sc-steps">
+        {HERO_STEPS.map((s, i) => (
+          <li key={s.title} className="sc-step">
+            <span className="sc-step-n" aria-hidden="true">{i + 1}</span>
+            <b className="sc-step-t">{s.title}</b>
+            <span className="sc-step-b">{s.body}</span>
+          </li>
+        ))}
+      </ol>
       <div className="sc-hero-cta">
         <Link href="/lab" className="np-btn np-btn-primary">
           Build your agent <span aria-hidden="true">→</span>
         </Link>
-        <ol className="sc-hero-steps">
-          <li>Describe it</li>
-          <li>It backtests</li>
-          <li>It paper-trades the next games</li>
-        </ol>
       </div>
     </div>
   )
