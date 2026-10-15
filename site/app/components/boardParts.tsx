@@ -6,14 +6,25 @@
  *  number two ways. */
 
 import { dayTimeText, priceText, timeText, useMounted, type OddsFormat } from '../lib/display'
-import type { BoardRow } from '../lib/boardRow'
+import type { BoardRow, ShownPrice } from '../lib/boardRow'
 import type { BestPick } from '../lib/venues'
+import { IconLock } from './icons'
 
 // ── writing numbers ──────────────────────────────────────────────────────────
 
 export function odds(p: number | null | undefined, f: OddsFormat): string {
   if (p == null || p <= 0.01 || p >= 0.99) return '—'
   return priceText(p, f)
+}
+
+/** One board cell: the price, or a lock that says why there is none. */
+export function Shown({ s, f }: { s: ShownPrice; f: OddsFormat }) {
+  if (s.kind === 'price') return <>{priceText(s.ask, f)}</>
+  return (
+    <span className="np-closed" role="img" aria-label={s.why} title={s.why}>
+      <IconLock />
+    </span>
+  )
 }
 
 export function money(v: number | null | undefined): string {

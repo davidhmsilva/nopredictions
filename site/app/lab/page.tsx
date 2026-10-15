@@ -1,357 +1,236 @@
 'use client'
 
-import { useRef, useState, type FormEvent } from 'react'
-
-import { isNbaMarket } from '../lib/backtest'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import { QuotaStrip } from '../components/QuotaStrip'
-import { ToolChips, ToolFacts, ToolForm, ToolHead, ToolOutput } from '../components/ToolPage'
+import { ToolChips, ToolForm, ToolHead } from '../components/ToolPage'
 import { useSession } from '../lib/useSession'
 import { oddsText, useOddsFormat } from '../lib/display'
+import { LEAGUES } from '../lib/backtest'
 import { QUOTA_RESET_TEXT } from '../lib/planTerms'
 import { clarify, type LabQuestion } from '../lib/labQuestions'
+import {
+  ALL_LEAGUES,
+  DEFAULT_PICK,
+  FEATURED,
+  ODDS_BANDS,
+  QUICK_SIDES,
+  bandText,
+  type Picked,
+} from '../lib/labQuick'
 import { Clarify } from './Clarify'
 import { InplayResult, type InplayApiResult } from './InplayResult'
+import { LabResult, type LabApiResult } from './LabResult'
 
-// ── types mirrored from the API route ───────────────────────────────────────
+// The Lab used to be a headline, an empty box and a glossary: nobody saw a
+// result before signing up, because every example spent a use and a use needs
+// an account. Now the page opens ON a result, the picker and the popular
+// tests run free (a cached SQL query, no model — see lib/labQuick), and the
+// written theory, which is the part that costs a Claude call, keeps its quota.
 
-interface Stats {
-  n: number
-  wins: number
-  pushes?: number
-  hitRatePct: number
-  avgOdds: number | null
-  pnl: number
-  yieldPct: number
-  ci95Pct: number
-  pValue: number | null
-  clvPct: number | null
-  yieldOpenPct: number | null
-  nOpen: number
-  maxDrawdown: number
-  firstMatch: string | null
-  lastMatch: string | null
-}
-
-interface Verdict {
-  code: string
-  label: string
-  detail: string
-}
-
-interface SeasonRow {
-  season: number
-  n: number
-  wins: number
-  pnl: number
-}
-
-interface MonthRow {
-  month: string
-  n: number
-  pnl: number
-}
-
-interface ApiResult {
-  ok: boolean
-  error?: string
-  supported?: boolean
-  reason?: string
-  suggestion?: string | null
-  interpretation?: string | null
-  spec?: { market?: string }
-  verdict?: Verdict
-  stats?: Stats
-  seasons?: SeasonRow[]
-  monthly?: MonthRow[]
-  caveats?: string[]
-}
-
-const EXAMPLES = [
-  'Draws are underpriced in Serie B',
-  'Home favorites below 1.50 are free money in the Premier League',
-  'Back over 2.5 goals when both teams have been in high-scoring games',
-  'Away underdogs on short rest collapse in the Championship',
-  'Teams in terrible form bounce back at home in La Liga',
+/** Written theories worth showing as a start: each needs words the picker
+ *  does not have, and the last is a live rule. */
+const WRITTEN_EXAMPLES = [
+  'Away underdogs on short rest in the Championship',
+  'Back Barcelona at home after a bad run of form',
   'Back a 1.30-1.50 favourite that is pressing while level, sell after the next goal',
 ]
 
-// ── equity curve ─────────────────────────────────────────────────────────────
-
-function EquityCurve({ monthly }: { monthly: MonthRow[] }) {
-  if (monthly.length < 2) return null
-  const W = 640
-  const H = 180
-  const PAD = 8
-  let cum = 0
-  const pts = monthly.map(m => (cum += m.pnl))
-  const min = Math.min(0, ...pts)
-  const max = Math.max(0, ...pts)
-  const range = max - min || 1
-  const x = (i: number) => PAD + (i / (pts.length - 1)) * (W - 2 * PAD)
-  const y = (v: number) => PAD + (1 - (v - min) / range) * (H - 2 * PAD)
-  const path = pts.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
-  const zeroY = y(0)
-  const final = pts[pts.length - 1]
-
-  return (
-    <div className="bt-chart">
-      <div className="bt-chart-head">
-        <span>CUMULATIVE P&amp;L (UNITS, 1U FLAT)</span>
-        <span className={final >= 0 ? 'bt-pos' : 'bt-neg'}>
-          {final >= 0 ? '+' : ''}
-          {final.toFixed(1)}u
-        </span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="bt-chart-svg" preserveAspectRatio="none">
-        <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} className="bt-chart-zero" />
-        <path d={path} className={final >= 0 ? 'bt-chart-line bt-chart-line-pos' : 'bt-chart-line bt-chart-line-neg'} />
-      </svg>
-      <div className="bt-chart-foot">
-        <span>{monthly[0].month}</span>
-        <span>{monthly[monthly.length - 1].month}</span>
-      </div>
-    </div>
-  )
-}
-
-// ── what a test gives you ────────────────────────────────────────────────────
-//
-// Shown in place of the empty terminal. A first-time visitor has no idea what
-// "backtest" buys them, and the honest answer — a number, an interval, and a
-// verdict that is usually no — is more convincing than a promise.
-
-const DATA_FACTS: { v: string; k: string }[] = [
-  { v: '111,475', k: 'real games' },
-  { v: '22', k: 'football leagues + NBA' },
-  { v: '2012–2026', k: 'seasons covered' },
-  { v: 'Pinnacle', k: 'closing odds' },
-]
-
-const OUTPUT_FACTS: { k: string; v: string }[] = [
-  { k: 'Selections', v: 'How many bets your theory would actually have made. Under 200 and there is no verdict.' },
-  { k: 'Yield ± 95% CI', v: 'Profit per unit staked, with the interval. The interval is the part that decides it.' },
-  { k: 'p-value', v: 'The odds a result this good came from luck alone.' },
-  { k: 'CLV', v: 'Whether the price moved your way after you bet. Positive yield without it is usually luck.' },
-  { k: 'Equity curve', v: 'The run of it — including the drawdown you would have had to sit through.' },
-]
-
-function WhatYouGet() {
-  return (
-    <section className="tp-explain">
-      <ToolFacts facts={DATA_FACTS} />
-      <ToolOutput rows={OUTPUT_FACTS} />
-    </section>
-  )
-}
-
-// ── page ─────────────────────────────────────────────────────────────────────
-
-type Phase = 'idle' | 'running' | 'asking' | 'done'
 type Mode = 'prematch' | 'inplay' | 'unsupported'
 
+/** The country, so "Premier League" and "Super League" say whose. */
+const LEAGUE_GROUPS = Array.from(new Set(LEAGUES.map((l) => l.country))).map((country) => ({
+  country,
+  leagues: LEAGUES.filter((l) => l.country === country),
+}))
+
 export default function LabPage() {
+  const [pick, setPick] = useState<Picked>(DEFAULT_PICK)
   const [input, setInput] = useState('')
-  const [phase, setPhase] = useState<Phase>('idle')
-  const [termLines, setTermLines] = useState<{ text: string; cls: string }[]>([])
-  const [result, setResult] = useState<ApiResult | null>(null)
+  const [result, setResult] = useState<LabApiResult | null>(null)
+  const [inplay, setInplay] = useState<InplayApiResult | null>(null)
+  const [busy, setBusy] = useState<'quick' | 'theory' | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [gate, setGate] = useState<'signed_out' | 'quota' | null>(null)
-  const [lastHypothesis, setLastHypothesis] = useState('')
-  const [saved, setSaved] = useState<{ id?: number; error?: string; busy?: boolean } | null>(null)
-  // The questions step: what was asked, of which theory, and for which kind
-  // of rule. A live rule has its own result, with no backtest in it.
   const [questions, setQuestions] = useState<LabQuestion[] | null>(null)
   const [asked, setAsked] = useState<{ theory: string; mode: Mode } | null>(null)
-  const [inplay, setInplay] = useState<InplayApiResult | null>(null)
+  const [saved, setSaved] = useState<{ id?: number; error?: string; busy?: boolean } | null>(null)
+  const [lastTheory, setLastTheory] = useState('')
+  const [activeExample, setActiveExample] = useState<string | null>(FEATURED[0].id)
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
-  // The counter above the box has to move when a run spends one, without a
-  // page reload — so the session is re-read after every attempt, refused ones
-  // included (a refusal is how you find out the count is already zero).
+  const topRef = useRef<HTMLDivElement>(null)
+  const resultRef = useRef<HTMLDivElement>(null)
   const { me, refresh } = useSession()
-  const oddsFmt = useOddsFormat()
+  const fmt = useOddsFormat()
 
-  function pushLine(text: string, cls = 'lp-term-dim') {
-    setTermLines(prev => [...prev, { text, cls }])
-  }
-
-  /** Step 1: read the theory and ask what it leaves open. The questions are a
-   *  help, never a gate — any failure here goes straight to the test. */
-  async function run(hypothesis: string) {
-    if (!hypothesis.trim() || phase === 'running') return
+  function reset() {
     timers.current.forEach(clearTimeout)
     timers.current = []
     setResult(null)
     setInplay(null)
     setGate(null)
+    setError(null)
     setSaved(null)
     setQuestions(null)
-    setPhase('running')
-    setTermLines([
-      { text: `> read "${hypothesis}"`, cls: 'lp-term-cmd' },
-      { text: 'checking what the theory leaves open…', cls: 'lp-term-dim' },
-    ])
+    setStatus(null)
+  }
+
+  function showResult() {
+    // Only scroll when the result is off screen — on a desktop it sits right
+    // under the picker and a jump would be noise.
+    requestAnimationFrame(() => {
+      const el = resultRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      if (r.top < 60 || r.top > window.innerHeight * 0.6) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    })
+  }
+
+  // ── the free half ─────────────────────────────────────────────────────────
+
+  async function runQuick(body: { example: string } | { pick: Picked }, scroll = true) {
+    if (busy) return
+    reset()
+    setBusy('quick')
+    setActiveExample('example' in body ? body.example : null)
+    try {
+      const res = await fetch('/api/lab/quick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const d: LabApiResult = await res.json()
+      if (!d.ok) setError(d.error ?? 'Something went wrong.')
+      else {
+        setResult(d)
+        setLastTheory(d.title ?? '')
+        if (scroll) showResult()
+      }
+    } catch {
+      setError('Network error — try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // The page opens on a result, not on a promise of one.
+  useEffect(() => {
+    runQuick({ example: FEATURED[0].id }, false)
+    return () => timers.current.forEach(clearTimeout)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── the written half (spends a use) ───────────────────────────────────────
+
+  /** Step 1: read the theory and ask what it leaves open. The questions are a
+   *  help, never a gate — any failure here goes straight to the test. */
+  async function runTheory(theory: string) {
+    if (!theory.trim() || busy) return
+    reset()
+    setActiveExample(null)
+    setBusy('theory')
+    setStatus('Reading your theory…')
+    showResult()
     let mode: Mode = 'prematch'
     try {
       const res = await fetch('/api/lab/plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hypothesis }),
+        body: JSON.stringify({ hypothesis: theory }),
       })
       if (res.status === 401 || res.status === 402) {
         refresh()
         setGate(res.status === 401 ? 'signed_out' : 'quota')
-        setTermLines([])
-        setPhase('done')
+        setStatus(null)
+        setBusy(null)
         return
       }
       const d = await res.json()
       if (d.ok) {
         mode = d.mode ?? 'prematch'
         if (d.questions?.length) {
-          pushLine(
-            `${mode === 'inplay' ? 'live rule' : 'pre-match theory'} · ${d.questions.length} question${d.questions.length === 1 ? '' : 's'} before it runs`,
-            'lp-term-ok',
-          )
-          setAsked({ theory: hypothesis, mode })
+          setAsked({ theory, mode })
           setQuestions(d.questions)
-          setPhase('asking')
+          setStatus(null)
+          setBusy(null)
           return
         }
       }
     } catch {
       // fall through to the test
     }
-    await proceed(mode, hypothesis)
+    await proceed(mode, theory)
   }
 
   /** Step 2: the theory, clarified, to the engine that fits it. */
   async function proceed(mode: Mode, text: string) {
     setQuestions(null)
-    if (mode === 'inplay') return runInplay(text)
-    return runBacktest(text)
+    setBusy('theory')
+    setLastTheory(text)
+    return mode === 'inplay' ? runInplay(text) : runBacktest(text)
   }
 
-  async function runInplay(hypothesis: string) {
-    setPhase('running')
-    setLastHypothesis(hypothesis)
-    setTermLines([
-      { text: `> build "${hypothesis}"`, cls: 'lp-term-cmd' },
-      { text: 'translating to a live rule…', cls: 'lp-term-dim' },
-    ])
+  async function runInplay(theory: string) {
+    setStatus('Turning it into a live rule…')
     try {
       const res = await fetch('/api/lab/inplay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hypothesis }),
+        body: JSON.stringify({ hypothesis: theory }),
       })
       const data = await res.json()
       refresh()
       if (res.status === 401 || res.status === 402) {
         setGate(res.status === 401 ? 'signed_out' : 'quota')
-        setTermLines([])
-        setPhase('done')
-        return
-      }
-      if (!data.ok) {
-        pushLine(`✗ ERROR — ${data.error ?? 'something went wrong'}`, 'lp-term-warn')
-        setPhase('done')
-        return
-      }
-      if (!data.supported) {
-        pushLine('✗ NOT EXPRESSIBLE AS A LIVE RULE YET', 'lp-term-warn')
+      } else if (!data.ok) {
+        setError(data.error ?? 'Something went wrong.')
+      } else if (!data.supported) {
         setResult(data)
-        setPhase('done')
-        return
+      } else {
+        setInplay(data)
       }
-      pushLine('rule      live · Polymarket football · paper, 1u per match', 'lp-term-dim')
-      pushLine('✓ READY TO RUN — the forward record is the test', 'lp-term-ok')
-      setInplay(data)
-      setPhase('done')
     } catch {
-      pushLine('✗ ERROR — network or server failure', 'lp-term-warn')
-      setPhase('done')
+      setError('Network or server failure — nothing was spent.')
+    } finally {
+      setStatus(null)
+      setBusy(null)
+      showResult()
     }
   }
 
-  async function runBacktest(hypothesis: string) {
-    timers.current.forEach(clearTimeout)
-    timers.current = []
-    setResult(null)
-    setInplay(null)
-    setGate(null)
-    setSaved(null)
-    setPhase('running')
-    setLastHypothesis(hypothesis)
-    setTermLines([{ text: `> test "${hypothesis}"`, cls: 'lp-term-cmd' }])
-    timers.current.push(setTimeout(() => pushLine('parsing hypothesis…'), 400))
-    timers.current.push(setTimeout(() => pushLine('translating to a testable spec…'), 2200))
-    timers.current.push(
-      setTimeout(
-        () => pushLine('scanning 111,475 games · 22 football leagues + NBA…'),
-        5200,
-      ),
-    )
-
+  async function runBacktest(theory: string) {
+    setStatus('Turning your words into a test…')
+    timers.current.push(setTimeout(() => setStatus('Replaying it over 111,475 games…'), 3500))
     try {
       const res = await fetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hypothesis }),
+        body: JSON.stringify({ hypothesis: theory }),
       })
-      const data: ApiResult = await res.json()
-      timers.current.forEach(clearTimeout)
+      const data: LabApiResult = await res.json()
       refresh()
-
-      // 401 = no account, 402 = the day is spent. Neither is an error, and
-      // printing "✗ ERROR" over a sign-in prompt tells someone their theory
-      // broke something when the only thing that happened is that they are
-      // not signed in.
       if (res.status === 401 || res.status === 402) {
         setGate(res.status === 401 ? 'signed_out' : 'quota')
-        setTermLines([])
-        setPhase('done')
-        return
+      } else if (!data.ok) {
+        setError(data.error ?? 'Something went wrong.')
+      } else {
+        setResult({ ...data, title: data.title ?? theory })
       }
-
-      if (!data.ok) {
-        pushLine(`✗ ERROR — ${data.error ?? 'something went wrong'}`, 'lp-term-warn')
-        setPhase('done')
-        return
-      }
-      if (!data.supported) {
-        pushLine('✗ NOT TESTABLE WITH CURRENT DATA', 'lp-term-warn')
-        setResult(data)
-        setPhase('done')
-        return
-      }
-      const s = data.stats!
-      // name the dataset that actually ran — the pre-flight line is a guess
-      pushLine(
-        isNbaMarket(data.spec?.market ?? '')
-          ? 'dataset   NBA · 10,006 games · 2014-15 → 2021-22 · consensus close'
-          : 'dataset   football · 101,469 matches · 2012-2026 · Pinnacle close',
-      )
-      pushLine(
-        `backtest   n=${s.n.toLocaleString('en-US')} · yield ${s.yieldPct >= 0 ? '+' : ''}${s.yieldPct.toFixed(2)}% · p=${s.pValue != null ? s.pValue.toFixed(3) : 'n/a'}${s.clvPct != null ? ` · CLV ${s.clvPct >= 0 ? '+' : ''}${s.clvPct.toFixed(2)}%` : ''}`,
-      )
-      const cls =
-        data.verdict!.code === 'EDGE_FOUND'
-          ? 'lp-term-ok'
-          : data.verdict!.code === 'INSUFFICIENT_SAMPLE' || data.verdict!.code === 'NO_MATCHES'
-            ? 'lp-term-warn'
-            : 'lp-term-warn'
-      pushLine(`${data.verdict!.code === 'EDGE_FOUND' ? '✓' : '✗'} ${data.verdict!.label}`, cls)
-      setResult(data)
-      setPhase('done')
     } catch {
+      setError('Network or server failure.')
+    } finally {
       timers.current.forEach(clearTimeout)
-      pushLine('✗ ERROR — network or server failure', 'lp-term-warn')
-      setPhase('done')
+      setStatus(null)
+      setBusy(null)
+      showResult()
     }
   }
 
-  /** Keep this theory as an agent. The server re-runs the backtest from the
+  /** Keep this test as an agent. The server re-runs the backtest from the
    *  spec rather than trusting the numbers on this page — see lib/agents. */
   async function saveAgent() {
     const spec = inplay?.spec ?? result?.spec
@@ -366,8 +245,8 @@ export default function LabPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          hypothesis: lastHypothesis,
-          interpretation: (inplay ?? result)?.interpretation ?? '',
+          hypothesis: lastTheory.slice(0, 500),
+          interpretation: ((inplay ?? result)?.interpretation ?? result?.title ?? '').slice(0, 500),
           spec,
         }),
       })
@@ -378,314 +257,221 @@ export default function LabPage() {
     }
   }
 
-  function handleSubmit(e: FormEvent) {
+  function onPick(e: FormEvent) {
     e.preventDefault()
-    run(input)
+    runQuick({ pick })
   }
 
-  const s = result?.stats
-  const showResults = phase === 'done' && result?.ok && result.supported && s
+  function onTheory(e: FormEvent) {
+    e.preventDefault()
+    runTheory(input)
+  }
+
+  const showTested = !busy && result?.ok && result.supported && result.stats && result.verdict
 
   return (
     <AppShell>
-      <div className="tp-page">
-        <ToolHead eyebrow="LAB" title="You have a theory. Find out if it pays.">
-          Write it the way you would say it out loud. We replay it over every game we
-          have and tell you what it would have made — including when the answer is
-          nothing, which it usually is.
+      <div className="tp-page lx-page" ref={topRef}>
+        <ToolHead eyebrow="LAB" title="Test a betting idea on 14 years of real odds.">
+          Pick a bet or write your own. We replay it over 111,475 real games at the closing price and
+          show you what it would have made.
         </ToolHead>
 
-        <QuotaStrip
-          quota={me?.lab ?? null}
-          signedIn={Boolean(me?.user)}
-          feature="Lab test"
-          next="/lab"
-        />
+        <form className="lx-pick" onSubmit={onPick}>
+          <span className="lx-pick-word">Back</span>
+          <select
+            className="lx-select"
+            aria-label="What to back"
+            value={pick.side}
+            onChange={(e) => setPick({ ...pick, side: e.target.value as Picked['side'] })}
+          >
+            {QUICK_SIDES.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <span className="lx-pick-word">in</span>
+          <select
+            className="lx-select"
+            aria-label="League"
+            value={pick.league}
+            onChange={(e) => setPick({ ...pick, league: e.target.value })}
+          >
+            <option value={ALL_LEAGUES}>Every league</option>
+            {LEAGUE_GROUPS.map((g) => (
+              <optgroup key={g.country} label={g.country}>
+                {g.leagues.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <span className="lx-pick-word">at</span>
+          <select
+            className="lx-select"
+            aria-label="Odds"
+            value={pick.odds}
+            onChange={(e) => setPick({ ...pick, odds: e.target.value })}
+          >
+            {ODDS_BANDS.map((b) => (
+              <option key={b.id} value={b.id}>
+                {bandText(b, (d) => oddsText(d, fmt)).replace(/^Any odds$/, 'any odds')}
+              </option>
+            ))}
+          </select>
+          <button type="submit" className="tp-go lx-go" disabled={busy !== null}>
+            {busy === 'quick' ? 'Testing…' : 'Test it'}
+          </button>
+        </form>
 
-        <ToolForm onSubmit={handleSubmit} cta={phase === 'running' ? 'TESTING…' : 'TEST IT'} disabled={phase === 'running'}>
-          <input
-            className="tp-input"
-            placeholder='e.g. "Draws are underpriced in Serie B"'
-            value={input}
-            maxLength={500}
-            onChange={e => setInput(e.target.value)}
-            disabled={phase === 'running'}
-            aria-label="Hypothesis"
-          />
-        </ToolForm>
-
-        <ToolChips label="TRY ONE">
-          {EXAMPLES.map(ex => (
+        <div className="lx-popular">
+          <span className="lx-popular-label">Popular</span>
+          {FEATURED.map((f) => (
             <button
-              key={ex}
+              key={f.id}
               type="button"
-              className="tp-chip"
-              disabled={phase === 'running'}
-              onClick={() => {
-                setInput(ex)
-                run(ex)
-              }}
+              className={`tp-chip${activeExample === f.id ? ' is-on' : ''}`}
+              disabled={busy !== null}
+              onClick={() => runQuick({ example: f.id })}
             >
-              {ex}
+              {f.title}
             </button>
           ))}
-        </ToolChips>
+        </div>
+        <p className="lx-free">Picked and popular tests are free — no account needed.</p>
 
-
-        {/* The terminal was the first thing on the page and, until you ran
-            something, it was an empty grey box the height of a screen. It now
-            appears when there is something in it; before that the space says
-            what comes back instead. */}
-        {gate && (
-          <section className="tp-gate">
-            <h2>{gate === 'signed_out' ? 'This one needs an account' : "That is today's three"}</h2>
-            <p>
-              {gate === 'signed_out'
-                ? 'Replaying a theory over 111,475 games costs us a model call, so it sits behind a free account. Three a day, no card.'
-                : `Free accounts get three Lab tests a day. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit.`}
-            </p>
-            <div className="tp-gate-actions">
-              {gate === 'signed_out' ? (
-                <Link className="np-btn np-btn-primary" href="/login?next=%2Flab">
-                  Sign in — it is free
-                </Link>
-              ) : (
-                <Link className="np-btn np-btn-primary" href="/pricing">See Pro</Link>
-              )}
-              <Link className="np-btn" href="/insights">Read what we already tested</Link>
+        <div className="lx-result" ref={resultRef}>
+          {busy && (
+            <div className="lx-busy" role="status">
+              <span className="scan-spinner" />
+              <span>{status ?? 'Testing…'}</span>
             </div>
-          </section>
-        )}
+          )}
 
-        {termLines.length > 0 ? (
-          <div className="lp-term bt-term">
-            <div className="lp-term-head">
-              <span className="lp-term-dot" />
-              <span className="lp-term-dot" />
-              <span className="lp-term-dot" />
-              <span className="lp-term-title">NOPREDICTIONS AGENT — HYPOTHESIS TESTER</span>
-            </div>
-            <div className="lp-term-body bt-term-body">
-              {termLines.map((l, i) => (
-                <div key={i} className={`lp-term-line ${l.cls}`}>
-                  {l.text}
-                </div>
-              ))}
-              {phase === 'running' && (
-                <div className="lp-term-line lp-term-cmd">
-                  <span className="lp-term-cursor" />
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <WhatYouGet />
-        )}
+          {error && !busy && <div className="tp-warn lx-error">{error}</div>}
 
-        {phase === 'asking' && questions && asked && (
-          <Clarify
-            questions={questions}
-            busy={false}
-            onDone={(c) => proceed(asked.mode, clarify(asked.theory, c))}
-            onSkip={() => proceed(asked.mode, asked.theory)}
-          />
-        )}
-
-        {phase === 'done' && inplay?.ok && inplay.supported && inplay.rule && (
-          <InplayResult result={inplay} saved={saved} onSave={saveAgent} />
-        )}
-
-        {/* not testable */}
-        {phase === 'done' && result?.ok && result.supported === false && (
-          <section className="bt-panel">
-            <div className="bt-verdict bt-verdict-warn">NOT TESTABLE — YET</div>
-            <p className="bt-text">{result.reason}</p>
-            {result.suggestion && (
-              <div className="bt-suggestion">
-                <div className="bt-label">CLOSEST TESTABLE THEORY</div>
-                <p className="bt-text">&ldquo;{result.suggestion}&rdquo;</p>
-                <button
-                  type="button"
-                  className="lp-btn-primary bt-submit"
-                  onClick={() => {
-                    setInput(result.suggestion!)
-                    run(result.suggestion!)
-                  }}
-                >
-                  TEST THAT INSTEAD
+          {gate && (
+            <section className="tp-gate">
+              <h2>{gate === 'signed_out' ? 'Written theories need a free account' : "That's today's three"}</h2>
+              <p>
+                {gate === 'signed_out'
+                  ? 'Reading a theory in your own words costs us a model call, so it sits behind a free account: three a day, no card. The picker and the popular tests stay free.'
+                  : `Free accounts get three written theories a day. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit. The picker stays free.`}
+              </p>
+              <div className="tp-gate-actions">
+                {gate === 'signed_out' ? (
+                  <Link className="np-btn np-btn-primary" href="/login?mode=signup&next=%2Flab">
+                    Create a free account
+                  </Link>
+                ) : (
+                  <Link className="np-btn np-btn-primary" href="/pricing">
+                    See Pro
+                  </Link>
+                )}
+                <button type="button" className="np-btn" onClick={() => topRef.current?.scrollIntoView({ behavior: 'smooth' })}>
+                  Use the picker instead
                 </button>
               </div>
-            )}
-          </section>
-        )}
+            </section>
+          )}
 
-        {/* results */}
-        {showResults && (
-          <section className="bt-panel">
-            <div
-              className={`bt-verdict ${
-                result!.verdict!.code === 'EDGE_FOUND'
-                  ? 'bt-verdict-ok'
-                  : result!.verdict!.code === 'INSUFFICIENT_SAMPLE' || result!.verdict!.code === 'NO_MATCHES'
-                    ? 'bt-verdict-warn'
-                    : 'bt-verdict-bad'
-              }`}
-            >
-              {result!.verdict!.label}
-            </div>
-            <p className="bt-text">{result!.verdict!.detail}</p>
+          {questions && asked && !busy && (
+            <Clarify
+              questions={questions}
+              busy={false}
+              onDone={(c) => proceed(asked.mode, clarify(asked.theory, c))}
+              onSkip={() => proceed(asked.mode, asked.theory)}
+            />
+          )}
 
-            {result!.interpretation && (
-              <>
-                <div className="bt-label">WHAT WAS ACTUALLY TESTED</div>
-                <p className="bt-text bt-interp">{result!.interpretation}</p>
-              </>
-            )}
+          {!busy && inplay?.ok && inplay.supported && inplay.rule && (
+            <InplayResult result={inplay} saved={saved} onSave={saveAgent} />
+          )}
 
-            <div className="bt-save">
-              {saved?.id ? (
-                <p className="bt-text">
-                  Saved. <Link href={`/agent/${saved.id}`}>Open the agent</Link> and press Run it —
-                  it trades nothing until you do.
-                </p>
-              ) : (
-                <>
+          {!busy && result?.ok && result.supported === false && (
+            <section className="lr">
+              <div className="lr-title">{lastTheory}</div>
+              <h2 className="lr-head">We can&apos;t test that one yet</h2>
+              <p className="lr-note">{result.reason}</p>
+              {result.suggestion && (
+                <div className="lr-actions">
                   <button
                     type="button"
-                    className="lp-btn-primary bt-submit"
-                    disabled={saved?.busy}
-                    onClick={saveAgent}
+                    className="np-btn np-btn-primary"
+                    onClick={() => {
+                      setInput(result.suggestion!)
+                      runTheory(result.suggestion!)
+                    }}
                   >
-                    {saved?.busy ? 'SAVING…' : 'SAVE AS AN AGENT'}
+                    Test “{result.suggestion}” instead
                   </button>
-                  <span className="bt-save-note">
-                    Whatever the verdict above. Switch it on in Agents and it paper-trades the
-                    next games that fit — the forward record is the test history cannot run.
-                  </span>
-                  {saved?.error && <p className="bt-text bt-neg">{saved.error}</p>}
-                </>
-              )}
-            </div>
-
-            {s.n > 0 && (
-              <>
-                <div className="bt-metrics">
-                  <div className="bt-metric">
-                    <div className="bt-metric-v">{s.n.toLocaleString('en-US')}</div>
-                    <div className="bt-metric-k">SELECTIONS</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className="bt-metric-v">{s.hitRatePct.toFixed(1)}%</div>
-                    <div className="bt-metric-k">HIT RATE</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className="bt-metric-v">{oddsText(s.avgOdds, oddsFmt)}</div>
-                    <div className="bt-metric-k">AVG ODDS</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className={`bt-metric-v ${s.pnl >= 0 ? 'bt-pos' : 'bt-neg'}`}>
-                      {s.pnl >= 0 ? '+' : ''}
-                      {s.pnl.toFixed(1)}u
-                    </div>
-                    <div className="bt-metric-k">TOTAL P&amp;L</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className={`bt-metric-v ${s.yieldPct >= 0 ? 'bt-pos' : 'bt-neg'}`}>
-                      {s.yieldPct >= 0 ? '+' : ''}
-                      {s.yieldPct.toFixed(2)}%
-                    </div>
-                    <div className="bt-metric-k">YIELD ± {s.ci95Pct.toFixed(2)} (95% CI)</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className="bt-metric-v">{s.pValue != null ? s.pValue.toFixed(3) : '—'}</div>
-                    <div className="bt-metric-k">P-VALUE VS ZERO</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className={`bt-metric-v ${(s.clvPct ?? 0) >= 0 ? 'bt-pos' : 'bt-neg'}`}>
-                      {s.clvPct != null ? `${s.clvPct >= 0 ? '+' : ''}${s.clvPct.toFixed(2)}%` : '—'}
-                    </div>
-                    <div className="bt-metric-k">AVG CLV (OPEN→CLOSE)</div>
-                  </div>
-                  <div className="bt-metric">
-                    <div className="bt-metric-v bt-neg">-{s.maxDrawdown.toFixed(1)}u</div>
-                    <div className="bt-metric-k">MAX DRAWDOWN</div>
-                  </div>
                 </div>
+              )}
+            </section>
+          )}
 
-                {/* Rule 5 of this project's methodology: positive yield with
-                    non-positive CLV is luck until proven otherwise. The verdict
-                    above is computed from yield and p-value alone, so when the
-                    two arms disagree the page has to say so rather than let
-                    "EDGE FOUND" stand on its own. */}
-                {s.yieldPct > 0 && s.clvPct != null && s.clvPct <= 0 && (
-                  <div className="np-note bt-clv-warn">
-                    <strong>The two arms disagree.</strong> This made money at the closing
-                    price, but its CLV is{' '}
-                    <span className="np-num">{s.clvPct.toFixed(2)}%</span> — the odds did not
-                    move from open to close, so nothing says the market was wrong here rather
-                    than the sample being kind. Positive yield with non-positive CLV is the
-                    signature of luck, and it is the first thing to check out of sample.
-                  </div>
-                )}
-
-                <EquityCurve monthly={result!.monthly ?? []} />
-
-                {(result!.seasons?.length ?? 0) > 1 && (
-                  <div className="bt-seasons">
-                    <div className="bt-label">BY SEASON</div>
-                    <table className="bt-table">
-                      <thead>
-                        <tr>
-                          <th>SEASON</th>
-                          <th>N</th>
-                          <th>HIT</th>
-                          <th>P&amp;L</th>
-                          <th>YIELD</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result!.seasons!.map(r => (
-                          <tr key={r.season}>
-                            <td>
-                              {r.season}-{String((r.season + 1) % 100).padStart(2, '0')}
-                            </td>
-                            <td>{r.n.toLocaleString('en-US')}</td>
-                            <td>{((r.wins / r.n) * 100).toFixed(0)}%</td>
-                            <td className={r.pnl >= 0 ? 'bt-pos' : 'bt-neg'}>
-                              {r.pnl >= 0 ? '+' : ''}
-                              {r.pnl.toFixed(1)}u
-                            </td>
-                            <td className={r.pnl >= 0 ? 'bt-pos' : 'bt-neg'}>
-                              {((r.pnl / r.n) * 100).toFixed(1)}%
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </>
-            )}
-
-            {(result!.caveats?.length ?? 0) > 0 && (
-              <div className="bt-caveats">
-                <div className="bt-label">HONESTY NOTES</div>
-                <ul>
-                  {result!.caveats!.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
-        )}
-
-        <div className="np-note bt-foot">
-          Backtests run against closing odds — Pinnacle for football, consensus for the NBA.
-          Flat 1u stakes, minimum 200 selections before any verdict.{' '}
-          <strong>A backtest is not an edge.</strong> It is the first filter, and most
-          theories that survive it still die out of sample.
+          {showTested && (
+            <LabResult
+              r={result!}
+              saved={saved}
+              onSave={saveAgent}
+              onTryAnother={() => topRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            />
+          )}
         </div>
+
+        <section className="lx-own">
+          <h2>Or write it in your own words</h2>
+          <p>
+            Team names, recent form, rest days, a rule for during the match — anything the picker
+            can&apos;t say.
+          </p>
+          <QuotaStrip quota={me?.lab ?? null} signedIn={Boolean(me?.user)} feature="Lab test" next="/lab" />
+          <ToolForm onSubmit={onTheory} cta={busy === 'theory' ? 'Testing…' : 'Test it'} disabled={busy !== null}>
+            <input
+              className="tp-input"
+              placeholder="Draws are underpriced in Serie B when both teams are mid-table"
+              value={input}
+              maxLength={500}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={busy !== null}
+              aria-label="Your theory"
+            />
+          </ToolForm>
+          <ToolChips label="For example">
+            {WRITTEN_EXAMPLES.map((ex) => (
+              <button
+                key={ex}
+                type="button"
+                className="tp-chip"
+                disabled={busy !== null}
+                onClick={() => setInput(ex)}
+              >
+                {ex}
+              </button>
+            ))}
+          </ToolChips>
+        </section>
+
+        <details className="lx-how">
+          <summary>How the Lab works</summary>
+          <ul>
+            <li>
+              Football: 101,469 league matches in 22 leagues, 2012 to January 2026, each bet at
+              Pinnacle&apos;s closing price — the sharpest price there is, and the hardest to beat.
+              NBA: 10,006 games, 2014-15 to 2021-22, at the consensus close.
+            </li>
+            <li>Every bet is 1 unit, win or lose, so the profit is in units and the return is per bet.</li>
+            <li>Under 200 bets we don&apos;t give a verdict: a good run looks like a pattern for a long time.</li>
+            <li>
+              A test over the past is the first filter, not the last. Tracking a test on new games is
+              how you find out whether it holds.
+            </li>
+          </ul>
+        </details>
       </div>
     </AppShell>
   )

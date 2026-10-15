@@ -1,21 +1,17 @@
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
-import { getSql } from '../../lib/db'
+import { runSpec, type SpecResult } from '../../lib/labRun'
 import { currentUser } from '../../lib/supabaseAuth'
 import { claimUse, refundUse, refusalMessage } from '../../lib/plan'
 import {
   LEAGUES,
   LEAGUE_CODES,
-  NBA_CAVEATS,
   NBA_SEASON_MAX,
   NBA_SEASON_MIN,
   ParseResultSchema,
   isNbaMarket,
   toSqlSpec,
-  computeStats,
-  verdict,
-  type RawBacktest,
   type Spec,
 } from '../../lib/backtest'
 
@@ -207,15 +203,12 @@ export async function POST(request: Request) {
 
   const { spec, warnings } = sanitizeSpec(toSqlSpec(parsed.spec))
 
-  // 2 · Run the backtest in Postgres (separate function per sport)
-  const nba = isNbaMarket(spec.market)
-  let raw: RawBacktest
+  // 2 · Run the backtest in Postgres (separate function per sport) — the same
+  //     path as the Lab's free tests, so a typed theory and the same theory
+  //     picked from the list cannot disagree.
+  let r: SpecResult
   try {
-    const sql = getSql()
-    const rows = nba
-      ? await sql`SELECT run_backtest_nba(${sql.json(spec as never)}) AS r`
-      : await sql`SELECT run_backtest(${sql.json(spec as never)}) AS r`
-    raw = rows[0].r as RawBacktest
+    r = await runSpec(spec)
   } catch (err) {
     console.error('backtest error', err)
     await refund()
@@ -223,19 +216,7 @@ export async function POST(request: Request) {
   }
 
   // 3 · Stats + honest verdict
-  const stats = computeStats(raw)
-  const v = verdict(stats)
-
-  const caveats = [
-    ...parsed.caveats,
-    ...warnings,
-    ...(nba
-      ? NBA_CAVEATS
-      : [
-          'Entry price = Pinnacle closing odds, flat 1u stakes. Beating the close is the hardest version of this test.',
-        ]),
-    'Rest days / form only count games in our dataset (league games — cups are not included).',
-  ]
+  const caveats = [...parsed.caveats, ...warnings, ...r.datasetCaveats]
 
   return NextResponse.json({
     ok: true,
@@ -243,10 +224,11 @@ export async function POST(request: Request) {
     hypothesis,
     interpretation: parsed.interpretation,
     spec,
-    verdict: v,
-    stats,
-    seasons: raw.seasons,
-    monthly: raw.monthly,
+    verdict: r.verdict,
+    stats: r.stats,
+    seasons: r.seasons,
+    monthly: r.monthly,
+    recent: r.recent,
     caveats,
     entitlement: use,
   })

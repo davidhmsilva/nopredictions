@@ -2,8 +2,7 @@
 
 /** The shared frame for a tool page — the Lab and the Wallet analyser.
  *
- *  Both do the same job: a headline, a box you paste something into, some
- *  shortcuts, and an honest list of what comes back. They were built at
+ *  Both do the same job: a headline, a box you type into and some shortcuts. They were built at
  *  different times and shared nothing — `np-page-head` / `np-h1` / `bt-form` /
  *  `bt-chip` on one, `scanner-hero` / `scanner-h1` / `analyze-input-row` /
  *  `wallet-known-chip` on the other, with the Wallet not even using AppShell.
@@ -21,18 +20,6 @@
  */
 
 import type { ReactNode } from 'react'
-
-export interface Fact {
-  /** The number or word that carries it. */
-  v: string
-  /** What it is. */
-  k: string
-}
-
-export interface OutputRow {
-  k: string
-  v: string
-}
 
 export function ToolHead({
   eyebrow,
@@ -87,41 +74,5 @@ export function ToolChips({ label, children }: { label?: string; children: React
       {label && <div className="tp-chips-label">{label}</div>}
       <div className="tp-chips-row">{children}</div>
     </div>
-  )
-}
-
-export function ToolFacts({ facts }: { facts: Fact[] }) {
-  return (
-    <div className="tp-facts">
-      {facts.map((f) => (
-        <div key={f.k} className="tp-fact">
-          <span className="tp-fact-v np-num">{f.v}</span>
-          <span className="tp-fact-k">{f.k}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/** "What comes back" — the promise, itemised.
- *
- *  It earns its place on both pages for the same reason: someone who has never
- *  run one has no idea what "FIFO round trips" or "yield ± 95% CI" buys them,
- *  and the list is more convincing than the phrase. */
-export function ToolOutput({ title = 'What comes back', rows }: { title?: string; rows: OutputRow[] }) {
-  return (
-    <section className="tp-out-wrap">
-      <div className="tp-section-head">
-        <h2>{title}</h2>
-      </div>
-      <dl className="tp-out">
-        {rows.map((o) => (
-          <div key={o.k} className="tp-out-row">
-            <dt>{o.k}</dt>
-            <dd>{o.v}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
   )
 }

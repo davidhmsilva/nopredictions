@@ -15,9 +15,9 @@
  */
 
 import Link from 'next/link'
-import { LiveState, money, odds } from './boardParts'
+import { LiveState, money, odds, Shown } from './boardParts'
 import { VenueLogo } from './VenueLogo'
-import { columnsFor, outcomeLabel, type BoardRow } from '../lib/boardRow'
+import { CLOSED_FT, CLOSED_NONE, columnsFor, outcomeLabel, shownPrice, type BoardRow } from '../lib/boardRow'
 import { useOddsFormat } from '../lib/display'
 import { VENUE_NAME, gradeOf, type OutcomeKey } from '../lib/venues'
 
@@ -45,17 +45,15 @@ export function GameCard({ r, showLeague = true }: { r: BoardRow; showLeague?: b
 
       <div className="gm-lines">
         {cols.map((c) => {
-          const pick = r.best[c.key]
           const score = scoreFor(r, c.key)
           return (
             <div key={c.key} className={`gm-line${c.key === 'draw' ? ' is-draw' : ''}`}>
               <span className="gm-name">{outcomeLabel(r, c.key)}</span>
               {score != null && <b className="gm-score np-num">{score}</b>}
-              <span
-                className="gm-price"
-                title={pick && pick.ask != null ? undefined : 'Not offered right now'}
-              >
-                <b className="np-num">{odds(pick?.ask ?? null, f)}</b>
+              <span className="gm-price">
+                <b className="np-num">
+                  <Shown s={shownPrice(r, c.key)} f={f} />
+                </b>
               </span>
             </div>
           )
@@ -91,25 +89,32 @@ export function GameCard({ r, showLeague = true }: { r: BoardRow; showLeague?: b
 }
 
 /** The Over on a US game's main total, from Polymarket's own book. A quote
- *  with no real market behind it prints as a dash, the same as a price the
- *  venue does not offer. */
+ *  with no real market behind it shows the same lock as a price the venue
+ *  does not offer. */
 function TotalLine({ r }: { r: BoardRow }) {
   const f = useOddsFormat()
   const t = r.total
   const q = t && gradeOf([t.over]) !== 'none' ? t.over : null
   const unit = TOTAL_UNIT[r.sport] ?? 'points'
+  const priced = !r.finished && q?.ask != null && odds(q.ask, f) !== '—'
   return (
     <div className="gm-line is-total">
       <span className="gm-name">{t ? `Over ${t.line}` : 'Over / under'}</span>
       <span
         className="gm-price"
         title={
-          t && q
+          priced && t
             ? `Over ${t.line} total ${unit} on Polymarket. Kalshi's totals are not compared here yet.`
-            : 'Not offered right now'
+            : undefined
         }
       >
-        <b className="np-num">{odds(q?.ask ?? null, f)}</b>
+        <b className="np-num">
+          {priced && q?.ask != null ? (
+            odds(q.ask, f)
+          ) : (
+            <Shown s={{ kind: 'closed', why: r.finished ? CLOSED_FT : CLOSED_NONE }} f={f} />
+          )}
+        </b>
       </span>
     </div>
   )

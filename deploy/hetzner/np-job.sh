@@ -85,6 +85,12 @@ case "$job" in
   team-watch)
     # weekly: is the market slow on clubs having a good season? CLV report -> reports/team_watch_<date>.md
     exec python team_watch.py --report --save >> team_watch.log 2>&1 ;;
+  drift-scan)
+    # Pre-Match Drift: open NO-on-longshot positions 1.5–48h out (db/020, db/075)
+    exec python drift_scanner.py >> drift_scanner.log 2>&1 ;;
+  drift-monitor)
+    # Pre-Match Drift: exit on +10% target / -5% stop / force-close before kick-off
+    exec python drift_monitor.py >> drift_monitor.log 2>&1 ;;
 
   # ── by hand: any agent script with the server's env and venv ────────────────
   py)

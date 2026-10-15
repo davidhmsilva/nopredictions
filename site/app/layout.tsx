@@ -3,13 +3,14 @@ import './globals.css'
 import { Analytics } from '@vercel/analytics/next'
 
 // What the site leads with, in one place, so the browser tab, a search result
-// and a link pasted on X all say the same thing. The title names what the tool
-// DOES, not a venue or a sport; the description says what is on it today.
-const TITLE = 'NOPREDICTIONS — Find the better odds on every game'
+// and a link pasted on X all say the same thing. Since 2026-10-15 it leads with
+// the agent, like the hero; the description still names both venues, because
+// those are the words people search, and says the agent paper-trades.
+const TITLE = 'NOPREDICTIONS — Build an AI trading agent for prediction markets'
 const DESCRIPTION =
-  'Polymarket and Kalshi side by side for the NFL, college football, MLB, NBA, NHL, WNBA and soccer, with the better price marked after fees. American, decimal or implied odds. Free, no tips.'
+  'Describe a strategy in plain English. Your AI agent backtests it on a decade of real games, then paper-trades it on Polymarket and Kalshi. Free odds on every game.'
 const CARD =
-  'Polymarket and Kalshi side by side on every game, with the better price marked after fees. Free, no tips.'
+  'Your own AI agent, hunting edges in prediction markets. Describe a strategy, see if it would have made money, and let it trade the games that fit.'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.nopredictions.com'),

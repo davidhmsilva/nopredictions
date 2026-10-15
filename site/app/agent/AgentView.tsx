@@ -5,7 +5,7 @@
  *  fetches and acts, this draws. */
 
 import Link from 'next/link'
-import type { AgentDetail, AgentOrder, AgentSummary } from '../lib/agents'
+import type { AgentDetail, AgentOrder, AgentSummary, DriftPosition } from '../lib/agents'
 import { dateText, dayTimeText, oddsText, useOddsFormat } from '../lib/display'
 import { EquityChart, StatusBadge, ago, pct, pickOf, settledOf, sinceText, tone, units } from './parts'
 import { describeInplay, isInplaySpec } from '../lib/inplaySpec'
@@ -75,6 +75,87 @@ function Bids({ orders }: { orders: AgentOrder[] }) {
                     <span className={`np-badge ${st.cls}`}>{st.label}</span>
                     {won && o.status !== 'filled' && <span className="ag-row-sub">would have {won}</span>}
                   </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+/** Why a drift position closed, said plainly. */
+const DRIFT_REASON: Record<string, string> = {
+  target: 'hit the +10% target',
+  kickoff: 'closed before kick-off',
+  stop: 'stopped out',
+  kickoff_post: 'force-closed after kick-off',
+  kickoff_missed: 'missed its exit window',
+  void_women: 'fixture voided',
+}
+
+/** The outcome we hold NO on, read out. We bet it would NOT happen. */
+function driftPick(p: DriftPosition): string {
+  if (p.outcome === 'draw') return 'No draw'
+  const team = p.outcome === 'away_win' ? p.away : p.home
+  return team ? `${team} not to win` : 'No'
+}
+
+/** A drift agent's positions: it buys NO on a longshot a day or two before
+ *  kick-off, where the price is still drifting toward fair, and exits before
+ *  the match starts — so these are pre-match positions, never held to a
+ *  result. */
+function Positions({ positions }: { positions: DriftPosition[] }) {
+  const fmt = useOddsFormat()
+  const odds = (p: number | null) => oddsText(p != null && p > 0 ? 1 / p : null, fmt)
+  return (
+    <section className="gc-section">
+      <h2 className="gc-h2">Positions</h2>
+      <p className="gc-quiet">
+        This agent buys the NO side of a longshot a day or two before kick-off, where the price is still
+        drifting toward fair, and sells before the match starts. Nothing is ever held to a result — the
+        P&amp;L is the price move on the NO side between entry and exit.
+      </p>
+      <div className="sc-table-wrap">
+        <table className="sc-table">
+          <thead>
+            <tr>
+              <th className="ag-c-placed">Entered</th>
+              <th>Position</th>
+              <th className="ag-c-num">Entry</th>
+              <th className="ag-c-num ag-hide-m">Exit</th>
+              <th className="ag-c-status">Result</th>
+              <th className="ag-c-num">P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {positions.map((p) => {
+              const r = p.status === 'open'
+                ? { label: 'OPEN', cls: 'is-info' }
+                : p.pl_units == null || p.pl_units === 0
+                  ? { label: 'VOID', cls: '' }
+                  : p.pl_units > 0
+                    ? { label: 'WON', cls: 'is-good' }
+                    : { label: 'LOST', cls: 'is-live' }
+              const reason = p.exit_reason ? DRIFT_REASON[p.exit_reason] ?? p.exit_reason.replace(/_/g, ' ') : null
+              return (
+                <tr key={p.id}>
+                  <td className="ag-c-placed np-num">
+                    {dayTimeText(new Date(p.entry_at))}
+                    {p.kickoff && <span className="ag-row-sub">kick-off {dayTimeText(new Date(p.kickoff))}</span>}
+                  </td>
+                  <td>
+                    <span className="ag-t-pick">{driftPick(p)}</span>
+                    {p.home && p.away && <span className="ag-t-event">{p.home} v {p.away}</span>}
+                  </td>
+                  <td className="ag-c-num np-num">{odds(p.entry_no)}</td>
+                  <td className="ag-c-num ag-hide-m np-num">{odds(p.exit_no)}</td>
+                  <td className="ag-c-status">
+                    <span className={`np-badge ${r.cls}`}>{r.label}</span>
+                    {reason && <span className="ag-row-sub">{reason}</span>}
+                  </td>
+                  <td className={`ag-c-num np-num ${tone(p.pl_units)}`}>{p.pl_units != null ? units(p.pl_units) : '—'}</td>
                 </tr>
               )
             })}
@@ -186,7 +267,7 @@ function Tiles({ a }: { a: AgentSummary }) {
 
 export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: AgentActions }) {
   const fmt = useOddsFormat()
-  const { agent: a, trades, curve } = detail
+  const { agent: a, trades, curve, positions } = detail
   const settled = settledOf(a)
   const bt = a.backtest
 
@@ -255,6 +336,9 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
 
       {detail.orders?.length > 0 && <Bids orders={detail.orders} />}
 
+      {positions?.length > 0 && <Positions positions={positions} />}
+
+      {positions?.length === 0 && (
       <section className="gc-section">
         <h2 className="gc-h2">Bets</h2>
         {trades.length === 0 ? (
@@ -327,6 +411,7 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
           </>
         )}
       </section>
+      )}
     </>
   )
 }

@@ -1,0 +1,349 @@
+{
+ "created_at": "2026-10-10T19:41:28+00:00",
+ "note": "first v2 run: families + 5 default search runs (clv/yield \u00d7 pin_raw/pm_taker, yield \u00d7 pm_maker_strict)",
+ "alpha_each": 0.002631578947368421,
+ "items": [
+  {
+   "kind": "family",
+   "family": "price_level",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 33.10074628322848,
+    "df": 2,
+    "p": 6.490292521419753e-08
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 1.7216872906750234,
+    "p": 2.2169795408055707e-06,
+    "r2_gain": 0.0032777359832230615
+   }
+  },
+  {
+   "kind": "family",
+   "family": "price_level",
+   "view": "ou25_over",
+   "target": "move",
+   "train": {
+    "matches": 14405,
+    "chi2": 65.47778992678447,
+    "df": 2,
+    "p": 6.0489302094219395e-15
+   },
+   "valid": {
+    "matches": 7806,
+    "gamma": 1.663310093608603,
+    "p": 3.026177902890913e-15,
+    "r2_gain": 0.008701093349919352
+   }
+  },
+  {
+   "kind": "family",
+   "family": "form",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 51603,
+    "chi2": 44.5224652478689,
+    "df": 1,
+    "p": 2.5145520658229687e-11
+   },
+   "valid": {
+    "matches": 22053,
+    "gamma": 1.164670067433578,
+    "p": 8.293569129523138e-05,
+    "r2_gain": 0.0007715261779658627
+   }
+  },
+  {
+   "kind": "family",
+   "family": "goals_avg",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 51603,
+    "chi2": 124.07374777466319,
+    "df": 1,
+    "p": 8.117002674570341e-29
+   },
+   "valid": {
+    "matches": 22053,
+    "gamma": 2.650961523509056,
+    "p": 5.44081238855468e-49,
+    "r2_gain": 0.010906804523778311
+   }
+  },
+  {
+   "kind": "family",
+   "family": "goals_avg",
+   "view": "ou25_over",
+   "target": "move",
+   "train": {
+    "matches": 14290,
+    "chi2": 317.77075986444964,
+    "df": 1,
+    "p": 4.4308110828328665e-71
+   },
+   "valid": {
+    "matches": 7744,
+    "gamma": 0.49918703596413777,
+    "p": 1.9274961555993975e-10,
+    "r2_gain": 0.005308551730676044
+   }
+  },
+  {
+   "kind": "family",
+   "family": "team_state",
+   "view": "1x2_sides",
+   "target": "move",
+   "train": {
+    "matches": 51251,
+    "chi2": 1078.473414464859,
+    "df": 7,
+    "p": 1.325441049782977e-228
+   },
+   "valid": {
+    "matches": 21945,
+    "gamma": 1.5142478024273511,
+    "p": 5.730036081403836e-171,
+    "r2_gain": 0.04025594343105296
+   }
+  },
+  {
+   "kind": "family",
+   "family": "team_state",
+   "view": "1x2_sides",
+   "target": "close_bias",
+   "train": {
+    "matches": 51251,
+    "chi2": 17.45629691318606,
+    "df": 7,
+    "p": 0.014679364327165122
+   },
+   "valid": {
+    "matches": 21945,
+    "gamma": 1.1130072361466237,
+    "p": 0.0009477247038327652,
+    "r2_gain": 0.0003290254530568222
+   }
+  },
+  {
+   "kind": "family",
+   "family": "team_state",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 51251,
+    "chi2": 169.20765346286242,
+    "df": 3,
+    "p": 1.8867711511214184e-36
+   },
+   "valid": {
+    "matches": 21945,
+    "gamma": 1.8242595510995014,
+    "p": 5.465223988308785e-32,
+    "r2_gain": 0.008564799314382227
+   }
+  },
+  {
+   "kind": "family",
+   "family": "team_state",
+   "view": "ou25_over",
+   "target": "move",
+   "train": {
+    "matches": 14220,
+    "chi2": 31.895314847522535,
+    "df": 3,
+    "p": 5.506185466012352e-07
+   },
+   "valid": {
+    "matches": 7706,
+    "gamma": 1.4115354858988283,
+    "p": 3.8324469699023376e-08,
+    "r2_gain": 0.00437515423627161
+   }
+  },
+  {
+   "kind": "family",
+   "family": "model_score",
+   "view": "1x2_sides",
+   "target": "move",
+   "train": {
+    "matches": 29790,
+    "chi2": 475.87822607166277,
+    "df": 1,
+    "p": 1.68515732555641e-105
+   },
+   "valid": {
+    "matches": 21945,
+    "gamma": 1.617795792972087,
+    "p": 1.5633499923731796e-164,
+    "r2_gain": 0.038780245382258265
+   }
+  },
+  {
+   "kind": "family",
+   "family": "tier",
+   "view": "1x2_sides",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 340.3798232517538,
+    "df": 2,
+    "p": 1.223095885708025e-74
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 1.6167091422437638,
+    "p": 2.4605014824398356e-58,
+    "r2_gain": 0.000392974772115371
+   }
+  },
+  {
+   "kind": "family",
+   "family": "tier",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 53.37589868763865,
+    "df": 2,
+    "p": 2.5678571879421045e-12
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 2.33765802296816,
+    "p": 7.260818941256759e-17,
+    "r2_gain": 0.00274404478094262
+   }
+  },
+  {
+   "kind": "family",
+   "family": "tier",
+   "view": "ou25_over",
+   "target": "move",
+   "train": {
+    "matches": 14405,
+    "chi2": 56.92399791259508,
+    "df": 2,
+    "p": 4.3562310812758114e-13
+   },
+   "valid": {
+    "matches": 7806,
+    "gamma": 1.4601641969466843,
+    "p": 1.9971584238428066e-13,
+    "r2_gain": 0.0063178472329906525
+   }
+  },
+  {
+   "kind": "family",
+   "family": "season_phase",
+   "view": "1x2_sides",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 117.50872486046458,
+    "df": 2,
+    "p": 3.04301861316914e-26
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 0.6122977771433733,
+    "p": 0.00022159357613196038,
+    "r2_gain": 1.870514067007223e-05
+   }
+  },
+  {
+   "kind": "family",
+   "family": "season_phase",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 200.822818298702,
+    "df": 2,
+    "p": 2.465352852761812e-44
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 1.250578626645556,
+    "p": 3.0043756739686406e-18,
+    "r2_gain": 0.0036547360468044045
+   }
+  },
+  {
+   "kind": "family",
+   "family": "season_phase",
+   "view": "ou25_over",
+   "target": "move",
+   "train": {
+    "matches": 14405,
+    "chi2": 138.57152688106035,
+    "df": 2,
+    "p": 8.120359627430219e-31
+   },
+   "valid": {
+    "matches": 7806,
+    "gamma": 1.2587764433208073,
+    "p": 5.873849376649407e-36,
+    "r2_gain": 0.020876963843370906
+   }
+  },
+  {
+   "kind": "family",
+   "family": "league",
+   "view": "1x2_sides",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 613.3649232940925,
+    "df": 21,
+    "p": 2.4678963238270597e-116
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 1.4387557764909535,
+    "p": 1.6703706163879926e-76,
+    "r2_gain": 0.0005862358413163343
+   }
+  },
+  {
+   "kind": "family",
+   "family": "league",
+   "view": "1x2_draw",
+   "target": "move",
+   "train": {
+    "matches": 52190,
+    "chi2": 181.55796513010677,
+    "df": 21,
+    "p": 1.4760873082797293e-27
+   },
+   "valid": {
+    "matches": 22230,
+    "gamma": 0.8753111642923667,
+    "p": 5.368328030614122e-10,
+    "r2_gain": 0.0017245424774463961
+   }
+  },
+  {
+   "kind": "family",
+   "family": "league",
+   "view": "ou25_over",
+   "target": "move",
+   "train": {
+    "matches": 14405,
+    "chi2": 183.98319899980848,
+    "df": 21,
+    "p": 4.972505048175795e-28
+   },
+   "valid": {
+    "matches": 7806,
+    "gamma": 0.9373127270911065,
+    "p": 1.3939208505485414e-19,
+    "r2_gain": 0.01072666503059602
+   }
+  }
+ ]
+}

@@ -10,7 +10,6 @@ import {
   IconLab,
   IconMenu,
   IconSearch,
-  IconTeams,
   IconWallet,
 } from './icons'
 import { invalidateSession, useSession } from '../lib/useSession'
@@ -20,9 +19,11 @@ import { loadTeamIndex, searchTeams, type TeamHit } from '../lib/teamIndex'
 import { teamHref } from '../lib/teamSlug'
 
 /** The tabs, in the order a bettor uses them on a matchday:
- *  what is on → the clubs behind it → can I test my own idea → what is the
- *  agent doing → who else is doing it well. Game Center is deliberately
- *  absent: you reach a fixture by clicking it, never by picking a tab. */
+ *  what is on → can I test my own idea → what is the agent doing → who else
+ *  is doing it well. Game Center is deliberately absent: you reach a fixture
+ *  by clicking it, never by picking a tab. Teams left the menu on 2026-10-10
+ *  (the user's call); /teams and every /team/… page still exist, reached from
+ *  the search box and the Game Center. */
 export const TABS: {
   href: string
   label: string
@@ -30,7 +31,6 @@ export const TABS: {
   Icon: (p: { className?: string }) => JSX.Element
 }[] = [
   { href: '/',       label: 'Home',   hint: "Today's boards", Icon: IconBoard },
-  { href: '/teams',  label: 'Teams',  hint: 'Every club',     Icon: IconTeams },
   { href: '/lab',    label: 'Lab',    hint: 'Test a theory',  Icon: IconLab },
   { href: '/agent',  label: 'Agents', hint: 'Yours',          Icon: IconAgent },
   { href: '/wallet', label: 'Wallet', hint: 'Read a trader',  Icon: IconWallet },
@@ -47,8 +47,6 @@ function isActive(pathname: string, href: string): boolean {
       SPORT_KEYS.some((k) => pathname === `/${k}` || pathname.startsWith(`/${k}/`))
     )
   }
-  // One club's page lives at /team/…, the index at /teams.
-  if (href === '/teams') return pathname === '/teams' || pathname.startsWith('/team/')
   return pathname === href || pathname.startsWith(href + '/')
 }
 

@@ -1,0 +1,13 @@
+# /etc/systemd/system/np-drift-monitor.timer
+# drift_monitor.py — was */15 (exits Pre-Match Drift positions: target/stop/kickoff)
+[Unit]
+Description=NOPREDICTIONS timer drift-monitor
+
+[Timer]
+OnCalendar=*:00/15
+Persistent=true
+AccuracySec=1s
+Unit=np-job@drift-monitor.service
+
+[Install]
+WantedBy=timers.target

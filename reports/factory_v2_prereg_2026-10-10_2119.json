@@ -1,0 +1,142 @@
+{
+ "created_at": "2026-10-10T21:19:44+00:00",
+ "note": "round 2 \u2014 entry timing (the operator's hypothesis: enter 24-48h before kick-off). Chosen from an EXPLORATORY look at train+validation by entry time (decile tables, league-FE interaction), not by the search protocol: validation is not independent for these items, the holdout is their first test. Thresholds are dev quantiles.",
+ "alpha_each": 0.01,
+ "items": [
+  {
+   "kind": "family",
+   "family": "entry_timing",
+   "view": "1x2_sides",
+   "target": "move",
+   "explore": {
+    "interaction_per_day": 0.364,
+    "se": 0.052,
+    "p": 1.1e-12,
+    "with": "league FE, train+validation"
+   }
+  },
+  {
+   "kind": "spec",
+   "objective": "clv",
+   "execution": "pin_raw",
+   "id": "timing-top1-48",
+   "spec": {
+    "template": "timing",
+    "view": "1x2_sides",
+    "side": "both",
+    "where": [
+     [
+      "mv_hat",
+      ">=",
+      0.0563
+     ],
+     [
+      "hours_before",
+      ">=",
+      36
+     ]
+    ],
+    "odds": null,
+    "name": "model top 1% \u00b7 entry \u226536h"
+   },
+   "explore": {
+    "n": 326,
+    "mean": 0.0365,
+    "se": 0.0092
+   }
+  },
+  {
+   "kind": "spec",
+   "objective": "clv",
+   "execution": "pm_taker",
+   "id": "timing-top1-48-pm",
+   "spec": {
+    "template": "timing",
+    "view": "1x2_sides",
+    "side": "both",
+    "where": [
+     [
+      "mv_hat",
+      ">=",
+      0.0563
+     ],
+     [
+      "hours_before",
+      ">=",
+      36
+     ]
+    ],
+    "odds": null,
+    "name": "model top 1% \u00b7 entry \u226536h"
+   },
+   "explore": {
+    "n": 326,
+    "mean": 0.0269,
+    "se": 0.0095
+   }
+  },
+  {
+   "kind": "spec",
+   "objective": "clv",
+   "execution": "pin_raw",
+   "id": "timing-top5-48",
+   "spec": {
+    "template": "timing",
+    "view": "1x2_sides",
+    "side": "both",
+    "where": [
+     [
+      "mv_hat",
+      ">=",
+      0.0375
+     ],
+     [
+      "hours_before",
+      ">=",
+      36
+     ]
+    ],
+    "odds": null,
+    "name": "model top 5% \u00b7 entry \u226536h"
+   },
+   "explore": {
+    "n": 1556,
+    "mean": 0.0079,
+    "se": 0.0036
+   }
+  },
+  {
+   "kind": "spec",
+   "objective": "clv",
+   "execution": "pin_raw",
+   "id": "timing-top1-24",
+   "spec": {
+    "template": "timing",
+    "view": "1x2_sides",
+    "side": "both",
+    "where": [
+     [
+      "mv_hat",
+      ">=",
+      0.0563
+     ],
+     [
+      "hours_before",
+      "between",
+      [
+       12,
+       35.999
+      ]
+     ]
+    ],
+    "odds": null,
+    "name": "model top 1% \u00b7 entry 12-36h"
+   },
+   "explore": {
+    "n": 545,
+    "mean": 0.0122,
+    "se": 0.0057
+   }
+  }
+ ]
+}

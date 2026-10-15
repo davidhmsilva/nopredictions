@@ -118,6 +118,16 @@ export function IconClock({ className }: P) {
   )
 }
 
+/** A closed market, the way a sportsbook marks a suspended price. */
+export function IconLock({ className }: P) {
+  return (
+    <svg {...box} className={className}>
+      <rect x="5.5" y="10.5" width="13" height="9.5" rx="2" />
+      <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" />
+    </svg>
+  )
+}
+
 /** Two exchanges, side by side. Marks the filter for the games both list —
  *  the only ones where a cheaper venue exists to find. */
 export function IconVenues({ className }: P) {

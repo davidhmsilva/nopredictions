@@ -13,7 +13,15 @@
 
 import type { LiveSource, MatchPhase, ScoutFixture } from './scoutTypes'
 import { SPORT_META, type SportGame, type SportKey } from './sportsMeta'
-import { combinedVolume, type BestPick, type OutcomeKey, type Quote, type VenueBook } from './venues'
+import {
+  combinedVolume,
+  gradeOf,
+  TRADEABLE,
+  type BestPick,
+  type OutcomeKey,
+  type Quote,
+  type VenueBook,
+} from './venues'
 
 /** Every board the site has: soccer, and the six US sports. */
 export type BoardSport = 'soccer' | SportKey
@@ -175,6 +183,41 @@ export function outcomeLabel(row: BoardRow, key: OutcomeKey): string {
     case 'over25':
       return 'Over 2.5 goals'
   }
+}
+
+/** What a board cell shows for one outcome: a price, or a closed market.
+ *
+ *  🔑 Never a bare dash. A first-time visitor reads a column of "—" as a broken
+ *     page (the user's call, 2026-10-10). A market with nothing fair to buy
+ *     gets a lock instead, the way a sportsbook shows a suspended price, and
+ *     the tooltip says why. */
+export type ShownPrice = { kind: 'price'; ask: number } | { kind: 'closed'; why: string }
+
+export const CLOSED_FT = 'Full time: this market has closed.'
+export const CLOSED_NONE = 'Not offered right now.'
+const CLOSED_NO_FAIR =
+  'Suspended: no fair price to buy right now. The result is all but decided, or the book is too thin.'
+
+export function shownPrice(row: BoardRow, key: OutcomeKey): ShownPrice {
+  if (row.finished) return { kind: 'closed', why: CLOSED_FT }
+  const pick = row.best[key]
+  if (pick?.ask != null && pick.ask > 0.01 && pick.ask < 0.99) return { kind: 'price', ask: pick.ask }
+
+  // A long price on a real book. `bestOf` stops at TRADEABLE because neither
+  // venue "wins" a decided outcome. Tottenham trailing 1-0 at 80' was still a
+  // two-sided 0.003/0.006 book: 167.00 is a real price, not a missing one. The
+  // short end (0.98 and up) stays closed: 1.01 is not a bet anyone places.
+  let ask: number | null = null
+  let quoted = false
+  for (const b of row.venues) {
+    const q = b.quotes[key]
+    if (!q) continue
+    if (q.ask != null || q.bid != null) quoted = true
+    if (q.ask == null || !(q.ask > 0) || q.ask >= TRADEABLE[1] || gradeOf([q]) === 'none') continue
+    if (ask == null || q.ask < ask) ask = q.ask
+  }
+  if (ask != null) return { kind: 'price', ask }
+  return { kind: 'closed', why: quoted ? CLOSED_NO_FAIR : CLOSED_NONE }
 }
 
 /** Whether a card for this row would show at least one price. A game whose

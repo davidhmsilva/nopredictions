@@ -6,17 +6,18 @@ import { useParams, useRouter } from 'next/navigation'
 import { AppShell } from '../../components/AppShell'
 import { WalletReport } from '../../components/WalletReport'
 import { WalletContents } from '../../components/WalletContents'
+import { WalletSummary } from '../../components/WalletSummary'
 import type { WalletProfile } from '../../lib/wallet'
 import { QUOTA_RESET_TEXT } from '../../lib/planTerms'
 
 // A big wallet is tens of thousands of fills; the request runs for a while and
 // a bare spinner for 20 seconds reads as a hang. These say what is happening.
 const STAGES = [
-  'Walking the activity feed…',
-  'Still walking — a busy wallet is tens of thousands of fills…',
-  'Fetching market metadata…',
-  'Matching FIFO round trips…',
-  'Bootstrapping the confidence interval…',
+  'Reading every trade this wallet has made…',
+  'Still reading — a busy trader has tens of thousands…',
+  'Looking up the markets they traded…',
+  'Rebuilding each bet from buy to payout…',
+  'Checking whether it is skill or a lucky run…',
   'Almost there…',
 ]
 
@@ -33,6 +34,9 @@ export default function WalletPage() {
   const [stage, setStage] = useState(0)
   const started = useRef(0)
   const [elapsed, setElapsed] = useState(0)
+  // The full analysis is ~4,800px of tables. Most people want the top; the
+  // rest is one click away and nothing in it is cut.
+  const [full, setFull] = useState(false)
 
 
   useEffect(() => {
@@ -73,16 +77,16 @@ export default function WalletPage() {
     <AppShell>
       <div className="wr-page">
         <button className="wallet-back" onClick={() => router.push('/wallet')}>
-          ← ANALYSE ANOTHER WALLET
+          ← All traders
         </button>
 
         {gate && (
           <div className="np-card np-wallet-gate">
-            <h2>{gate === 'signed_out' ? 'This one needs an account' : "That is today's three"}</h2>
+            <h2>{gate === 'signed_out' ? 'This trader needs a free account' : "That's today's three"}</h2>
             <p>
               {gate === 'signed_out'
-                ? 'Rebuilding a trader’s whole record is the expensive half of this site. A free account gets three a day, and takes an email and a password.'
-                : `Free accounts get three wallet reads a day. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit.`}
+                ? 'The leaderboard and the traders we wrote up are free to open. Any other wallet takes a free account — three a day, just an email and a password.'
+                : `Free accounts get three wallet reads a day, on top of the free traders on the Wallets page. The count resets at ${QUOTA_RESET_TEXT} — or Pro removes the limit.`}
             </p>
             <div className="np-btn-row">
               {gate === 'signed_out' ? (
@@ -95,7 +99,7 @@ export default function WalletPage() {
               ) : (
                 <Link className="np-btn np-btn-primary" href="/pricing">See Pro</Link>
               )}
-              <Link className="np-btn" href="/wallet">Back</Link>
+              <Link className="np-btn" href="/wallet">See the free traders</Link>
             </div>
           </div>
         )}
@@ -114,15 +118,28 @@ export default function WalletPage() {
 
         {error && (
           <div className="wallet-error">
-            <div className="wallet-error-title">Could not analyse this wallet</div>
+            <div className="wallet-error-title">We couldn&apos;t read this wallet</div>
             <div className="wallet-error-body">{error}</div>
           </div>
         )}
 
         {profile && (
           <>
-            <WalletContents />
-            <WalletReport p={profile} />
+            <WalletSummary p={profile} />
+            <div className="ws-full-toggle">
+              <button type="button" className="np-btn" aria-expanded={full} onClick={() => setFull(!full)}>
+                {full ? 'Hide the full analysis ▴' : 'Show the full analysis ▾'}
+              </button>
+              {!full && (
+                <span>Entry prices, timing, month by month, where they play, and the written reading.</span>
+              )}
+            </div>
+            {full && (
+              <>
+                <WalletContents />
+                <WalletReport p={profile} compact />
+              </>
+            )}
           </>
         )}
       </div>
