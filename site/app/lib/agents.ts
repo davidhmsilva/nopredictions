@@ -375,7 +375,7 @@ async function driftPerf(ids: number[]): Promise<Map<number, DriftPerf>> {
              array_agg(realized_pnl_usd::float8 order by coalesce(exit_at, entry_at), id)
                filter (where status = 'closed' and realized_pnl_usd <> 0) as pls
         from public.drift_positions
-       where strategy_id = any(${sql.array(ids)})
+       where strategy_id in ${sql(ids)}
        group by strategy_id
     ` as never
   } catch (err) {
