@@ -106,17 +106,19 @@ export function HomeBoard({ initial = null }: { initial?: BoardRow[] | null }) {
   )
   const rows = ready ? live : (initial ?? [])
 
-  // 🔑 The hero says what the product does, as three steps: describe a
-  //    strategy, see it backtested, trade the ones that fit. It never claims
-  //    an edge has been found — "Trade" is paper on Polymarket, and the board
-  //    underneath is the proof of the scanning, not of a win.
+  // 🔑 The hero sells owning your own AI agent, then shows what it does as
+  //    three steps: describe a strategy, see it backtested, trade the ones
+  //    that fit. It never claims an edge has been found — "Trade" is paper on
+  //    Polymarket, and the board underneath is the proof of the scanning, not
+  //    of a win.
   const head = (
     <div className="sc-head">
       <p className="sc-eyebrow">NOPREDICTIONS · AI trading agents</p>
-      <h1 className="sc-h1">See if the price is wrong before you trade it</h1>
+      <h1 className="sc-h1">Your own AI agent, hunting edges in prediction markets</h1>
       <p className="sc-h1-sub">
-        Describe a strategy in plain English, watch it backtested over a decade of real games,
-        then trade the ones that fit — on Polymarket, at the best venue price.
+        Tell it a strategy in plain English. It shows whether that idea would have made money
+        over a decade of real games, then paper-trades the games that fit — on Polymarket, at
+        the best venue price.
       </p>
       <ol className="sc-steps">
         {HERO_STEPS.map((s, i) => (
