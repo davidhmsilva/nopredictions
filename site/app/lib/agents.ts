@@ -125,11 +125,35 @@ export interface AgentOrder {
   payout: number | null
 }
 
+/** One Pre-Match Drift position (db/020, drift_scanner/drift_monitor). The
+ *  agent buys NO on a longshot early and exits before kick-off, so a position
+ *  is not a paper_trade: it has an entry and an exit price on the NO side, a
+ *  take-profit target, and a realised P&L. Prices are probabilities; the page
+ *  turns them into odds. Drift agents only — empty for every other agent. */
+export interface DriftPosition {
+  id: number
+  entry_at: string
+  exit_at: string | null
+  kickoff: string | null
+  home: string | null
+  away: string | null
+  /** home_win | draw | away_win — the outcome we bet AGAINST (we hold NO). */
+  outcome: string
+  entry_no: number
+  exit_no: number | null
+  target_no: number | null
+  status: 'open' | 'closed'
+  exit_reason: string | null
+  pl_units: number | null
+}
+
 export interface AgentDetail {
   agent: AgentSummary
   trades: AgentTrade[]
   /** Maker agents only: their bids, newest first. Empty for every other agent. */
   orders: AgentOrder[]
+  /** Drift agents only: their positions, newest first. Empty for every other. */
+  positions: DriftPosition[]
   /** Cumulative P&L after each settled bet, with its date, thinned to at most
    *  CURVE_POINTS. */
   curve: { t: string; pl: number }[]
@@ -248,7 +272,14 @@ function cumulative(pls: number[]): number[] {
   return pls.map((x) => (run += x))
 }
 
-type SummaryRow = Omit<AgentSummary, 'spark'> & { pls: number[] | null }
+type SummaryRow = Omit<AgentSummary, 'spark'> & { pls: number[] | null; rules: { kind?: string } | null }
+
+/** Is this a Pre-Match Drift agent? Its record lives in drift_positions, not
+ *  paper_trades, so v_strategy_performance has nothing for it and its summary
+ *  is filled in separately (driftPerf). */
+function isDrift(rules: { kind?: string } | null): boolean {
+  return rules?.kind === 'drift'
+}
 
 /** The summary rows, owner-checked. Membership comes from v_agent_trades
  *  (db/054), the same rule v_strategy_performance counts by — so the curve on
@@ -257,7 +288,7 @@ async function summaries(userId: string, onlyId?: number): Promise<AgentSummary[
   const sql = getSql()
   const rows = await sql<SummaryRow[]>`
     select s.id, s.name, s.source, s.theory, s.interpretation, s.spec, s.backtest,
-           s.run_status, s.run_blocker, s.is_public, s.created_at, s.promoted_at,
+           s.run_status, s.run_blocker, s.is_public, s.created_at, s.promoted_at, s.rules,
            p.parent_strategy_id,
            coalesce(p.n_trades, 0)::int            as n_trades,
            coalesce(p.n_open, 0)::int              as n_open,
@@ -284,7 +315,84 @@ async function summaries(userId: string, onlyId?: number): Promise<AgentSummary[
        ${onlyId != null ? sql`and s.id = ${onlyId}` : sql``}
      order by (s.run_status = 'running') desc, p.latest_pick_at desc nulls last, s.created_at desc
   `
-  return rows.map(({ pls, ...a }) => ({ ...a, spark: thin(cumulative(pls ?? []), SPARK_POINTS) }))
+
+  // Drift agents keep their record in drift_positions, so overwrite the (empty)
+  // v_strategy_performance numbers with the ones from that table.
+  const driftIds = rows.filter((r) => isDrift(r.rules)).map((r) => r.id)
+  const perf = driftIds.length ? await driftPerf(driftIds) : new Map<number, DriftPerf>()
+
+  return rows.map(({ pls, rules, ...a }) => {
+    const d = isDrift(rules) ? perf.get(a.id) : undefined
+    if (d) {
+      return {
+        ...a,
+        n_trades: d.n_trades, n_open: d.n_open, wins: d.wins, losses: d.losses,
+        staked: d.staked, pl_units: d.pl_units, yield_pct: d.yield_pct, avg_clv: null,
+        first_bet_at: d.first_bet_at, last_bet_at: d.last_bet_at,
+        spark: thin(cumulative(d.pls), SPARK_POINTS),
+      }
+    }
+    return { ...a, spark: thin(cumulative(pls ?? []), SPARK_POINTS) }
+  })
+}
+
+interface DriftPerf {
+  n_trades: number
+  n_open: number
+  wins: number
+  losses: number
+  staked: number
+  pl_units: number
+  yield_pct: number | null
+  first_bet_at: string | null
+  last_bet_at: string | null
+  pls: number[]
+}
+
+/** A drift agent's record, read from drift_positions. A closed position counts
+ *  as won (NO P&L > 0), lost (< 0) or void (= 0, a monitor miss or a voided
+ *  fixture); voids sit in the list but, like a void paper trade, stay out of
+ *  the staked/P&L/yield the way v_strategy_performance keeps them out. The 1u
+ *  stake is $1, so realised_pnl_usd already reads as units. */
+async function driftPerf(ids: number[]): Promise<Map<number, DriftPerf>> {
+  const sql = getSql()
+  let rows: {
+    strategy_id: number; n_trades: number; n_open: number; wins: number; losses: number
+    staked: number; pl_units: number; first_bet_at: string | null; last_bet_at: string | null
+    pls: number[] | null
+  }[]
+  try {
+    rows = await sql`
+      select strategy_id,
+             count(*) filter (where status = 'closed' and realized_pnl_usd <> 0)::int as n_trades,
+             count(*) filter (where status = 'open')::int                             as n_open,
+             count(*) filter (where status = 'closed' and realized_pnl_usd > 0)::int   as wins,
+             count(*) filter (where status = 'closed' and realized_pnl_usd < 0)::int   as losses,
+             coalesce(sum(stake_usd)        filter (where status = 'closed' and realized_pnl_usd <> 0), 0)::float8 as staked,
+             coalesce(sum(realized_pnl_usd) filter (where status = 'closed' and realized_pnl_usd <> 0), 0)::float8 as pl_units,
+             min(entry_at)                        as first_bet_at,
+             max(coalesce(exit_at, entry_at))     as last_bet_at,
+             array_agg(realized_pnl_usd::float8 order by coalesce(exit_at, entry_at), id)
+               filter (where status = 'closed' and realized_pnl_usd <> 0) as pls
+        from public.drift_positions
+       where strategy_id = any(${sql.array(ids)})
+       group by strategy_id
+    ` as never
+  } catch (err) {
+    if ((err as { code?: string }).code === '42P01') return new Map()  // table absent
+    throw err
+  }
+  const m = new Map<number, DriftPerf>()
+  for (const r of rows) {
+    m.set(r.strategy_id, {
+      n_trades: r.n_trades, n_open: r.n_open, wins: r.wins, losses: r.losses,
+      staked: r.staked, pl_units: r.pl_units,
+      yield_pct: r.staked > 0 ? (r.pl_units / r.staked) * 100 : null,
+      first_bet_at: r.first_bet_at, last_bet_at: r.last_bet_at,
+      pls: r.pls ?? [],
+    })
+  }
+  return m
 }
 
 export async function listAgents(userId: string): Promise<{ agents: AgentSummary[]; limits: AgentLimits }> {
@@ -305,6 +413,28 @@ async function ordersOf(id: number): Promise<AgentOrder[]> {
         from public.close_maker_orders o
        where o.strategy_id = ${id}
        order by o.created_at desc, o.id desc
+       limit ${TRADES_SHOWN}
+    `
+  } catch (err) {
+    if ((err as { code?: string }).code === '42P01') return []      // relation does not exist
+    throw err
+  }
+}
+
+/** A drift agent's positions, newest first. Called for every agent; an agent
+ *  with no drift_positions (every non-drift one) gets an empty list, as does a
+ *  database the migration has not reached yet. */
+async function driftPositionsOf(id: number): Promise<DriftPosition[]> {
+  const sql = getSql()
+  try {
+    return await sql<DriftPosition[]>`
+      select id, entry_at, exit_at, kickoff_at as kickoff, home, away, outcome_key as outcome,
+             entry_no_price::float8 as entry_no, exit_no_price::float8 as exit_no,
+             target_no_price::float8 as target_no, status, exit_reason,
+             case when status = 'closed' then realized_pnl_usd::float8 end as pl_units
+        from public.drift_positions
+       where strategy_id = ${id}
+       order by coalesce(exit_at, entry_at) desc, id desc
        limit ${TRADES_SHOWN}
     `
   } catch (err) {
@@ -366,6 +496,25 @@ export async function getAgent(userId: string, id: number): Promise<AgentDetail 
     `,
   ])
 
+  const positions = await driftPositionsOf(id)
+
+  // A drift agent has no paper_trades; its curve is built from the closed
+  // positions that counted (won or lost), oldest first — the same rows the
+  // tiles and the spark count.
+  if (positions.length) {
+    const closed = positions
+      .filter((p) => p.status === 'closed' && p.pl_units != null && p.pl_units !== 0)
+      .reverse()
+    const run = cumulative(closed.map((p) => p.pl_units as number))
+    return {
+      agent,
+      orders: [],
+      trades: [],
+      positions,
+      curve: thin(closed.map((p, i) => ({ t: p.exit_at ?? p.entry_at, pl: run[i] })), CURVE_POINTS),
+    }
+  }
+
   const running = cumulative(settled.map((r) => r.pl))
   return {
     agent,
@@ -377,6 +526,7 @@ export async function getAgent(userId: string, id: number): Promise<AgentDetail 
           ? { home: ctx_home, away: ctx_away, entry_minute, goals_at_entry, target_line, pressure_index }
           : null,
     })),
+    positions: [],
     curve: thin(settled.map((r, i) => ({ t: r.t, pl: running[i] })), CURVE_POINTS),
   }
 }
