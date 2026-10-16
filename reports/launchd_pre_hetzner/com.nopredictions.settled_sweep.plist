@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.nopredictions.settled_sweep — settled_sweep_daemon.sh under launchd.
+
+  Same supervisor as com.nopredictions.pressure, for the same reason: a cron job
+  inherits its TCC identity from whatever launched it, and three outages in three
+  weeks came from a long-lived process being stripped of its permissions mid-run.
+  Read that plist's header before changing anything here; every conclusion in it
+  applies to this job too, including:
+
+  ⚠️ DO NOT MOVE THIS REPO BACK UNDER ~/Documents, ~/Desktop or ~/Downloads.
+
+  ⚠️ NEVER add a `*/N settled_sweep_daemon.sh` cron line while this is loaded.
+  The wrapper is a singleton, so a cron tick against a healthy holder just exits
+  0 — which is exactly the trap: if a cron-started wrapper ever wins the flock,
+  launchd's copy exits 0 on every start and KeepAlive respawns it every 30s
+  forever. One supervisor. The `--settle` cron line is a DIFFERENT job (a short
+  backfill that exits) and is safe to keep.
+
+  This observer places no orders and holds no keys — see the module docstring.
+
+  Install / inspect / remove:
+      cp agent/launchd/com.nopredictions.settled_sweep.plist ~/Library/LaunchAgents/
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nopredictions.settled_sweep.plist
+      launchctl print gui/$(id -u)/com.nopredictions.settled_sweep
+      launchctl bootout gui/$(id -u)/com.nopredictions.settled_sweep
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nopredictions.settled_sweep</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/davidsilva/agente/agent/settled_sweep_daemon.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidsilva/agente/agent</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- launchd's voice only, kept out of settled_sweep_observer.log: a fresh
+         mtime on the agent's own log is what hid two of the pressure outages. -->
+    <key>StandardOutPath</key>
+    <string>/Users/davidsilva/agente/agent/settled_sweep_launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/davidsilva/agente/agent/settled_sweep_launchd.log</string>
+</dict>
+</plist>
