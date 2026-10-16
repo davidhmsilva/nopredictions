@@ -134,6 +134,7 @@ interface EspnGame {
   away: EspnTeam
   homeKeys: Set<string>
   awayKeys: Set<string>
+  book: SportGame['sportsbook']
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -149,6 +150,38 @@ function espnTeam(c: any): EspnTeam {
     logo: t.logo ?? null,
     score,
   }
+}
+
+/** "+145", "-175", "EVEN" → the price that pays it (1 / decimal odds). An
+ *  American price under 100 in size is not one, so it reads as none. */
+function americanPrice(v: unknown): number | null {
+  const s = String(v ?? '').trim().toUpperCase()
+  const ml = s === 'EVEN' || s === 'EV' ? 100 : Number(s.replace(/^\+/, ''))
+  if (!s || !Number.isFinite(ml) || Math.abs(ml) < 100) return null
+  return ml < 0 ? -ml / (-ml + 100) : 100 / (ml + 100)
+}
+
+/** The sportsbook moneyline the scoreboard carries, by ESPN's own home/away,
+ *  so no team name is matched to place it.
+ *
+ *  Measured 2026-10-11: DraftKings is the only provider on every US sport, and
+ *  it is there for games a day or two out (college football 56 of 59 that
+ *  week, NHL 5 of 48), never once a game has started.
+ *
+ *  ⚠️ The two sides must add up like a book: between 1.00 and 1.15 with the
+ *     margin in. Anything else is a misread or a stale side, and a wrong price
+ *     beside a real one is worse than none. */
+function espnBook(c: any): SportGame['sportsbook'] {
+  for (const o of c?.odds ?? []) {
+    const ml = o?.moneyline
+    const home = americanPrice(ml?.home?.close?.odds ?? o?.homeTeamOdds?.moneyLine)
+    const away = americanPrice(ml?.away?.close?.odds ?? o?.awayTeamOdds?.moneyLine)
+    if (home == null || away == null) continue
+    const sum = home + away
+    if (sum < 1 || sum > 1.15) continue
+    return { book: o?.provider?.displayName || o?.provider?.name || 'Sportsbook', home, away }
+  }
+  return null
 }
 
 /** The schedule.
@@ -197,17 +230,19 @@ async function espnGames(src: Source, days: number, now: Date): Promise<EspnGame
     const ymd = etOf(new Date(e.date)).ymd
     if (ymd < from || ymd > to) continue
     const st = c.status?.type ?? e.status?.type ?? {}
+    const state = st.state === 'in' ? 'in' : st.state === 'post' ? 'post' : 'pre'
     const home = espnTeam(h)
     const away = espnTeam(a)
     out.push({
       id: String(e.id),
       start: new Date(e.date).toISOString(),
-      state: st.state === 'in' ? 'in' : st.state === 'post' ? 'post' : 'pre',
+      state,
       detail: st.shortDetail ?? '',
       home,
       away,
       homeKeys: keysOf(home),
       awayKeys: keysOf(away),
+      book: state === 'pre' ? espnBook(c) : null,
     })
   }
   return out
@@ -701,6 +736,7 @@ export async function buildSportBoard(sport: SportKey): Promise<SportBoardData> 
             under: books.get(s.pm.total.tokens.under) ?? s.pm.total.gamma.under,
           }
         : null,
+      sportsbook: g.book,
       pmTokens: s.pm ? { home: s.pm.tokens.home, away: s.pm.tokens.away } : null,
       start: g.start,
       state: g.state,
@@ -724,7 +760,14 @@ export async function buildSportBoard(sport: SportKey): Promise<SportBoardData> 
     sport,
     games: rows,
     generatedAt: now.toISOString(),
-    counts: { espn: games.length, kalshi: kalshiN, kalshiPlaced, polymarket: pmN, polymarketPlaced: pmPlaced },
+    counts: {
+      espn: games.length,
+      kalshi: kalshiN,
+      kalshiPlaced,
+      polymarket: pmN,
+      polymarketPlaced: pmPlaced,
+      sportsbook: rows.filter((r) => r.sportsbook).length,
+    },
   }
 }
 
