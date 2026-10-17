@@ -33,7 +33,7 @@ export default function AgentPage({ params }: { params: { id: string } }) {
       if (r.status === 404) return setData({ state: 'missing' })
       const d = await r.json()
       if (!d.ok) return setData({ state: 'error', message: d.error ?? 'Could not load the agent.' })
-      setData({ state: 'ok', detail: { agent: d.agent, trades: d.trades, curve: d.curve, orders: d.orders ?? [], positions: d.positions ?? [] } })
+      setData({ state: 'ok', detail: { agent: d.agent, trades: d.trades, curve: d.curve, orders: d.orders ?? [], positions: d.positions ?? [], legacy_positions: d.legacy_positions ?? 0 } })
     } catch {
       setData({ state: 'error', message: 'Network error — the agent did not load.' })
     }
