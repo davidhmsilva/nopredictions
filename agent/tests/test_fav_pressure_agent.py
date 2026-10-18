@@ -206,24 +206,36 @@ def test_why_not_names_the_binding_gate():
     assert "kickoff" in fa._why_not(_row(), _book(), ok, _fav(prematch=False))
     assert "favourite" in fa._why_not(_row(), _book(), ok, _fav(p=0.42))
     assert "window" in fa._why_not(_row(fav_pressure_now=None), _book(), ok, _fav())
-    assert "pressing" in fa._why_not(_row(fav_pressure_now=5.0), _book(), ok, _fav())
-    assert "on top" in fa._why_not(_row(dominance_now=2.0), _book(), ok, _fav())
+    assert "pressing enough for 17'" in fa._why_not(_row(fav_pressure_now=5.0), _book(), ok, _fav())
     assert "ask" in fa._why_not(_row(), _book(ask=0.95), ok, _fav())
     assert "depth" in fa._why_not(_row(), _book(depth=1.0), ok, _fav())
 
 
-def test_a_dominant_underdog_is_not_a_signal():
-    """The thesis is the FAVOURITE living up to its price. The same match with
-    the roles reversed must not enter."""
+def test_a_favourite_that_is_not_pressing_does_not_enter():
+    """The thesis is the FAVOURITE pressing. An underdog doing all the pressing
+    leaves the favourite under its bar, and that alone keeps it out."""
     row = _row(fav_pressure_now=5.0, dog_pressure_now=40.0, dominance_now=-35.0)
-    assert fa._why_not(row, _book(), _sig(minute=17), _fav()) != ""
+    assert "pressing" in fa._why_not(row, _book(), _sig(minute=17), _fav())
 
 
-def test_thresholds_stay_reachable():
-    """Both are set at measured percentiles of real openings — p90 per side and
-    p75 for the gap. Anything much higher fires once a month."""
-    assert fa.MIN_FAV_PRESSURE <= 30.0
-    assert fa.MIN_DOMINANCE <= 20.0
+def test_the_underdogs_pressure_no_longer_blocks_an_entry():
+    """obs_version 5: dominance is retired. Both sides' pressure raised the
+    chance the favourite led at the break, so subtracting one from the other
+    cancelled the signal. A favourite above its bar enters however hard the
+    underdog is pressing too."""
+    row = _row(fav_pressure_now=31.0, dog_pressure_now=40.0, dominance_now=-9.0)
+    assert fa._why_not(row, _book(), _sig(minute=22), _fav()) == ""
+
+
+def test_the_bar_is_frozen_per_minute():
+    """The 2/3 quantile of fav_pressure_now per minute bucket, measured once on
+    clean-book obs_version 3-4 rows (2026-10-12) and never refitted:
+    H-FAV-PRESS-REL is a forward test only while the bar stays put."""
+    assert [fa.pressure_bar(m) for m in (15, 19, 20, 24, 25, 29, 30, 34, 35, 40)] == \
+        [25.6, 25.6, 29.3, 29.3, 26.2, 26.2, 27.3, 27.3, 26.9, 26.9]
+    assert fa.pressure_bar(14) is None and fa.pressure_bar(41) is None
+    assert (fa.FAV_PRESS_BAR[0][0], fa.FAV_PRESS_BAR[-1][1]) == \
+        (fa.ENTRY_MIN_MINUTE, fa.ENTRY_MAX_MINUTE)
 
 
 # ── observe(), end to end ────────────────────────────────────────────────────
@@ -278,8 +290,8 @@ def test_a_favourite_that_takes_over_late_can_still_enter(board):
     rows = fa.observe({1: surge}, fvt.load(), board, state)
     r = rows[0]
     assert r["pressure_source"] == "window"
-    assert r["dominance_now"] >= fa.MIN_DOMINANCE
-    assert r["opening_dominance"] < fa.MIN_DOMINANCE      # the control disagrees
+    assert r["fav_pressure_now"] >= fa.pressure_bar(30)
+    assert r["opening_fav_pressure"] < fa.pressure_bar(16)   # the control disagrees
     assert r["would_enter"], r["skip_reason"]
 
 

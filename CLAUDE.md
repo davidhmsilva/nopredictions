@@ -122,7 +122,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── live_tracker.py                ← rolling-window pressure signals ✅
 │   ├── pressure_agent.py              ← Live Pressure Overs + drives the HT arm ✅
 │   ├── ht_pressure_agent.py           ← Live Pressure HT Over 0.5 (first half) ✅
-│   ├── fav_pressure_agent.py          ← Live Pressure Favourite HT ✅
+│   ├── fav_pressure_agent.py          ← Favourite Pressing HT (replaced s18 on 2026-10-12) ✅
 │   ├── first_half_table.py            ← empirical P(goal before HT | 0-0 at m) ✅
 │   ├── favourite_ht_table.py          ← empirical P(fav leads at HT | 0-0 at m) ✅
 │   ├── sim/                           ← Monte Carlo match simulator ✅ NEW
@@ -434,7 +434,8 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Over Late Goals — observation | 🔬 Paper only, no orders. Fair value known, PM side unmeasured |
 | Live Pressure Overs (strategy 16) | 🔬 Paper only — the only agent still running. **obs_version 4** (book gates, db/037) |
 | Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 4** (min odds 1.75 + armed monitoring) |
-| Live Pressure Favourite HT (strategy 18) | 🔬 Paper only, favourite ahead at HT. **obs_version 3** (rolling reading, entry to 40') |
+| Live Pressure Favourite HT (strategy 18) | 🗄️ Archived 2026-10-12 (154 bets, −11.4% net). Replaced by Favourite Pressing HT |
+| Favourite Pressing HT | 🔬 Paper only, favourite ahead at HT on its own pressure for the minute. **obs_version 5**, db/075 |
 | Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
 | InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
 | Resolver | ✅ Settles trades + calculates CLV |
@@ -612,6 +613,10 @@ v5 gives up stays countable.
 
 ## Live Pressure Favourite HT — third arm (paper, 2026-08-19)
 
+🗄️ **Archived 2026-10-12** and replaced by
+[Favourite Pressing HT](#favourite-pressing-ht--the-favourites-own-pressure-for-the-minute-paper-2026-10-12).
+This section is its history.
+
 Buy the pre-match favourite to be **ahead at half time**, but only once it has
 shown it is living up to the price. Strategy id **18**, hypothesis
 `H-PRESSURE-FAV`, table `fav_ht_observations` (db/034), view `v_fav_ht_trades`.
@@ -677,6 +682,64 @@ entry window runs to 40'. Same thresholds, same book gates.
 ⚠️ And the number no gate fixes: across 635 fixtures this market's ask sits
 **8.49pp above the realised rate, CI[−11.94,−5.04]**. See
 [The 100-game review](#the-100-game-review--book-quality-not-pressure-2026-08-3031).
+
+---
+
+## Favourite Pressing HT — the favourite's own pressure for the minute (paper, 2026-10-12)
+
+It replaces strategy 18, by the operator's decision, with rules he confirmed.
+Same daemon, same table (`fav_ht_observations`, **obs_version 5**), same
+market. Hypothesis `H-FAV-PRESS-REL`, migration db/075.
+
+**The rule.** Buy "<favourite> leading at halftime?" Yes **at the ask**, 1u,
+paper, once per fixture, at the first poll where all of these hold:
+- the pre-kickoff favourite is ≥ 0.50;
+- the score is 0-0, between 15' and 40';
+- the favourite's own `fav_pressure_now` is at least the frozen bar for its
+  minute (`FAV_PRESS_BAR`): 15-19' **25.6** · 20-24' **29.3** · 25-29' **26.2**
+  · 30-34' **27.3** · 35-40' **26.9**;
+- the book is clean, as in s18 (spread ≤ 3pp, two-sided, ≥ $25 ask, ask ≤ 0.85).
+
+There is **no dominance term and no odds filter.** It settles on Polymarket's
+resolution.
+
+**Why strategy 18 went.** Against the price, the underdog's pressure also
+raised the chance the favourite led at the break. Its coefficient was +0.61
+per percentile, beside +0.69 for the favourite's own. So dominance (favourite
+minus underdog) cancelled the signal: 117 clean-book entries under that gate
+made −8.4%, and the live record was 154 bets at −11.4% net.
+
+**What separated** the favourite's own pressure, relative to its minute
+(359 clean-book fixtures, one bet each):
+- top third **+6.8%**, bottom third **−24.0%**;
+- a difference of **+30.8pp CI[+4,+60]**, the same in both halves of the
+  period, both obs_version groups, and home and away.
+
+⚠️ **The level is not established:** +6.8% CI[−13,+28], and +1.4% on the
+v3-v4 axis alone. The bar is the 2/3 quantile on clean-book v3-v4 rows, frozen
+on 2026-10-12. **Never refit it to later rows**, because that turns the forward
+test back into a backtest. It fires on about 2.3 fixtures a day on ESPN-era
+rows. 91 groups were scanned to find it, which is why only rows from v5 on
+count.
+
+Three sub-rules are **registered, not traded**:
+- **`-A`, favourite 50-60%:** a subset of the strategy's own trades, so it
+  is read straight off its record.
+- **`-B`, odds 4.00+, and `-C`, 30-34':** both enter later than the
+  strategy does, so they are read off the observation rows. 64 of B's 82
+  fixtures are also in C.
+
+On shuffled outcomes, the best of the 13 cuts reached +27% one time in seven.
+
+**Verdict:**
+- **Primary:** the top third beats the bottom third on forward observation
+  rows, CI clear of zero. That needs about 200 fixtures a side, roughly 3-4
+  months.
+- **Money:** net yield CI clear of zero after the fee, which needs thousands of
+  bets.
+
+`--report` prints one paper line per strategy, so the archived s18 record never
+pools with this one. `strategy_id()` refuses a retired strategy.
 
 ---
 

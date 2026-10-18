@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Favourite-pressure agent — back the pre-match favourite to be AHEAD AT HALF TIME,
-but only once it has shown it is actually living up to the price.
+Favourite Pressing HT — back the pre-match favourite to be AHEAD AT HALF TIME
+when it is pressing hard for the minute it is in.
 
-THE RULE (as specified)
------------------------
-A fixture has a clear pre-match favourite. The match is still 0-0 after 15
-minutes. Over those first 15 minutes the favourite has both pressed hard in
-absolute terms AND out-pressed the underdog. Buy PM's "<Favourite> leading at
-halftime?" (Yes), 1u, paper.
+THE RULE (obs_version 5, 2026-10-12, confirmed by the operator)
+---------------------------------------------------------------
+A fixture has a clear pre-match favourite. The match is still 0-0, between 15'
+and 40'. The favourite's own pressure is in the top third for that minute
+(FAV_PRESS_BAR, frozen). The underdog's pressure does not enter the rule. Buy
+PM's "<Favourite> leading at halftime?" (Yes) at the ask, 1u, paper.
+Hypothesis H-FAV-PRESS-REL (db/075).
 
-The second half of that sentence is the whole point, and it is what makes this
-different from simply backing favourites: the price already contains the
-favourite's strength, so a favourite doing exactly what its price expects is not
-information. What might be information is the JOINT event — favourite, and
-visibly on top, and still level. Two of those three are public and instant (the
-price, the scoreline); the third arrives on a slower feed.
+It replaces "Live Pressure Favourite HT" (strategy 18, archived 2026-10-12). That
+rule asked the favourite to OUT-press the underdog (dominance >= 20). Against the
+price, the underdog's pressure also raised the chance the favourite led at the
+break, so dominance subtracted half of the signal and selected nothing.
 
 WHAT IS BEING BOUGHT
 --------------------
@@ -104,11 +103,14 @@ logging.basicConfig(
 log = logging.getLogger("fav_pressure")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-STRATEGY_NAME = "Live Pressure Favourite HT"
+STRATEGY_NAME = "Favourite Pressing HT"
 # v4 (2026-09-11): missing xG estimated from shots, not renormalised (see
 # live_tracker.estimate_xg), via ht_pressure_agent.current_pressure. The axis
 # moved; never pool with v3.
-OBS_VERSION = 4
+# v5 (2026-10-12): the gate is the favourite's own pressure against a per-minute
+# bar, with no dominance term, and entries belong to "Favourite Pressing HT".
+# v1-v4 entries are strategy 18's. Never pool the two.
+OBS_VERSION = 5
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -140,36 +142,37 @@ ENTRY_MAX_MINUTE = 40
 # the market genuinely expects to win.
 MIN_FAV_PROB = 0.50
 
-# Both thresholds are calibrated to FREQUENCY on 165 real fixtures that already
-# carry a 15-18' stats row, recomputing this exact index WITH the xG
-# renormalisation (see live_tracker.danger_index):
-#   per-side danger     — p50 15, p75 24, p90 32, p95 40
-#   |gap| between sides — p50 14, p75 23, p90 31
-# MIN_FAV_PRESSURE LOWERED 30 -> 19 on 2026-08-20, by the user's decision and not
-# by any fit. Measured percentiles are above; 19 sits at about p62 per side.
+# The pressure gate (obs_version 5, 2026-10-12). Strategy 18 used favourite >= 19
+# AND dominance (favourite - underdog) >= 20. Measured 2026-10-11 on 359
+# clean-book fixtures, one bet per fixture, outcome from PM's resolution:
+#   * dominance selected nothing: 117 clean-book entries under that rule, -8.4%.
+#     Against the price, BOTH sides' pressure raised the chance the favourite led
+#     at the break (+0.69 and +0.61 per percentile), so the difference cancelled.
+#   * the favourite's own pressure, relative to its minute, separated: top third
+#     +6.8% vs bottom third -24.0%, +30.8pp CI[+4,+60], with the same sign and
+#     size in both halves of the period, both obs_version groups, home and away.
+#   * ⚠️ the LEVEL is not established: top third +6.8% CI[-13,+28], and +1.4% on
+#     the v3-v4 axis alone (n=122).
 #
-# ⚠️ At 19 this threshold barely binds any more and the dominance term decides
-# almost everything: a side scoring 19 with a gap of 20 is arithmetically
-# impossible — the underdog would need a negative index — so every entry still
-# needs a side of at least 20, whatever this constant says. The pair moves the
-# candidate rate from 19.3% of fixtures to 34.8%, which is real loosening, but it
-# comes from retiring the side term rather than from a considered view of how
-# dominant a favourite has to look. Dropping MIN_DOMINANCE to 14 (the gap's own
-# median) would take it to 47.0%; that was not asked for and is left alone.
-#
-# obs_version 3 applies both numbers to the ROLLING reading as well, and the
-# transfer was checked rather than assumed. Reconstructed offline from the
-# cumulative stats already on this table (4,556 poll-rows, minutes 19-44, still
-# 0-0, deltas against the row nearest minute-15):
-#
-#   per side  p25  6.2  p50 11.7  p75 19.6  p90 30.4     (19 clears 26.3%)
-#   |gap|     p25  4.6  p50 10.0  p75 18.8  p90 28.8     (20 clears ~26%)
-#
-# — within a point or two of the opening-15 percentiles quoted above, and flat
-# across the clock. So the pair keeps selecting about the top quartile on the new
-# axis, which is what it was set to do. Nothing was refitted to an outcome.
-MIN_FAV_PRESSURE = 19.0         # the favourite is pressing in absolute terms
-MIN_DOMINANCE = 20.0            # ...and out-pressing the underdog (now the real gate)
+# The bar is the 2/3 quantile of fav_pressure_now per minute bucket, on
+# clean-book rows of obs_version 3-4, FROZEN on 2026-10-12. Refitting it to later
+# rows would turn a forward test back into a backtest. On the ESPN-era rows it
+# fires on ~2.3 fixtures a day.
+FAV_PRESS_BAR = (
+    (15, 19, 25.6),
+    (20, 24, 29.3),
+    (25, 29, 26.2),
+    (30, 34, 27.3),
+    (35, 40, 26.9),
+)
+
+
+def pressure_bar(minute: int) -> float | None:
+    """The favourite's pressure needed at this minute; None outside 15'-40'."""
+    for lo, hi, bar in FAV_PRESS_BAR:
+        if lo <= minute <= hi:
+            return bar
+    return None
 
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
 MIN_DEPTH_USD = 25.0            # half-time markets are thin; see ht_pressure_agent
@@ -522,8 +525,8 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             and fav["p_fav"] >= MIN_FAV_PROB
             and sig.has_stats
             and row["fav_pressure_now"] is not None
-            and row["fav_pressure_now"] >= MIN_FAV_PRESSURE
-            and row["dominance_now"] >= MIN_DOMINANCE
+            and pressure_bar(sig.minute) is not None
+            and row["fav_pressure_now"] >= pressure_bar(sig.minute)
             and book["best_ask"] <= MAX_ASK
             and book["best_bid"] is not None
             and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
@@ -552,12 +555,10 @@ def _why_not(row: dict, book: dict, sig: PressureSignals, fav: dict) -> str:
     if row["fav_pressure_now"] is None:
         return (f"no {FIRST15_MIN}-minute window at {sig.minute}' "
                 f"(fixture picked up late)")
-    if row["fav_pressure_now"] < MIN_FAV_PRESSURE:
-        return (f"favourite not pressing ({row['fav_pressure_now']:.0f} "
-                f"< {MIN_FAV_PRESSURE})")
-    if row["dominance_now"] < MIN_DOMINANCE:
-        return (f"favourite not on top (dominance {row['dominance_now']:+.0f} "
-                f"< {MIN_DOMINANCE})")
+    bar = pressure_bar(sig.minute)
+    if bar is not None and row["fav_pressure_now"] < bar:
+        return (f"favourite not pressing enough for {sig.minute}' "
+                f"({row['fav_pressure_now']:.1f} < {bar})")
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
     if book["best_bid"] is None:
@@ -651,10 +652,12 @@ def write(conn, rows: list[dict]) -> None:
 
 def strategy_id(conn) -> int:
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM strategies WHERE name = %s", (STRATEGY_NAME,))
+        # An archived strategy is never bought for, even under its own name.
+        cur.execute("SELECT id FROM strategies WHERE name = %s AND retired_at IS NULL",
+                    (STRATEGY_NAME,))
         got = cur.fetchone()
     if not got:
-        raise SystemExit(f"strategy '{STRATEGY_NAME}' missing — apply db/034")
+        raise SystemExit(f"strategy '{STRATEGY_NAME}' missing or retired — apply db/075")
     return got[0]
 
 
@@ -698,14 +701,14 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
                 f"{r['fav_team']} to lead at half time at {r['best_ask']:.3f} "
                 f"({1 / r['best_ask']:.2f}). Pre-match favourite at "
                 f"{r['fav_prob']:.0%} (de-vigged PM 1X2, captured before kickoff), "
-                f"and living up to it: pressure "
-                f"{r['fav_pressure_now']:.0f} vs {r['dog_pressure_now']:.0f} "
-                f"for the underdog (dominance {r['dominance_now']:+.0f}), over "
-                f"{span}. PREDICTION: the side the "
-                f"market already rated, visibly on top and still level, is more "
-                f"likely to be ahead at the break than the price pays for. "
-                f"Bought on that call alone, not on a price comparison. For the "
-                f"record, {fair_txt} — recorded as the null, NOT a gate. PAPER."
+                f"pressing {r['fav_pressure_now']:.1f} over {span}, against a bar "
+                f"of {pressure_bar(r['minute'])} for this minute (the top third, "
+                f"frozen 2026-10-12). The underdog's "
+                f"{r['dog_pressure_now']:.1f} is recorded, not used. "
+                f"PREDICTION (H-FAV-PRESS-REL): a favourite pressing this hard "
+                f"while level is not overpriced to lead at the break, as one "
+                f"pressing little is. Taker at the ask. For the record, "
+                f"{fair_txt} — recorded as the null, NOT a gate. PAPER."
             )
             cur.execute(
                 """INSERT INTO paper_trades
@@ -1279,21 +1282,26 @@ def report(conn) -> None:
                       f"{r['mean_minute']:4.1f}  mean ask {r['mean_ask']:.3f} "
                       f"({1 / r['mean_ask']:.2f})  hit {hit}")
 
+        # One line per strategy: obs_version 1-4 entries are the archived
+        # strategy 18's, v5+ are Favourite Pressing HT's, and they never pool.
         cur.execute(
-            """SELECT count(*) AS n,
+            """SELECT s.name, count(*) AS n,
                       count(*) FILTER (WHERE pt.result = 'won') AS won,
                       sum(pt.payout_units - pt.stake_units)::float8 AS pnl,
                       sum(pt.stake_units)::float8 AS staked
                  FROM fav_ht_observations o
                  JOIN paper_trades pt ON pt.id = o.paper_trade_id
-                WHERE pt.result IS NOT NULL"""
+                 JOIN strategies s ON s.id = pt.strategy_id
+                WHERE pt.result IS NOT NULL
+                GROUP BY s.name ORDER BY min(pt.placed_at)"""
         )
-        t = cur.fetchone()
-        if t and t["n"]:
+        for t in cur.fetchall():
             yld = 100.0 * t["pnl"] / t["staked"] if t["staked"] else 0.0
-            print(f"\npaper: n={t['n']} won={t['won']} P&L={t['pnl']:+.2f}u yield={yld:+.1f}%")
-            print("  (verdict gate: n >= 200 AND yield CI clear of zero after the fee "
-                  "AND the dominance arm beating the plain-favourite arm)")
+            print(f"\npaper, {t['name']}: n={t['n']} won={t['won']} "
+                  f"P&L={t['pnl']:+.2f}u (gross) yield={yld:+.1f}%")
+        print("  (verdict, H-FAV-PRESS-REL: forward rows only. Primary: top third beats "
+              "bottom third, CI clear of zero, ~200 fixtures a side. Money: yield CI "
+              "clear of zero after the fee.)")
 
 
 # ── standalone loop ──────────────────────────────────────────────────────────
