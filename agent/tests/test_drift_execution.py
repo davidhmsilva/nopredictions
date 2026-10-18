@@ -116,3 +116,47 @@ def test_an_unchanged_book_is_a_loss_not_a_target(monkeypatch):
     }
     assert drift_monitor._process_position(None, pos, datetime.now(timezone.utc), dry_run=True)
     assert closed == {"reason": "stop", "sell": 0.65}
+
+
+# ── Entry gates and exit levels (db/077) ─────────────────────────────────────
+
+import drift_scanner                   # noqa: E402
+
+
+def _quote(paid, bid, ask, depth=100.0):
+    return {"entry_no_price": paid, "size_shares": round(1 / paid, 4),
+            "entry_no_bid": bid, "entry_no_ask": ask,
+            "entry_no_ask_size": round(depth / ask, 2) if ask else None,
+            "entry_no_depth_usd": depth, "entry_yes_bid": None, "entry_yes_ask": None}
+
+
+def test_the_wide_middlesbrough_book_is_refused():
+    # NO 0.65 / 0.78: a 13c book, marked −17% the moment it is bought.
+    reason, _ = drift_scanner.entry_gate(_quote(0.78, 0.65, 0.78), fair=0.10)
+    assert reason and "spread" in reason
+
+
+def test_one_sided_and_thin_books_are_refused():
+    assert "one-sided" in drift_scanner.entry_gate(_quote(0.70, None, 0.70), 0.10)[0]
+    assert "$" in drift_scanner.entry_gate(_quote(0.70, 0.68, 0.70, depth=5), 0.10)[0]
+
+
+def test_edge_is_read_on_the_yes_price_obtained():
+    # Brighton v Crystal Palace draw, 2026-10-16: YES 0.04 / 0.43. Gamma's ask
+    # says +18pp over a 0.25 fair; buying NO at 0.96 obtains YES at 0.04.
+    reason, edge = drift_scanner.entry_gate(_quote(0.96, 0.95, 0.96), fair=0.25)
+    assert edge == -21.0 and "executable edge" in reason
+
+
+def test_a_tight_book_with_edge_enters():
+    reason, edge = drift_scanner.entry_gate(_quote(0.66, 0.64, 0.66), fair=0.24)
+    assert reason is None and edge == 10.0
+
+
+def test_the_stop_is_a_move_from_the_entry_bid_not_the_spread():
+    q = _quote(0.66, 0.64, 0.66)
+    target, stop = drift_scanner.exit_levels(q)
+    assert target == round(0.66 * 1.10, 4)
+    assert stop == round(0.64 * 0.95, 4)
+    # An unchanged book marks at the entry bid: a loss, but neither exit fires.
+    assert stop < 0.64 < target

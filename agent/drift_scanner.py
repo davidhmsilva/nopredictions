@@ -24,9 +24,15 @@ paid), and drift_monitor sells it at the NO BID. Before db/076 it bought at
 rows carry price_convention = 'yes_side_inverted'. The SIGNAL is unchanged: it
 still compares Gamma's YES ask with the DC fair.
 
+Book gates and edge (2026-10-19), all on the executable price:
+  - the NO book is two-sided, ≤ MAX_SPREAD wide and holds ≥ MIN_DEPTH_USD at the ask
+  - edge = (1 − NO price paid) − DC fair ≥ MIN_EDGE_PP. Buying NO at its ask is
+    selling YES at its bid, so this is the YES price actually obtained. Gamma's
+    YES ask is only a cheap pre-filter: it can only overstate the edge.
+
 Exit (handled by drift_monitor.py):
   - NO bid reaches target (+TARGET_PCT on the price paid, default 10%)
-  - NO bid falls below stop (-STOP_PCT, default 5%)
+  - NO bid falls STOP_PCT below the NO bid at entry (a price move, not the spread)
   - Hard close HARD_CLOSE_MINUTES (default 15) before kickoff
 
 Usage:
@@ -66,6 +72,12 @@ TARGET_PCT      = float(os.environ.get("DRIFT_TARGET_PCT", "0.10"))  # take prof
 STOP_PCT        = float(os.environ.get("DRIFT_STOP_PCT",   "0.05"))  # stop loss at -5% on NO (key parameter)
 HARD_CLOSE_MIN  = int(os.environ.get("DRIFT_HARD_CLOSE",  "15"))     # force close 15min before kickoff
 STAKE_USD       = float(os.environ.get("DRIFT_STAKE_USD",  "1.0"))
+# Book gates on the NO side, read at entry (2026-10-19). With executable prices a
+# position is marked at the bid the moment it is bought, so a book wider than the
+# stop is a stop-out on the first check: on 2026-10-16 11 of 18 dry-run entries
+# were. Same thresholds the in-play arms use: 3c is where those books broke.
+MAX_SPREAD      = float(os.environ.get("DRIFT_MAX_SPREAD", "0.03"))  # NO ask − NO bid
+MIN_DEPTH_USD   = float(os.environ.get("DRIFT_MIN_DEPTH",  "25"))    # $ resting at the NO ask
 # Draw drift signal scales with favourite strength. Observer (n=88 obs ≥66.7%):
 # −4.39pp avg draw drift, 68% down, +7.19% NO return; 1.50-1.80 still +4.81%;
 # 1.80-2.50 is the dead zone (+2-3%). Require fav_yes ≥ this gate on DRAW entries.
@@ -179,18 +191,46 @@ def entry_quote(yes_token: str, no_token: str | None, stake_usd: float = STAKE_U
     }
 
 
+def entry_gate(quote: dict, fair: float) -> tuple[str | None, float]:
+    """(reason to refuse or None, executable edge in pp) for a quoted entry.
+
+    The edge is measured on the YES price actually obtained: buying NO at p is
+    selling YES at 1 − p."""
+    edge_pp = round((1.0 - quote["entry_no_price"] - fair) * 100, 1)
+    bid, ask = quote["entry_no_bid"], quote["entry_no_ask"]
+    if bid is None or ask is None:
+        return "one-sided NO book", edge_pp
+    if ask - bid > MAX_SPREAD + 1e-9:
+        return f"NO spread {ask - bid:.3f} > {MAX_SPREAD:.3f}", edge_pp
+    if (quote["entry_no_depth_usd"] or 0) < MIN_DEPTH_USD:
+        return f"${quote['entry_no_depth_usd']:.0f} at the NO ask < ${MIN_DEPTH_USD:.0f}", edge_pp
+    if edge_pp < MIN_EDGE_PP:
+        return f"executable edge +{edge_pp:.1f}pp < {MIN_EDGE_PP:.1f}pp", edge_pp
+    return None, edge_pp
+
+
+def exit_levels(quote: dict) -> tuple[float, float]:
+    """(target, stop) on the NO bid. The target is a real profit on the price
+    paid; the stop is a fall of STOP_PCT from the bid at entry, so the spread
+    already paid on the way in is not counted as a move against us."""
+    target = round(quote["entry_no_price"] * (1 + TARGET_PCT), 4)
+    stop = round(quote["entry_no_bid"] * (1 - STOP_PCT), 4)
+    return target, stop
+
+
 def _insert_position(conn, *, token_id, no_token_id, condition_id, question, home, away,
                      outcome_key, kickoff_at, entry_yes_price, dc_fair,
-                     edge_pp, quote, strategy_id=None, dry_run=False) -> bool:
+                     edge_pp, quote, exec_edge_pp=None, strategy_id=None,
+                     dry_run=False) -> bool:
     entry_no_price  = quote["entry_no_price"]
     size_shares     = quote["size_shares"]
-    target_no_price = round(entry_no_price * (1 + TARGET_PCT), 4)
-    stop_no_price   = round(entry_no_price * (1 - STOP_PCT), 4)
+    target_no_price, stop_no_price = exit_levels(quote)
     no_bid = quote["entry_no_bid"]
 
     log.info(
         f"  ENTRY | {home} v {away} — {outcome_key} | "
-        f"signal YES={entry_yes_price:.2f} DC={dc_fair:.2f} edge=+{edge_pp:.1f}pp | "
+        f"signal YES={entry_yes_price:.2f} DC={dc_fair:.2f} edge=+{edge_pp:.1f}pp "
+        f"(executable +{exec_edge_pp:.1f}pp) | "
         f"BUY NO at ask {quote['entry_no_ask']:.3f} (paid {entry_no_price:.4f}, "
         f"bid {no_bid if no_bid is not None else '-'}, "
         f"${quote['entry_no_depth_usd']:.0f} at the top) | "
@@ -211,9 +251,9 @@ def _insert_position(conn, *, token_id, no_token_id, condition_id, question, hom
                   stake_usd, size_shares, target_no_price, stop_no_price,
                   hard_close_minutes, strategy_id, price_convention,
                   entry_yes_bid, entry_yes_ask, entry_no_bid, entry_no_ask,
-                  entry_no_ask_size, entry_no_depth_usd)
+                  entry_no_ask_size, entry_no_depth_usd, exec_edge_pp)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                       'executable',%s,%s,%s,%s,%s,%s)
+                       'executable',%s,%s,%s,%s,%s,%s,%s)
                ON CONFLICT DO NOTHING
                RETURNING id""",
             (token_id, no_token_id, condition_id, question, home, away, outcome_key,
@@ -222,7 +262,8 @@ def _insert_position(conn, *, token_id, no_token_id, condition_id, question, hom
              STAKE_USD, size_shares, target_no_price, stop_no_price,
              HARD_CLOSE_MIN, strategy_id,
              quote["entry_yes_bid"], quote["entry_yes_ask"], quote["entry_no_bid"],
-             quote["entry_no_ask"], quote["entry_no_ask_size"], quote["entry_no_depth_usd"]),
+             quote["entry_no_ask"], quote["entry_no_ask_size"], quote["entry_no_depth_usd"],
+             exec_edge_pp),
         )
         row = cur.fetchone()
         conn.commit()
@@ -351,6 +392,8 @@ def scan(dry_run: bool = False) -> int:
             if fair >= MAX_FAIR_PCT:
                 continue
 
+            # Pre-filter on Gamma's YES ask: it can only overstate the edge the
+            # book will give, so anything that fails here fails entry_gate too.
             edge_pp = round((ask - fair) * 100, 1)
             if edge_pp < MIN_EDGE_PP:
                 continue
@@ -373,6 +416,11 @@ def scan(dry_run: bool = False) -> int:
                 log.info(f"  SKIP {outcome_key} | {home} v {away} | edge=+{edge_pp:.1f}pp "
                          f"but no NO ask deep enough for ${STAKE_USD:.2f}")
                 continue
+            refuse, exec_edge_pp = entry_gate(quote, fair)
+            if refuse:
+                log.info(f"  SKIP {outcome_key} | {home} v {away} | Gamma edge=+{edge_pp:.1f}pp "
+                         f"but {refuse}")
+                continue
 
             entered = _insert_position(
                 conn,
@@ -386,6 +434,7 @@ def scan(dry_run: bool = False) -> int:
                 entry_yes_price=ask,
                 dc_fair=round(fair, 4),
                 edge_pp=edge_pp,
+                exec_edge_pp=exec_edge_pp,
                 quote=quote,
                 strategy_id=strategy_id,
                 dry_run=dry_run,

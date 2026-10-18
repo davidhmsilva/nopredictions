@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import csv
 import fcntl
+import gc
 import json
 import logging
 import os
@@ -194,10 +195,28 @@ def cmd_build(args):
 def cmd_grid(args):
     names = args.universe or list(grids.TEMPLATES)
     conn = registry.connect()
-    frames = _frames(conn, names, args.refresh)
-    specs = grids.all_specs([n for n in names if n in frames])
     t = time.time()
-    results = engine.run_batch(specs, frames)
+    if args.decay:
+        # The decay report reads every universe's frame afterwards, so it keeps
+        # them all in memory. Run it on the Mac, not on the 4GB server.
+        frames = _frames(conn, names, args.refresh)
+        specs = grids.all_specs([n for n in names if n in frames])
+        results = engine.run_batch(specs, frames)
+    else:
+        # One universe at a time. Holding every frame at once (three 507k-row
+        # pre-match tapes among them) reached 1.9GB and the OOM killer took the
+        # 04:00 run on the server every day from 2026-10-16. FDR is computed per
+        # universe in run_batch, so batching by universe gives identical results.
+        specs, results = [], []
+        for n in names:
+            fr = _frames(conn, [n], args.refresh)
+            if not fr:
+                continue
+            us = grids.all_specs([n])
+            specs += us
+            results += engine.run_batch(us, fr)
+            del fr
+            gc.collect()
     log.info(f"{len(specs):,} specs backtested in {time.time() - t:.0f}s")
     _report(results)
     print(f"\nfull grid → {_csv(results)}")
