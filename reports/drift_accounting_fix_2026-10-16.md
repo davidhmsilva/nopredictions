@@ -88,3 +88,16 @@ Middlesbrough v Cardiff draw at **0.78** (signal YES 0.35, only $4 at the top).
 3. **Deploy**: the server (`claude/sharp-gates-ua7ro2` on Hetzner) still runs the
    old code; its new rows land as `yes_side_inverted` and stay out of the site.
    The site change needs a deploy too.
+
+## Follow-up, 2026-10-19: the two open decisions, made
+
+Both decisions above were taken as recommended (db/077, `drift_scanner.entry_gate` / `exit_levels`):
+
+1. **Book gates at entry.** The NO book must be two-sided, ≤ 3c wide, and hold ≥ $25 at the ask, the same thresholds the in-play arms use. The stop is now 5% below the **NO bid at entry**, not below the price paid, so the spread paid on the way in is no longer read as a move against the position.
+2. **Edge on the executable price.** `exec_edge_pp = (1 − NO paid − DC fair) × 100 ≥ 8`. Gamma's YES ask is only a pre-filter, since it can only overstate the edge. `edge_pp` keeps its signal meaning.
+
+Dry run on the live board, 2026-10-19 00:20Z (known-token rule off):
+- **Entered:** Blackpool v MK Dons (NO 0.60/0.62, +10.4pp executable) and Walsall v Oldham (0.59/0.61, +10.6pp).
+- **Refused:** AFC Wimbledon v Mansfield (+9.0pp on Gamma, +7.0pp executable) and Liverpool v Villarreal draw (9c spread).
+
+No executable rows existed before the gates, so no sample mixes the two rule sets.
