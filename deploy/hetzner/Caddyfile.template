@@ -1,0 +1,17 @@
+# /etc/caddy/Caddyfile — serves the board publisher's files to the site.
+# Replace <TOKEN> with the secret path segment; BOARDS_URL on Vercel is
+#   https://65-21-144-241.sslip.io/b/<TOKEN>
+# The boards are public data (the site shows them), the token only keeps the
+# files from being an open API. sslip.io resolves to the IP inside the name,
+# which is what lets Caddy fetch a certificate with no domain of our own.
+65-21-144-241.sslip.io {
+	encode gzip
+	handle_path /b/<TOKEN>/* {
+		root * /srv/boards
+		header Cache-Control "public, max-age=15"
+		file_server
+	}
+	handle {
+		respond 404
+	}
+}

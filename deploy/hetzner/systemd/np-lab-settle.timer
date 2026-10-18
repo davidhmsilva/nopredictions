@@ -1,0 +1,12 @@
+# lab_strategy_runner.py --settle — was cron_guard --gap 25
+[Unit]
+Description=NOPREDICTIONS timer lab-settle
+
+[Timer]
+OnCalendar=*:20/30
+Persistent=true
+AccuracySec=1s
+Unit=np-job@lab-settle.service
+
+[Install]
+WantedBy=timers.target

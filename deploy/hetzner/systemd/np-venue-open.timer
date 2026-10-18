@@ -1,0 +1,12 @@
+# venue_open_recorder.py --once — every 10 min (db/071)
+[Unit]
+Description=NOPREDICTIONS timer venue-open
+
+[Timer]
+OnCalendar=*:07/10
+Persistent=true
+AccuracySec=1s
+Unit=np-job@venue-open.service
+
+[Install]
+WantedBy=timers.target

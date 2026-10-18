@@ -1598,6 +1598,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     import fav_pressure_agent as fav
     import fav_swing_agent as swing
     import ht_pressure_agent as ht
+    import ht_under_agent as under
     import lab_inplay_runner as lab_live
 
     table = lgt.load(lgt.WIDE_TABLE_PATH)
@@ -1615,6 +1616,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     conn = None if dry_run else _conn()
     strategy_id = None if dry_run else _strategy_id(conn)
     ht_strategy_id = None if dry_run else ht.strategy_id(conn)
+    under_strategy_id = None if dry_run else under.strategy_id(conn)
     fav_strategy_id = None if dry_run else fav.strategy_id(conn)
     swing_strategy_id = None if dry_run else swing.strategy_id(conn)
     tracker = LiveMatchTracker()
@@ -1671,6 +1673,15 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                        tracker.window_minutes, tracker.enrich_status)
         ht_rows = ht.observe(signals, ht_table, pm_fixtures, ht_state,
                              tracker.enrich_status)
+        # The Under arm decides on the first-half rows themselves (db/076). Its
+        # one network call, the Under book of a candidate, happens here, before
+        # any write. A failure costs this arm a cycle, never the others.
+        try:
+            under.decide(ht_rows)
+        except Exception as exc:                              # noqa: BLE001
+            log.exception(f"[UNDER] decide failed: {exc}")
+            for r in ht_rows:
+                r["under_would_enter"] = False
         fav_rows = fav.observe(signals, fav_table, pm_fixtures, fav_state,
                                tracker.enrich_status)
 
@@ -1694,15 +1705,25 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                             f"{len(rows)} rows lost, next poll is {interval}s away")
                 db_dropped, opened, rows = True, 0, []
 
-        ht_opened = 0
+        ht_opened = under_opened = 0
         if ht_rows and conn is not None and not db_dropped:
             try:
                 ht_opened = ht.open_trades(conn, ht_strategy_id, ht_rows)
+                # Before the write, so the Under trade id lands on its row.
+                under_opened = under.open_trades(conn, under_strategy_id, ht_rows)
                 ht.write(conn, ht_rows)
             except _DB_DROPPED as exc:
                 log.warning(f"db dropped mid-write [HT] ({exc.__class__.__name__}) — "
                             f"{len(ht_rows)} rows lost")
-                db_dropped, ht_opened, ht_rows = True, 0, []
+                db_dropped, ht_opened, under_opened, ht_rows = True, 0, 0, []
+        for r in ht_rows:
+            if r["under_entered"]:
+                log.info(
+                    f"  ENTER  [UNDER] {r['home'][:16]:16} 0-0 {r['away'][:16]:16} "
+                    f"{r['minute']}'  1H U0.5 ask={r['under_ask']:.3f} "
+                    f"({1 / r['under_ask']:.2f})  pressure={r['pressure_now']:.1f}  "
+                    f"#{r['under_paper_trade_id']}"
+                )
         for r in ht_rows:
             if r["entered"]:
                 log.info(
@@ -1767,7 +1788,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                     f"(base {r['edge_base_pp']:+.1f}pp)  #{r['paper_trade_id']}"
                 )
         log.info(f"live={len(rows):3d} priced={len(priced):3d} entered={opened:2d} "
-                 f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} "
+                 f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} under={under_opened} "
                  f"| FAV rows={len(fav_rows):3d} entered={fav_opened:2d} "
                  f"| SWING in={swing_counts.get('entered', 0)} held={swing_counts.get('open', 0)}"
                  f"+{swing_counts.get('goal', 0)} sold={swing_counts.get('sold', 0)} "
@@ -1811,6 +1832,7 @@ def main() -> None:
         import fav_pressure_agent as fav
         import fav_swing_agent as swing
         import ht_pressure_agent as ht
+        import ht_under_agent as under
         import lab_inplay_runner as lab_live
         conn = _conn()
         try:
@@ -1818,12 +1840,14 @@ def main() -> None:
                 # All three arms settle here, so the crontab keeps ONE settle line.
                 log.info(f"settled {settle(conn)} observations")
                 log.info(f"settled {ht.settle(conn)} first-half observations")
+                log.info(f"settled {under.settle(conn)} first-half Under trades")
                 log.info(f"settled {fav.settle(conn)} favourite observations")
                 log.info(f"settled {swing.settle(conn)} favourite-swing positions held to the end")
                 log.info(f"settled {lab_live.settle(conn)} Lab live-rule positions held to the end")
             if args.report:
                 report(conn)
                 ht.report(conn)
+                under.report(conn)
                 fav.report(conn)
                 swing.report(conn)
         finally:
