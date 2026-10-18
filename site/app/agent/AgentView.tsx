@@ -106,7 +106,7 @@ function driftPick(p: DriftPosition): string {
  *  kick-off, where the price is still drifting toward fair, and exits before
  *  the match starts — so these are pre-match positions, never held to a
  *  result. */
-function Positions({ positions }: { positions: DriftPosition[] }) {
+function Positions({ positions, legacy }: { positions: DriftPosition[]; legacy: number }) {
   const fmt = useOddsFormat()
   const odds = (p: number | null) => oddsText(p != null && p > 0 ? 1 / p : null, fmt)
   return (
@@ -115,8 +115,18 @@ function Positions({ positions }: { positions: DriftPosition[] }) {
       <p className="gc-quiet">
         This agent buys the NO side of a longshot a day or two before kick-off, where the price is still
         drifting toward fair, and sells before the match starts. Nothing is ever held to a result — the
-        P&amp;L is the price move on the NO side between entry and exit.
+        P&amp;L is the price move on the NO side between entry and exit, bought at the ask and sold at the bid.
       </p>
+      {legacy > 0 && (
+        <p className="ag-note">
+          {legacy.toLocaleString('en-US')} earlier positions are not shown and not counted: they were
+          booked buying at the bid and selling at the ask, so their profit was the bid–ask spread, not a
+          price move. The record starts again from the corrected positions.
+        </p>
+      )}
+      {positions.length === 0 ? (
+        <p className="gc-quiet">No corrected positions yet.</p>
+      ) : (
       <div className="sc-table-wrap">
         <table className="sc-table">
           <thead>
@@ -162,6 +172,7 @@ function Positions({ positions }: { positions: DriftPosition[] }) {
           </tbody>
         </table>
       </div>
+      )}
     </section>
   )
 }
@@ -268,6 +279,7 @@ function Tiles({ a }: { a: AgentSummary }) {
 export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: AgentActions }) {
   const fmt = useOddsFormat()
   const { agent: a, trades, curve, positions } = detail
+  const isDriftDetail = (positions?.length ?? 0) > 0 || (detail.legacy_positions ?? 0) > 0
   const settled = settledOf(a)
   const bt = a.backtest
 
@@ -336,9 +348,9 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
 
       {detail.orders?.length > 0 && <Bids orders={detail.orders} />}
 
-      {positions?.length > 0 && <Positions positions={positions} />}
+      {isDriftDetail && <Positions positions={positions} legacy={detail.legacy_positions ?? 0} />}
 
-      {positions?.length === 0 && (
+      {!isDriftDetail && (
       <section className="gc-section">
         <h2 className="gc-h2">Bets</h2>
         {trades.length === 0 ? (

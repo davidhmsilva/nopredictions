@@ -15,11 +15,18 @@ Entry conditions:
   - PM YES ask > DC fair by MIN_EDGE_PP (default 8pp)
   - Match kickoff is MIN_HOURS_OUT to MAX_HOURS_OUT from now
   - Only home_win and draw (away_win excluded: smaller drift, more stop-outs)
-  - No existing open position on this token
+  - The token has never been traded by this agent (one position per token, ever)
+
+Execution (db/076): the position is bought at the NO token's ASK on the CLOB
+book, walking the ladder for the whole stake (entry_no_price = the average price
+paid), and drift_monitor sells it at the NO BID. Before db/076 it bought at
+1 − Gamma's YES ask, which is the NO BID, and banked the spread as profit; those
+rows carry price_convention = 'yes_side_inverted'. The SIGNAL is unchanged: it
+still compares Gamma's YES ask with the DC fair.
 
 Exit (handled by drift_monitor.py):
-  - NO price reaches target (+TARGET_PCT, default 10%)
-  - NO price falls below stop (-STOP_PCT, default 5%)
+  - NO bid reaches target (+TARGET_PCT on the price paid, default 10%)
+  - NO bid falls below stop (-STOP_PCT, default 5%)
   - Hard close HARD_CLOSE_MINUTES (default 15) before kickoff
 
 Usage:
@@ -43,6 +50,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "../ingest/.env"))
 sys.path.insert(0, os.path.dirname(__file__))
 
+import drift_book
 from dixon_coles import DixonColesModel
 from dc_scanner import _norm, _find_team, _fetch_pm_events, _pm_token_id
 
@@ -73,11 +81,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     force=True,
 )
+# No FileHandler: the scheduler appends stdout to drift_scanner.log, and a
+# second handler on the same file wrote every line twice.
 log = logging.getLogger("drift")
-
-handler = logging.FileHandler(os.path.join(os.path.dirname(__file__), "drift_scanner.log"))
-handler.setFormatter(logging.Formatter("%(asctime)s [drift] %(message)s", "%H:%M:%S"))
-log.addHandler(handler)
 
 
 def _conn():
@@ -103,10 +109,12 @@ def _is_neutral_venue(home: str, away: str, national_teams: set[str]) -> bool:
     return home.lower() in national_teams and away.lower() in national_teams
 
 
-def _open_token_ids(conn) -> set[str]:
-    """Token IDs already open so we don't double-enter."""
+def _known_token_ids(conn) -> set[str]:
+    """Every token this agent has ever held, open or closed. Guarding on open
+    positions only let a token re-enter on every scan once the last position
+    closed: 32 entries per token in October 2026, ten minutes apart."""
     cur = conn.cursor()
-    cur.execute("SELECT token_id FROM drift_positions WHERE status = 'open'")
+    cur.execute("SELECT DISTINCT token_id FROM drift_positions")
     return {r[0] for r in cur.fetchall()}
 
 
@@ -141,18 +149,52 @@ def _team_from_question(question: str) -> str | None:
     return None
 
 
-def _insert_position(conn, *, token_id, condition_id, question, home, away,
+def entry_quote(yes_token: str, no_token: str | None, stake_usd: float = STAKE_USD) -> dict | None:
+    """What buying `stake_usd` of NO costs right now, from the CLOB book.
+
+    None when the book could not be read or its NO asks cannot absorb the stake:
+    a position the market would not have filled is not a paper trade."""
+    try:
+        books = drift_book.fetch_books([yes_token, no_token or ""])
+    except Exception as exc:                                         # noqa: BLE001
+        log.warning(f"    book read failed: {exc}")
+        return None
+    nb = drift_book.no_book(books, yes_token, no_token)
+    if nb is None:
+        return None
+    fill = drift_book.buy_fill(nb["asks"], stake_usd)
+    if fill is None:
+        return None
+    yb = books.get(yes_token) or drift_book.mirror(nb)
+    no_top, yes_top = drift_book.top(nb), drift_book.top(yb)
+    return {
+        "entry_no_price": fill[0],          # average price PAID per NO share
+        "size_shares": fill[1],
+        "entry_no_bid": no_top["bid"],
+        "entry_no_ask": no_top["ask"],
+        "entry_no_ask_size": no_top["ask_size"],
+        "entry_no_depth_usd": round(no_top["ask"] * no_top["ask_size"], 2),
+        "entry_yes_bid": yes_top["bid"],
+        "entry_yes_ask": yes_top["ask"],
+    }
+
+
+def _insert_position(conn, *, token_id, no_token_id, condition_id, question, home, away,
                      outcome_key, kickoff_at, entry_yes_price, dc_fair,
-                     edge_pp, strategy_id=None, dry_run=False) -> bool:
-    entry_no_price  = round(1.0 - entry_yes_price, 4)
-    size_shares     = round(STAKE_USD / entry_no_price, 4)
+                     edge_pp, quote, strategy_id=None, dry_run=False) -> bool:
+    entry_no_price  = quote["entry_no_price"]
+    size_shares     = quote["size_shares"]
     target_no_price = round(entry_no_price * (1 + TARGET_PCT), 4)
     stop_no_price   = round(entry_no_price * (1 - STOP_PCT), 4)
+    no_bid = quote["entry_no_bid"]
 
     log.info(
         f"  ENTRY | {home} v {away} — {outcome_key} | "
-        f"YES={entry_yes_price:.2f} NO={entry_no_price:.2f} DC={dc_fair:.2f} edge=+{edge_pp:.1f}pp | "
-        f"target_NO={target_no_price:.2f} stop_NO={stop_no_price:.2f} | "
+        f"signal YES={entry_yes_price:.2f} DC={dc_fair:.2f} edge=+{edge_pp:.1f}pp | "
+        f"BUY NO at ask {quote['entry_no_ask']:.3f} (paid {entry_no_price:.4f}, "
+        f"bid {no_bid if no_bid is not None else '-'}, "
+        f"${quote['entry_no_depth_usd']:.0f} at the top) | "
+        f"target_NO={target_no_price:.3f} stop_NO={stop_no_price:.3f} | "
         f"kickoff={kickoff_at.strftime('%m-%d %H:%M') if kickoff_at else '?'}"
     )
 
@@ -163,26 +205,31 @@ def _insert_position(conn, *, token_id, condition_id, question, home, away,
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO drift_positions
-                 (token_id, condition_id, question, home, away, outcome_key,
+                 (token_id, no_token_id, condition_id, question, home, away, outcome_key,
                   kickoff_at,
                   entry_yes_price, entry_no_price, dc_fair, edge_pp,
                   stake_usd, size_shares, target_no_price, stop_no_price,
-                  hard_close_minutes, strategy_id)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-               ON CONFLICT (token_id) WHERE status = 'open' DO NOTHING
+                  hard_close_minutes, strategy_id, price_convention,
+                  entry_yes_bid, entry_yes_ask, entry_no_bid, entry_no_ask,
+                  entry_no_ask_size, entry_no_depth_usd)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                       'executable',%s,%s,%s,%s,%s,%s)
+               ON CONFLICT DO NOTHING
                RETURNING id""",
-            (token_id, condition_id, question, home, away, outcome_key,
+            (token_id, no_token_id, condition_id, question, home, away, outcome_key,
              kickoff_at,
              entry_yes_price, entry_no_price, dc_fair, edge_pp,
              STAKE_USD, size_shares, target_no_price, stop_no_price,
-             HARD_CLOSE_MIN, strategy_id),
+             HARD_CLOSE_MIN, strategy_id,
+             quote["entry_yes_bid"], quote["entry_yes_ask"], quote["entry_no_bid"],
+             quote["entry_no_ask"], quote["entry_no_ask_size"], quote["entry_no_depth_usd"]),
         )
         row = cur.fetchone()
         conn.commit()
         if row:
             log.info(f"    → drift position #{row[0]} opened")
             return True
-        log.info(f"    → already open for this token, skipped")
+        log.info(f"    → token already traded by this agent, skipped")
         return False
     except Exception as exc:
         conn.rollback()
@@ -197,8 +244,10 @@ def scan(dry_run: bool = False) -> int:
     events = _fetch_pm_events(SCAN_DAYS)
     log.info(f"Fetched {len(events)} PM events")
 
-    conn = None if dry_run else _conn()
-    open_tokens = _open_token_ids(conn) if conn else set()
+    # A dry run still READS the table (known tokens, national teams), so it
+    # refuses exactly what a real run would; it never writes.
+    conn = _conn() if DATABASE_URL else None
+    open_tokens = _known_token_ids(conn) if conn else set()
     national_teams = _load_national_teams(conn) if conn else set()
     strategy_id = _drift_strategy_id(conn) if conn else None
     now = datetime.now(timezone.utc)
@@ -317,9 +366,18 @@ def scan(dry_run: bool = False) -> int:
                     )
                     continue
 
+            # The signal fired; now the price a buyer would actually pay.
+            no_token_id = _pm_token_id(mkt, "no")
+            quote = entry_quote(token_id, no_token_id)
+            if quote is None:
+                log.info(f"  SKIP {outcome_key} | {home} v {away} | edge=+{edge_pp:.1f}pp "
+                         f"but no NO ask deep enough for ${STAKE_USD:.2f}")
+                continue
+
             entered = _insert_position(
                 conn,
                 token_id=token_id,
+                no_token_id=no_token_id,
                 condition_id=str(mkt.get("conditionId") or mkt.get("id") or ""),
                 question=question,
                 home=home, away=away,
@@ -328,13 +386,13 @@ def scan(dry_run: bool = False) -> int:
                 entry_yes_price=ask,
                 dc_fair=round(fair, 4),
                 edge_pp=edge_pp,
+                quote=quote,
                 strategy_id=strategy_id,
                 dry_run=dry_run,
             )
             if entered:
                 n_entered += 1
-                if conn:
-                    open_tokens.add(token_id)
+                open_tokens.add(token_id)
 
     log.info(f"Scan complete — {n_entered} new drift positions opened")
     if conn:
