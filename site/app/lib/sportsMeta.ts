@@ -58,6 +58,12 @@ export interface SportGame {
    *  totals ladders are not read on these boards yet. Optional because a
    *  board cached before it existed has no such field. */
   total?: { line: number; over: Quote; under: Quote } | null
+  /** The sportsbook moneyline ESPN's schedule carries (DraftKings today), as
+   *  a price: 1 / decimal odds, the book's margin included. Before the game
+   *  only. ESPN drops it at kick-off, and a pre-game line beside a live price
+   *  would read as a live one. It never takes part in the better-price pick.
+   *  Optional because a board cached before it existed has no such field. */
+  sportsbook?: { book: string; home: number | null; away: number | null } | null
   /** Polymarket dollars + Kalshi contracts. What the board ranks on. */
   volumeCombined: number
   /** Polymarket's moneyline, in dollars — the book the 24h move is read off. */
@@ -90,5 +96,7 @@ export interface SportBoardData {
     kalshiPlaced: number
     polymarket: number
     polymarketPlaced: number
+    /** Games on the board carrying the sportsbook line. Optional, as above. */
+    sportsbook?: number
   }
 }

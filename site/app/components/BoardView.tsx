@@ -36,7 +36,7 @@ import { OddsToggle } from './OddsToggle'
 import { SportBar } from './SportBar'
 import { GameCard } from './GameCard'
 import { VenueLogo } from './VenueLogo'
-import { LiveState, money, Shown } from './boardParts'
+import { BookLine, LiveState, money, Shown } from './boardParts'
 import { IconAll, IconClock, IconDrop, IconInsights, IconLive, IconStar, IconVenues } from './icons'
 import { formatName, useMounted, useOddsFormat, zoneLabel, type OddsFormat } from '../lib/display'
 import {
@@ -63,6 +63,7 @@ function PriceCell({ row, col, f }: { row: BoardRow; col: BoardColumn; f: OddsFo
       <span className="sc-odd">
         <Shown s={s} f={f} />
       </span>
+      <BookLine r={row} k={col.key} f={f} className="sc-book" />
     </td>
   )
 }
@@ -232,6 +233,7 @@ function MobileOdds({ r, f }: { r: BoardRow; f: OddsFormat }) {
               <b className="np-num">
                 <Shown s={s} f={f} />
               </b>
+              <BookLine r={r} k={c.key} f={f} className="sc-modd-book np-num" />
             </span>
           </span>
         )

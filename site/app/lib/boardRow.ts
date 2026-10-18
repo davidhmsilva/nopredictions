@@ -66,6 +66,9 @@ export interface BoardRow {
   /** A US game's main total on Polymarket — what fills the card's third line,
    *  where football has the draw. Null on football and where none is listed. */
   total: { line: number; over: Quote } | null
+  /** A US game's sportsbook moneyline (DraftKings, via ESPN), shown small
+   *  under each exchange price. Before the game only; null on football. */
+  sportsbook: { book: string; home: number | null; away: number | null } | null
 }
 
 export interface BoardColumn {
@@ -123,6 +126,7 @@ export function rowFromScout(f: ScoutFixture): BoardRow {
     venues: f.venues ?? [],
     volume: f.volumeCombinedUsd ?? f.volumeUsd ?? 0,
     total: null,
+    sportsbook: null,
   }
 }
 
@@ -160,6 +164,9 @@ export function rowFromSportGame(g: SportGame, sport: SportKey): BoardRow {
     venues: g.venues ?? [],
     volume: g.volumeCombined ?? 0,
     total: g.total ? { line: g.total.line, over: g.total.over } : null,
+    // Re-checked here as well as on the server: a board read a minute later
+    // can hold a game that has since started.
+    sportsbook: g.state === 'pre' ? g.sportsbook ?? null : null,
   }
 }
 
@@ -218,6 +225,25 @@ export function shownPrice(row: BoardRow, key: OutcomeKey): ShownPrice {
   }
   if (ask != null) return { kind: 'price', ask }
   return { kind: 'closed', why: quoted ? CLOSED_NO_FAIR : CLOSED_NONE }
+}
+
+/** The sportsbook's price for one side, where it has one. */
+export function bookPrice(row: BoardRow, key: OutcomeKey): number | null {
+  const sb = row.sportsbook
+  if (!sb || row.live || row.finished || (key !== 'home' && key !== 'away')) return null
+  const p = sb[key]
+  return p != null && p > 0.01 && p < 0.99 ? p : null
+}
+
+/** How much more the board's better price pays than the sportsbook, in
+ *  percent, AFTER the exchange's fee (the book's margin is already in its
+ *  price). Negative when the sportsbook pays more. Null where there is no
+ *  exchange pick to compare. */
+export function vsBookPct(row: BoardRow, key: OutcomeKey): number | null {
+  const book = bookPrice(row, key)
+  const net = row.best[key]?.net
+  if (book == null || net == null || !(net > 0)) return null
+  return (book / net - 1) * 100
 }
 
 /** Whether a card for this row would show at least one price. A game whose
