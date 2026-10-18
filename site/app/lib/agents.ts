@@ -154,6 +154,10 @@ export interface AgentDetail {
   orders: AgentOrder[]
   /** Drift agents only: their positions, newest first. Empty for every other. */
   positions: DriftPosition[]
+  /** Drift agents only: positions booked before db/076 at the wrong side of the
+   *  book (bought at the NO bid, sold at the NO ask). They are left out of every
+   *  number and every list; this is how many there are. 0 for every other. */
+  legacy_positions: number
   /** Cumulative P&L after each settled bet, with its date, thinned to at most
    *  CURVE_POINTS. */
   curve: { t: string; pl: number }[]
@@ -353,7 +357,11 @@ interface DriftPerf {
  *  as won (NO P&L > 0), lost (< 0) or void (= 0, a monitor miss or a voided
  *  fixture); voids sit in the list but, like a void paper trade, stay out of
  *  the staked/P&L/yield the way v_strategy_performance keeps them out. The 1u
- *  stake is $1, so realised_pnl_usd already reads as units. */
+ *  stake is $1, so realised_pnl_usd already reads as units.
+ *
+ *  Only price_convention = 'executable' rows count (db/076). Everything booked
+ *  before it bought at the NO bid and sold at the NO ask, so its "+22%" was the
+ *  spread, not a result. */
 async function driftPerf(ids: number[]): Promise<Map<number, DriftPerf>> {
   const sql = getSql()
   let rows: {
@@ -375,7 +383,8 @@ async function driftPerf(ids: number[]): Promise<Map<number, DriftPerf>> {
              array_agg(realized_pnl_usd::float8 order by coalesce(exit_at, entry_at), id)
                filter (where status = 'closed' and realized_pnl_usd <> 0) as pls
         from public.drift_positions
-       where strategy_id = any(${sql.array(ids)})
+       where strategy_id in ${sql(ids)}
+         and price_convention = 'executable'
        group by strategy_id
     ` as never
   } catch (err) {
@@ -421,24 +430,34 @@ async function ordersOf(id: number): Promise<AgentOrder[]> {
   }
 }
 
-/** A drift agent's positions, newest first. Called for every agent; an agent
- *  with no drift_positions (every non-drift one) gets an empty list, as does a
+/** A drift agent's positions, newest first, and how many legacy (pre-db/076)
+ *  positions were left out. Called for every agent; an agent with no
+ *  drift_positions (every non-drift one) gets an empty list and 0, as does a
  *  database the migration has not reached yet. */
-async function driftPositionsOf(id: number): Promise<DriftPosition[]> {
+async function driftPositionsOf(id: number): Promise<{ positions: DriftPosition[]; legacy: number }> {
   const sql = getSql()
   try {
-    return await sql<DriftPosition[]>`
-      select id, entry_at, exit_at, kickoff_at as kickoff, home, away, outcome_key as outcome,
-             entry_no_price::float8 as entry_no, exit_no_price::float8 as exit_no,
-             target_no_price::float8 as target_no, status, exit_reason,
-             case when status = 'closed' then realized_pnl_usd::float8 end as pl_units
-        from public.drift_positions
-       where strategy_id = ${id}
-       order by coalesce(exit_at, entry_at) desc, id desc
-       limit ${TRADES_SHOWN}
-    `
+    const [positions, [{ legacy }]] = await Promise.all([
+      sql<DriftPosition[]>`
+        select id, entry_at, exit_at, kickoff_at as kickoff, home, away, outcome_key as outcome,
+               entry_no_price::float8 as entry_no, exit_no_price::float8 as exit_no,
+               target_no_price::float8 as target_no, status, exit_reason,
+               case when status = 'closed' then realized_pnl_usd::float8 end as pl_units
+          from public.drift_positions
+         where strategy_id = ${id} and price_convention = 'executable'
+         order by coalesce(exit_at, entry_at) desc, id desc
+         limit ${TRADES_SHOWN}
+      `,
+      sql<{ legacy: number }[]>`
+        select count(*)::int as legacy
+          from public.drift_positions
+         where strategy_id = ${id} and price_convention <> 'executable'
+      `,
+    ])
+    return { positions, legacy }
   } catch (err) {
-    if ((err as { code?: string }).code === '42P01') return []      // relation does not exist
+    const code = (err as { code?: string }).code
+    if (code === '42P01' || code === '42703') return { positions: [], legacy: 0 }  // table / column absent
     throw err
   }
 }
@@ -496,12 +515,12 @@ export async function getAgent(userId: string, id: number): Promise<AgentDetail 
     `,
   ])
 
-  const positions = await driftPositionsOf(id)
+  const { positions, legacy } = await driftPositionsOf(id)
 
   // A drift agent has no paper_trades; its curve is built from the closed
   // positions that counted (won or lost), oldest first — the same rows the
   // tiles and the spark count.
-  if (positions.length) {
+  if (positions.length || legacy) {
     const closed = positions
       .filter((p) => p.status === 'closed' && p.pl_units != null && p.pl_units !== 0)
       .reverse()
@@ -511,6 +530,7 @@ export async function getAgent(userId: string, id: number): Promise<AgentDetail 
       orders: [],
       trades: [],
       positions,
+      legacy_positions: legacy,
       curve: thin(closed.map((p, i) => ({ t: p.exit_at ?? p.entry_at, pl: run[i] })), CURVE_POINTS),
     }
   }
@@ -527,6 +547,7 @@ export async function getAgent(userId: string, id: number): Promise<AgentDetail 
           : null,
     })),
     positions: [],
+    legacy_positions: 0,
     curve: thin(settled.map((r, i) => ({ t: r.t, pl: running[i] })), CURVE_POINTS),
   }
 }
