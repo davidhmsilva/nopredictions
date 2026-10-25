@@ -1792,6 +1792,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                  f"| FAV rows={len(fav_rows):3d} entered={fav_opened:2d} "
                  f"| SWING in={swing_counts.get('entered', 0)} held={swing_counts.get('open', 0)}"
                  f"+{swing_counts.get('goal', 0)} sold={swing_counts.get('sold', 0)} "
+                 f"ctl={swing_counts.get('control_entered', 0)} ticks={swing_counts.get('ticks', 0)} "
                  f"| LAB rules={lab_counts.get('rules', 0)} in={lab_counts.get('entered', 0)} "
                  f"held={lab_counts.get('held', 0)} sold={lab_counts.get('sold', 0)} "
                  f"| {time.time() - t0:.1f}s")

@@ -752,6 +752,42 @@ pools with this one. `strategy_id()` refuses a retired strategy.
 
 ---
 
+## Favourite Swing — ticks and a control arm (db/078, 2026-10-20)
+
+`agent/fav_swing_agent.py` (H-FAV-SWING, db/061, the user's rule of 2026-09-29):
+buy a 1.30-1.50 kick-off favourite that presses while level, sell 5 minutes
+after the first goal (a further goal does not restart the clock), hold to
+the end if none. Runs inside `pressure_agent.py`.
+
+At 18 settled positions (10-09 → 10-18): **−2.32u, ROI −13%**. When a goal came
+after entry the favourite scored it 11 times in 13 (+0.20u each); the loss is the
+4 positions with no goal or a late equaliser held to a draw (−1u each). n=18
+answers nothing yet.
+
+**Instrumentation only — the rule did not change (still obs_version 2).**
+- `fav_swing_ticks`: the held token's book on **every poll** while a position is
+  open (up to 3h after entry), including polls where the fixture is missing from
+  the feed (`minute` NULL). A one-sided book is kept with the empty side NULL.
+  Before this the price was read only at entry and sale, so a time stop or a
+  faster exit could not be replayed. The exit still reads only a two-sided book,
+  exactly as `_fetch_book` did.
+- `fav_swing_positions.arm`: `'pressure'` is the rule; `'control'` is the same
+  rule **without the pressure gate** (same band, level score, 5-75', book gates,
+  goal clock and exit), bought at the first poll that clears them. Shadow: no
+  paper trade. Its pressure reading is recorded when there are stats, so the gate
+  can be re-applied to control rows at any threshold. **Never pool the arms.**
+  A control-only fixture whose book fails is re-read at most every 120s.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python fav_swing_agent.py --report     # per arm, plus tick counts
+python -m pytest tests/test_fav_swing_agent.py -q
+```
+
+⚠️ A restart of the pressure daemon is required for any of it to apply.
+
+---
+
 ## Two bugs that produced zero entries — fixed 2026-08-20
 
 Both first-half agents ran a full day and entered nothing. Neither cause was the
