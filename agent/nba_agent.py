@@ -911,6 +911,14 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     log.info(f"{len(games)} NBA games in scope{skip_txt} · "
              f"{sum(g.slug in bets for g in games)} already bet · sharp snapshot {snap_txt}")
 
+    # The maker arm (nba_maker.py) rests bids on the same games; its own
+    # strategy, table and errors, so a failure there never stops a taker bet.
+    try:
+        import nba_maker
+        nba_maker.cycle(conn, games, cache, now, dry_run=dry_run)
+    except Exception:                                    # noqa: BLE001
+        log.exception("maker arm failed this cycle — the taker arm carries on")
+
     written = last_snapshot_written(conn) if not dry_run else {}
     todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake, new_snap)
     closes: list[tuple] = []        # (trade_id, fair, mid, book, entry)
@@ -1142,6 +1150,11 @@ def settle() -> int:
         n += 1
     log.info(f"settled {n} of {len(pending)} finished NBA trades")
     provisional(conn, pending, verdicts)
+    try:
+        import nba_maker
+        nba_maker.settle(conn)
+    except Exception:                                    # noqa: BLE001
+        log.exception("maker settle failed — retried next run")
     return n
 
 
@@ -1201,6 +1214,8 @@ def main() -> None:
                         datefmt="%Y-%m-%d %H:%M:%S", force=True)
     if args.report:
         report()
+        import nba_maker
+        nba_maker.report()
         return
     lock = open(os.path.join(HERE, ".nba_agent.lock"), "w")
     try:
