@@ -2611,6 +2611,36 @@ python -m pytest tests/test_nba_agent.py -q
 - ⚠️ `nba_scanner.py` (Strategy 5, NBA Elo) is a different, older agent and is
   not scheduled on the server.
 
+### DraftKings via ESPN when the Odds API has nothing — obs_version 2 (2026-10-26)
+
+All 43 v1 bets (10-20 → 10-25) were FORCED at `pm_mid`: the shared Odds API
+key was down to **2 of 500 credits**, so no NBA snapshot ever existed and
+"the best EV on the board" was picked by the fee formula alone, i.e. heavy
+favourites near 0.95.
+
+🔑 **ESPN's NBA scoreboard carries DraftKings' moneyline, spread and total,
+with prices, for every game, in the one request the season gate already
+makes** (`competitions[].odds[]`, provider DraftKings; `close` is the CURRENT
+line until tip-off, total lines spelled `o226.5` / `u226.5`). Free, no key,
+no credit. `_dk_markets` turns it into the Odds API's shape under bookmaker
+`draftkings_espn`, so `sharp_for` and `nba_model` read it unchanged.
+
+- **Precedence** (`pick_sharp`): a fresh Odds API line (Pinnacle / consensus)
+  → DraftKings via ESPN (read this cycle, so always fresh) → a stale Odds API
+  line (forced only) → `pm_mid`. Closes follow the same order.
+- **Sources `dk_exact` / `dk_model`**, never `sharp_*`. **EDGE needs 3% / 5%**
+  against 1.5% / 3% on Pinnacle: a retail book's de-vigged price is a weaker
+  estimate of fair. Haircuts unchanged.
+- `obs_version 2` on every trade and candidate row; `--report` splits by
+  version. **Never pool v1 (`pm_mid`) with v2.**
+- The scoreboard is now asked for every listed game, bet or not, because a
+  close read needs the line too. Still free.
+- First dry run (2026-10-26, 9 games): 9/9 lines, best token per game −1.9% to
+  +2.4% EV against DraftKings, 0 EDGE.
+- ⚠️ DraftKings is not the benchmark this agent was built on. A paid Odds API
+  plan (Pinnacle) is still the real fix; this keeps the agent from betting
+  blind meanwhile. The maker arm still only reads the Odds API cache.
+
 ### NBA maker bids — the same games, at the bid (paper, 2026-10-25)
 
 By the operator's decision, after measuring the FORCED arm. Its first 36 bets
