@@ -113,6 +113,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── soccer_line_model.py           ← Dixon-Coles fitted to sharp 1X2 + total ✅ NEW
 │   ├── nba_agent.py                   ← NBA Every Game (paper) ✅ NEW 2026-10-06
 │   ├── nba_model.py                   ← NBA margin/total model anchored on Pinnacle ✅ NEW
+│   ├── nba_maker.py                   ← NBA maker bids: both sides, ML + main spread ✅ NEW 2026-10-25
 │   ├── close_model.py                 ← forecasts where a 1X2 price will CLOSE (H-STATS-CLOSE) ✅ NEW 2026-10-10
 │   ├── close_maker_agent.py           ← Close Forecast: paper maker bids on PM from that forecast ✅ NEW
 │   ├── factory/v2/                    ← Factory v2, pre-match: families, CLV, power gate, locked holdout ✅ NEW 2026-10-10
@@ -2796,6 +2797,97 @@ python -m pytest tests/test_nba_agent.py -q
   the NFL board's shape again.
 - ⚠️ `nba_scanner.py` (Strategy 5, NBA Elo) is a different, older agent and is
   not scheduled on the server.
+
+### DraftKings via ESPN when the Odds API has nothing — obs_version 2 (2026-10-26)
+
+All 43 v1 bets (10-20 → 10-25) were FORCED at `pm_mid`: the shared Odds API
+key was down to **2 of 500 credits**, so no NBA snapshot ever existed and
+"the best EV on the board" was picked by the fee formula alone, i.e. heavy
+favourites near 0.95.
+
+🔑 **ESPN's NBA scoreboard carries DraftKings' moneyline, spread and total,
+with prices, for every game, in the one request the season gate already
+makes** (`competitions[].odds[]`, provider DraftKings; `close` is the CURRENT
+line until tip-off, total lines spelled `o226.5` / `u226.5`). Free, no key,
+no credit. `_dk_markets` turns it into the Odds API's shape under bookmaker
+`draftkings_espn`, so `sharp_for` and `nba_model` read it unchanged.
+
+- **Precedence** (`pick_sharp`): a fresh Odds API line (Pinnacle / consensus)
+  → DraftKings via ESPN (read this cycle, so always fresh) → a stale Odds API
+  line (forced only) → `pm_mid`. Closes follow the same order.
+- **Sources `dk_exact` / `dk_model`**, never `sharp_*`. **EDGE needs 3% / 5%**
+  against 1.5% / 3% on Pinnacle: a retail book's de-vigged price is a weaker
+  estimate of fair. Haircuts unchanged.
+- `obs_version 2` on every trade and candidate row; `--report` splits by
+  version. **Never pool v1 (`pm_mid`) with v2.**
+- The scoreboard is now asked for every listed game, bet or not, because a
+  close read needs the line too. Still free.
+- First dry run (2026-10-26, 9 games): 9/9 lines, best token per game −1.9% to
+  +2.4% EV against DraftKings, 0 EDGE.
+- ⚠️ DraftKings is not the benchmark this agent was built on. A paid Odds API
+  plan (Pinnacle) is still the real fix; this keeps the agent from betting
+  blind meanwhile. The maker arm still only reads the Odds API cache.
+
+### NBA maker bids — the same games, at the bid (paper, 2026-10-25)
+
+By the operator's decision, after measuring the FORCED arm. Its first 36 bets
+(10-20 → 10-25) were all `pm_mid` FORCED buys 36 min before tip-off, because
+the shared Odds API key never gave the NBA a snapshot: **−4.2% at the ask**.
+The same tokens at the bid, no fee: **−1.9%**. But only **8 of 36** bids
+placed 36 min out ever traded at the bid and **2** traded through it: FORCED
+picks deep alternate spreads (fee 5%·(1−p) is smallest at 0.85-0.94), and 23
+of those 36 tokens had no trade at all before tip-off. PM's NBA price moved
+like a martingale from T-12h on those tokens (+0.49 / +0.16 / −0.01pp at
+T-12/6/3h), and the NBA had no liquidity rewards (one moneyline at
+$0.001/day on 10-25).
+
+Strategy **"NBA Every Game — maker bids"**, hypothesis `H-NBA-MAKER`, table
+`nba_maker_orders` (db/080, applied 2026-10-25). `agent/nba_maker.py`, run by
+`nba_agent.py` itself — `--once` (inside `run_once`, after the ESPN preseason
+gate, on the same games), `--settle` and `--report` — so no new cron line and
+no Odds API credit. A failure in it is logged and the taker arm carries on.
+
+- **What:** the full-game moneyline and the **main spread** (the spread whose
+  mid sits nearest 0.50, inside 0.40-0.60; a tie goes to the deeper market),
+  **both sides of each**: no sharp line is needed to pick a side, and a pair
+  measures fills and adverse selection per side with no model in the way.
+- **When:** the first cycle a game is inside 24h with both sides passing the
+  gates (spread ≤ 3¢, $2,000 Gamma liquidity, bid 0.05-0.95); never inside
+  15 min. One posting per (game, market), both sides or neither.
+- **Price, fixed:** one tick above the best bid when the spread is ≥ 3 ticks,
+  else at the best bid. At two ticks the improved pair would meet at the same
+  Yes-equivalent price, which is a self-cross, not two bids.
+- **Fill:** only a trade **strictly below** the bid, from Data API `/trades`
+  (`takerOnly`, paged backwards by `start`/`end` from the order's
+  `trades_checked_until`, so nothing is read twice and the 500 cap never
+  hides a print). A trade on the other token at q is this token at 1 − q. A
+  print AT the bid is `touched_at` only (queue). A fill writes a 1u paper
+  trade at the bid, no fee, `confidence = 'maker'`, `self_settling`.
+- **Close and payout for every order:** `close_price` is CLOB
+  `prices-history` at the last point ≤ tip-off, read after tip-off, so it
+  does not depend on the agent's cadence (it appears to run at :24/:54). The
+  payout is the CLOB winner flag. Filled vs expired on `close − bid` and
+  `payout − bid` is the adverse-selection measurement (db/073's design).
+- When nba_agent already holds a sharp snapshot, the token's fair value is
+  stored beside the bid (`fair`, `fair_source`) for later analysis only. It
+  never chooses or prices a bid.
+- Verified end to end on 2026-10-25 on a real finished game (76ers ML, pt#6734's
+  token) inside a rolled-back transaction: filled at 23:26Z on a 0.83 print
+  against a 0.84 bid, close 0.835, won; a 0.10 bid on the other side expired
+  with its close (0.165) and payout (0). First dry run: 7 games, 28 bids.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python nba_agent.py --once --dry-run   # also logs the bids the maker arm would post
+python nba_agent.py --report           # taker arms, then the maker table
+python -m pytest tests/test_nba_maker.py -q
+```
+
+⚠️ **Fixed bids are adverse by construction**: a bid rested from 24h out fills
+when the price falls through it. That is the thing being measured, not a
+defect; requoting to the live best bid is a v2 with its own `obs_version`.
+⚠️ Read `close − bid` on filled rows first (tens to hundreds of fills), yield
+much later; never pool with the EDGE / FORCED arms.
 
 ## Close Forecast — maker bids on where the price will close (paper, 2026-10-10)
 

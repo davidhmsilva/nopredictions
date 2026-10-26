@@ -9,7 +9,11 @@ executable ask is cheapest against the sharp line, net of the taker fee.
 
 Fair value is never ours. It comes from Pinnacle (The Odds API,
 `basketball_nba`; a median of other books when Pinnacle has not posted),
-de-vigged. Where Polymarket's line is the same half-point Pinnacle quotes, that
+de-vigged. When the Odds API has no fresh snapshot (obs_version 2, 2026-10-26:
+the shared key ran dry and v1 bet 43 games on Polymarket's own mid), the line
+is DraftKings', read free off ESPN's scoreboard — sources `dk_exact` /
+`dk_model`, edge thresholds doubled to 3% / 5% because a retail book is a
+weaker estimate of fair than Pinnacle. Where Polymarket's line is the same half-point Pinnacle quotes, that
 price IS the fair value (`sharp_exact`); everywhere else it is read off
 `nba_model`, anchored per game to Pinnacle's spread + moneyline + total
 (`sharp_model`, docked a haircut that grows with the distance from the sharp
@@ -85,7 +89,7 @@ ET = ZoneInfo("America/New_York")
 
 STRATEGY_NAME = "NBA Every Game"
 OWNER_FROM = "NFL Every Game"   # the new strategy is owned by whoever owns this one
-OBS_VERSION = 1
+OBS_VERSION = 2               # 2026-10-26: ESPN/DraftKings line when the Odds API has none
 
 # ── the sharp feed ───────────────────────────────────────────────────────────
 # One request returns every NBA game: 3 markets × ceil(books / 10) = 3 credits.
@@ -125,6 +129,16 @@ UNIT_USD = 10.0               # for the depth check only
 
 EDGE_MIN_EXACT = 1.5          # % net EV on cash, fair value = the book's own price
 EDGE_MIN_MODEL = 3.0          # % net EV, fair value read off the model
+# DraftKings through ESPN's scoreboard (free, no key) stands in when the Odds
+# API has no snapshot. It is a retail book, not Pinnacle: wider margin, slower
+# to move, so its de-vigged price is a weaker estimate of fair and an edge
+# against it has to be twice the size before it counts.
+EDGE_MIN_DK_EXACT = 3.0
+EDGE_MIN_DK_MODEL = 5.0
+EDGE_MIN = {"sharp_exact": EDGE_MIN_EXACT, "sharp_model": EDGE_MIN_MODEL,
+            "dk_exact": EDGE_MIN_DK_EXACT, "dk_model": EDGE_MIN_DK_MODEL}
+DK_BOOK = "draftkings_espn"   # bookmaker key in the Odds-API-shaped cache built from ESPN
+DK_SHARP = "dk_espn"          # Sharp.book when the line came from it
 # Model fair values are docked (base + per point from the sharp line, capped),
 # sized to nba_model's MEASURED error against 2018-2022 results (--validate,
 # 2026-10-06). Spreads miss by up to 3-4.5pp within a μ bucket (n=364-830, SE
@@ -376,18 +390,76 @@ def _espn_day(day: str) -> list[dict] | None:
     out = []
     for ev in d.get("events") or []:
         for c in ev.get("competitions") or []:
-            scores = {}
+            scores, side = {}, {}
             for t in c.get("competitors") or []:
                 full = club((t.get("team") or {}).get("displayName"))
                 if full:
                     scores[full] = t.get("score")
+                    side[t.get("homeAway")] = full
             if len(scores) != 2:
                 continue
             out.append({"teams": frozenset(scores), "start": _ts(ev.get("date")),
                         "season_type": (ev.get("season") or {}).get("type"),
                         "status": ((c.get("status") or {}).get("type") or {}).get("name"),
-                        "scores": scores})
+                        "scores": scores, "home": side.get("home"), "away": side.get("away"),
+                        "dk": _dk_markets(c.get("odds"), side.get("home"), side.get("away"))})
     return out
+
+
+def american_to_decimal(s) -> float | None:
+    try:
+        a = float(str(s).replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+    if a >= 100:
+        return 1 + a / 100
+    if a <= -100:
+        return 1 + 100 / -a
+    return None                                      # "EVEN" spelled as 100 is caught above
+
+
+def _dk_markets(odds: list | None, home: str | None, away: str | None) -> list[dict] | None:
+    """ESPN's DraftKings block → The Odds API's market shape (h2h / spreads /
+    totals, decimal prices, canonical names), so sharp_for reads it unchanged.
+    `close` is ESPN's name for the CURRENT line until tip-off, `open` the first.
+    Anything not DraftKings, or half a market, is left out."""
+    if not home or not away:
+        return None
+    o = next((x for x in odds or [] if (x.get("provider") or {}).get("name") == "DraftKings"), None)
+    if not o:
+        return None
+    cl = lambda blk, k: ((o.get(blk) or {}).get(k) or {}).get("close") or {}   # noqa: E731
+    out = []
+    mh, ma = american_to_decimal(cl("moneyline", "home").get("odds")), \
+        american_to_decimal(cl("moneyline", "away").get("odds"))
+    if mh and ma:
+        out.append({"key": "h2h", "outcomes": [{"name": home, "price": mh},
+                                               {"name": away, "price": ma}]})
+    sh, sa = cl("pointSpread", "home"), cl("pointSpread", "away")
+    ph, pa = american_to_decimal(sh.get("odds")), american_to_decimal(sa.get("odds"))
+    lh, la = _f(sh.get("line")), _f(sa.get("line"))
+    if ph and pa and lh is not None and la is not None and abs(lh + la) < 1e-9:
+        out.append({"key": "spreads", "outcomes": [{"name": home, "price": ph, "point": lh},
+                                                   {"name": away, "price": pa, "point": la}]})
+    ov, un = cl("total", "over"), cl("total", "under")
+    po, pu = american_to_decimal(ov.get("odds")), american_to_decimal(un.get("odds"))
+    lo, lu = _f(str(ov.get("line") or "").lstrip("oO")), _f(str(un.get("line") or "").lstrip("uU"))
+    if po and pu and lo is not None and lo == lu:
+        out.append({"key": "totals", "outcomes": [{"name": "Over", "price": po, "point": lo},
+                                                  {"name": "Under", "price": pu, "point": lo}]})
+    return out or None
+
+
+def espn_dk_cache(sched: dict[str, list[dict]] | None, fetched_at: datetime) -> dict | None:
+    """ESPN's DraftKings lines as an Odds-API-shaped cache with one bookmaker,
+    DK_BOOK. Costs nothing: it is the scoreboard the season gate already read."""
+    if not sched:
+        return None
+    data = [{"home_team": r["home"], "away_team": r["away"],
+             "commence_time": r["start"].isoformat(),
+             "bookmakers": [{"key": DK_BOOK, "markets": r["dk"]}]}
+            for rows in sched.values() for r in rows if r.get("dk") and r.get("start")]
+    return {"fetched_at_dt": fetched_at, "data": data} if data else None
 
 
 def _et_days(times: list[datetime]) -> list[str]:
@@ -474,7 +546,7 @@ def fetch_odds() -> dict | None:
 
 @dataclass
 class Sharp:
-    book: str                  # 'pinnacle' | 'consensus(n)'
+    book: str                  # 'pinnacle' | 'consensus(n)' | 'dk_espn'
     anchor: nm.Anchor          # team A = Game.home
     ml: dict                   # club -> (prop, pow)
     spread: dict               # club -> (point, prop, pow)   pinnacle only
@@ -539,6 +611,13 @@ def sharp_for(game: Game, cache: dict) -> Sharp | None:
             a = _anchor_of(v, game.home)
             ok = a.mu is not None and abs(a.ml_resid_pp) <= MAX_ML_RESID_PP
             return Sharp("pinnacle", a, v["ml"], v["spread"], v["total"], ok, snap)
+    if DK_BOOK in books:          # the ESPN cache carries this book and nothing else
+        v = _book_view(books[DK_BOOK], game.home, game.away)
+        if not (v and v["ml"] and v["spread"]):
+            return None
+        a = _anchor_of(v, game.home)
+        ok = a.mu is not None and abs(a.ml_resid_pp) <= MAX_ML_RESID_PP
+        return Sharp(DK_SHARP, a, v["ml"], v["spread"], v["total"], ok, snap)
     views = [v for k, b in books.items() if k != "pinnacle"
              for v in [_book_view(b, game.home, game.away)] if v and v["ml"] and v["spread"]]
     if len(views) < 2:
@@ -569,7 +648,7 @@ class Cand:
     liquidity: float
     fair: float                # after haircut
     fair_raw: float
-    source: str                # sharp_exact | sharp_model | pm_mid
+    source: str                # sharp_exact | sharp_model | dk_exact | dk_model | pm_mid
     dist: float = 0.0
     ev: float = 0.0
     verified: bool = False
@@ -595,6 +674,8 @@ def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
     the cheapest token to hold when a bet is forced."""
     out: list[Cand] = []
     a = sh.anchor if sh else None
+    # the source names the book: a DraftKings price never reads as a Pinnacle one
+    EX, MO = ("dk_exact", "dk_model") if sh and sh.book == DK_SHARP else ("sharp_exact", "sharp_model")
     for m in game.markets:
         fam = str(m.get("sportsMarketType") or "").lower()
         if fam not in FAMILIES or m.get("closed") or m.get("active") is False \
@@ -617,10 +698,10 @@ def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
                 continue
             for t in (t0, t1):
                 if sh and sh.ml.get(t):
-                    priced.append((t, None, min(sh.ml[t]), "sharp_exact", 0.0))
+                    priced.append((t, None, min(sh.ml[t]), EX, 0.0))
                 elif sh and sh.model_ok:
                     mu = a.mu if t == game.home else -a.mu
-                    priced.append((t, None, nm.win_prob(mu, a.sigma), "sharp_model", 0.0))
+                    priced.append((t, None, nm.win_prob(mu, a.sigma), MO, 0.0))
                 else:
                     priced.append((t, None, None, "pm_mid", 0.0))
 
@@ -635,13 +716,13 @@ def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
             y = game.other(x)
             pin = sh.spread if sh else {}
             if pin.get(x) and is_half(ln) and abs(pin[x][0] - ln) < 1e-9:
-                priced += [(x, ln, min(pin[x][1:]), "sharp_exact", 0.0),
-                           (y, -ln, min(pin[y][1:]), "sharp_exact", 0.0)]
+                priced += [(x, ln, min(pin[x][1:]), EX, 0.0),
+                           (y, -ln, min(pin[y][1:]), EX, 0.0)]
             elif sh and sh.model_ok:
                 mu_x = a.mu if x == game.home else -a.mu
                 fx = nm.cover_prob(mu_x, -ln, a.sigma)
                 d = abs(ln - pin[x][0]) if pin.get(x) else abs(-ln - mu_x)
-                priced += [(x, ln, fx, "sharp_model", d), (y, -ln, 1 - fx, "sharp_model", d)]
+                priced += [(x, ln, fx, MO, d), (y, -ln, 1 - fx, MO, d)]
             else:
                 priced += [(x, ln, None, "pm_mid", 0.0), (y, -ln, None, "pm_mid", 0.0)]
 
@@ -654,12 +735,12 @@ def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
                 continue
             tot = sh.total if sh else None
             if tot and is_half(ln) and abs(tot[0] - ln) < 1e-9:
-                priced += [("Over", ln, min(tot[1]), "sharp_exact", 0.0),
-                           ("Under", ln, min(tot[2]), "sharp_exact", 0.0)]
+                priced += [("Over", ln, min(tot[1]), EX, 0.0),
+                           ("Under", ln, min(tot[2]), EX, 0.0)]
             elif sh and a.T is not None:
                 fo = nm.over_prob(a.T, ln)
                 d = abs(ln - tot[0]) if tot else abs(ln - a.T)
-                priced += [("Over", ln, fo, "sharp_model", d), ("Under", ln, 1 - fo, "sharp_model", d)]
+                priced += [("Over", ln, fo, MO, d), ("Under", ln, 1 - fo, MO, d)]
             else:
                 priced += [("Over", ln, None, "pm_mid", 0.0), ("Under", ln, None, "pm_mid", 0.0)]
 
@@ -668,10 +749,10 @@ def candidates(game: Game, sh: Sharp | None) -> list[Cand]:
                 continue
             if src == "pm_mid":
                 fair = 0.5 * (bid + ask)
-            if src == "sharp_model" and fam == "spreads" and dist > MAX_SPREAD_DIST:
+            if src == MO and fam == "spreads" and dist > MAX_SPREAD_DIST:
                 continue
             raw = fair
-            if src == "sharp_model":
+            if src == MO:
                 fair = raw - _haircut(fam, dist)
             c = Cand(fam, line, side, q, m.get("conditionId") or "", tok, bid, ask, liq,
                      fair, raw, src, dist)
@@ -696,8 +777,8 @@ def decide(best: Cand | None, fresh: bool, mins: float) -> str | None:
     """'edge', 'forced' or None — the rule, apart from the network."""
     if best is None:
         return None
-    th = EDGE_MIN_EXACT if best.source == "sharp_exact" else EDGE_MIN_MODEL
-    if fresh and best.source != "pm_mid" and best.ev >= th:
+    th = EDGE_MIN.get(best.source)
+    if fresh and th is not None and best.ev >= th:
         return "edge"
     if mins <= FORCE_MIN:
         return "forced"
@@ -710,11 +791,28 @@ def _conn():
     return db_txn.connect(DATABASE_URL)
 
 
+def _rules_now() -> dict:
+    return {"venue": "polymarket", "sport": "nba", "phase": "paper-only",
+            "self_settling": True, "obs_version": OBS_VERSION,
+            "fair_value": "pinnacle de-vigged; nba_model for alternates",
+            "fair_value_fallback": "draftkings via ESPN scoreboard, de-vigged, when the "
+                                   "odds api has no fresh snapshot",
+            "season_types": sorted(BET_SEASON_TYPES),
+            "edge_min_exact_pct": EDGE_MIN_EXACT, "edge_min_model_pct": EDGE_MIN_MODEL,
+            "edge_min_dk_exact_pct": EDGE_MIN_DK_EXACT, "edge_min_dk_model_pct": EDGE_MIN_DK_MODEL,
+            "force_min": FORCE_MIN, "stake_u": STAKE_U}
+
+
 def ensure_strategy(conn) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT id FROM strategies WHERE name = %s", (STRATEGY_NAME,))
         row = cur.fetchone()
         if row:
+            # the rules record what is running now; the version each trade was
+            # placed under lives on the trade itself (sharp_consensus_sources)
+            cur.execute("""UPDATE strategies SET rules = rules || %s::jsonb
+                            WHERE id = %s AND (rules->>'obs_version') IS DISTINCT FROM %s""",
+                        (json.dumps(_rules_now()), row[0], str(OBS_VERSION)))
             return row[0]
     with db_txn.atomic(conn):
         with conn.cursor() as cur:
@@ -738,14 +836,7 @@ def ensure_strategy(conn) -> int:
                 VALUES (%s, %s, %s::jsonb, 'agent', 'running', %s,
                         (SELECT owner_id FROM strategies WHERE name = %s))
                 RETURNING id""", (
-                hyp, STRATEGY_NAME, json.dumps({
-                    "venue": "polymarket", "sport": "nba", "phase": "paper-only",
-                    "self_settling": True, "obs_version": OBS_VERSION,
-                    "fair_value": "pinnacle de-vigged; nba_model for alternates",
-                    "season_types": sorted(BET_SEASON_TYPES),
-                    "edge_min_exact_pct": EDGE_MIN_EXACT, "edge_min_model_pct": EDGE_MIN_MODEL,
-                    "force_min": FORCE_MIN, "stake_u": STAKE_U,
-                }), "Bet every NBA game on Polymarket, choosing the market with the best "
+                hyp, STRATEGY_NAME, json.dumps(_rules_now()), "Bet every NBA game on Polymarket, choosing the market with the best "
                     "price against the sharp line.", OWNER_FROM))
             sid = cur.fetchone()[0]
     log.info(f"created strategy '{STRATEGY_NAME}' id={sid}")
@@ -870,6 +961,18 @@ def may_fetch(why: str | None, left: int | None) -> bool:
     return not (left < RESERVE_CREDITS and why == "edge")
 
 
+def pick_sharp(odds_sh: Sharp | None, odds_age: float | None, dk_sh: Sharp | None,
+               max_age: float | None) -> tuple[Sharp | None, bool]:
+    """(line, fresh). A fresh Odds API line (Pinnacle or consensus) wins; else
+    ESPN's DraftKings line, read this cycle and so always fresh; else a stale
+    Odds API line, which may still price a forced bet but never an edge."""
+    if odds_sh and odds_age is not None and max_age is not None and odds_age <= max_age:
+        return odds_sh, True
+    if dk_sh:
+        return dk_sh, True
+    return odds_sh, False
+
+
 def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     now = datetime.now(timezone.utc)
     listed = [g for g in fetch_pm_games(now) if g.kickoff <= now + timedelta(minutes=HORIZON_MIN)]
@@ -883,9 +986,11 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     bets = bet_games(conn, sid)
 
     # Out of scope BEFORE anything is priced or fetched: a preseason game must
-    # not spend a credit. A game already bet stays in, for its close.
-    unbet = [g for g in listed if g.slug not in bets]
-    sched = espn_schedule(unbet) if unbet else {}
+    # not spend a credit. A game already bet stays in, for its close. The
+    # scoreboard is asked for every listed game, bet or not: it also carries
+    # DraftKings' line, which a close read needs as much as a new bet.
+    sched = espn_schedule(listed) if listed else {}
+    dk_cache = espn_dk_cache(sched, now)
     games, skipped = [], {}
     for g in listed:
         st = None if g.slug in bets else season_type(g, sched)
@@ -909,7 +1014,16 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     snap_txt = "none" if age is None else f"{age:.0f} min old ({pool_remaining()} credits in the pool)"
     skip_txt = "".join(f" · {n} skipped ({k})" for k, n in sorted(skipped.items()))
     log.info(f"{len(games)} NBA games in scope{skip_txt} · "
-             f"{sum(g.slug in bets for g in games)} already bet · sharp snapshot {snap_txt}")
+             f"{sum(g.slug in bets for g in games)} already bet · sharp snapshot {snap_txt} · "
+             f"ESPN/DraftKings lines {len(dk_cache['data']) if dk_cache else 0}")
+
+    # The maker arm (nba_maker.py) rests bids on the same games; its own
+    # strategy, table and errors, so a failure there never stops a taker bet.
+    try:
+        import nba_maker
+        nba_maker.cycle(conn, games, cache, now, dry_run=dry_run)
+    except Exception:                                    # noqa: BLE001
+        log.exception("maker arm failed this cycle — the taker arm carries on")
 
     written = last_snapshot_written(conn) if not dry_run else {}
     todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake, new_snap)
@@ -917,11 +1031,13 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     for g in games:
         mins = (g.kickoff - now).total_seconds() / 60
         req = required_age_min(mins)
-        sh = sharp_for(g, cache) if cache else None
+        odds_sh = sharp_for(g, cache) if cache else None
+        dk_sh = sharp_for(g, dk_cache) if dk_cache else None
 
         if g.slug in bets:          # read the close for a game already bet
             b = bets[g.slug]
-            if b["closing_price"] is None and 0 < mins <= CLOSE_MIN and sh and age is not None and age <= 8:
+            sh, close_ok = pick_sharp(odds_sh, age, dk_sh, 8)
+            if b["closing_price"] is None and 0 < mins <= CLOSE_MIN and sh and close_ok:
                 hit = [c for c in candidates(g, sh) if c.token_id == b["pm_token_id"]]
                 if hit and hit[0].source != "pm_mid":
                     c = hit[0]
@@ -931,8 +1047,8 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
         if req is None:
             continue
 
-        fresh = sh is not None and age is not None and age <= req + 5
-        cands = candidates(g, sh if sh else None)
+        sh, fresh = pick_sharp(odds_sh, age, dk_sh, req + 5)
+        cands = candidates(g, sh)
         if not cands:
             log.info(f"  {g.title:<28} {mins:6.0f}m  no book passes the gates")
             continue
@@ -1142,6 +1258,11 @@ def settle() -> int:
         n += 1
     log.info(f"settled {n} of {len(pending)} finished NBA trades")
     provisional(conn, pending, verdicts)
+    try:
+        import nba_maker
+        nba_maker.settle(conn)
+    except Exception:                                    # noqa: BLE001
+        log.exception("maker settle failed — retried next run")
     return n
 
 
@@ -1154,17 +1275,21 @@ def report() -> None:
             SELECT pt.id, pt.placed_at, pt.outcome, pt.entry_price, pt.stake_units, pt.result,
                    pt.payout_units, pt.confidence AS kind, pt.pm_clv,
                    (pt.sharp_consensus_sources->>'ev_pct')::float AS ev,
-                   pt.sharp_consensus_sources->>'fair_source' AS src
+                   pt.sharp_consensus_sources->>'fair_source' AS src,
+                   COALESCE((pt.sharp_consensus_sources->>'obs_version')::int, 1) AS obs
               FROM paper_trades pt JOIN strategies s ON s.id = pt.strategy_id
              WHERE s.name = %s ORDER BY pt.placed_at""", (STRATEGY_NAME,))
         rows = [dict(r) for r in cur.fetchall()]
     if not rows:
         print("no NBA trades yet")
         return
-    print(f"{'':8}{'n':>4}{'settled':>9}{'won':>5}{'stake':>8}{'net P&L':>9}{'yield':>8}"
+    # never pooled across obs_versions: v1 had no line at all (pm_mid), v2 adds
+    # DraftKings via ESPN, and the two measure different things
+    print(f"{'':12}{'n':>4}{'settled':>9}{'won':>5}{'stake':>8}{'net P&L':>9}{'yield':>8}"
           f"{'avg EV':>8}{'pm_clv':>9}")
-    for kind in ("edge", "forced", None):
-        sub = [r for r in rows if kind is None or r["kind"] == kind]
+    for obs, kind in [(o, k) for o in sorted({r["obs"] for r in rows})
+                      for k in ("edge", "forced", None)]:
+        sub = [r for r in rows if r["obs"] == obs and (kind is None or r["kind"] == kind)]
         if not sub:
             continue
         st = [r for r in sub if r["result"]]
@@ -1174,7 +1299,7 @@ def report() -> None:
         pnl = sum(float(r["payout_units"] or 0) - float(r["stake_units"]) for r in st) - fee
         evs = [r["ev"] for r in sub if r["ev"] is not None]
         clvs = [float(r["pm_clv"]) for r in sub if r["pm_clv"] is not None]
-        print(f"{(kind or 'ALL'):<8}{len(sub):>4}{len(st):>9}{sum(r['result'] == 'won' for r in st):>5}"
+        print(f"{'v%d %s' % (obs, kind or 'ALL'):<12}{len(sub):>4}{len(st):>9}{sum(r['result'] == 'won' for r in st):>5}"
               f"{stake:>8.1f}{pnl:>+9.2f}{(100 * pnl / stake if stake else 0):>+7.1f}%"
               f"{(sum(evs) / len(evs) if evs else 0):>+7.2f}%"
               f"{(100 * sum(clvs) / len(clvs) if clvs else float('nan')):>+8.2f}%")
@@ -1185,7 +1310,7 @@ def report() -> None:
     for r in rows[-20:]:
         clv_txt = "" if r["pm_clv"] is None else "pm_clv {:+.2%}".format(float(r["pm_clv"]))
         ev = r["ev"] if r["ev"] is not None else 0.0
-        print(f"  pt#{r['id']:<6} {r['placed_at']:%m-%d %H:%M} {r['kind']:<6} {r['src'] or '':<11} "
+        print(f"  pt#{r['id']:<6} {r['placed_at']:%m-%d %H:%M} v{r['obs']} {r['kind']:<6} {r['src'] or '':<11} "
               f"EV {ev:+5.2f}%  {float(r['stake_units']):.2f}u @ "
               f"{float(r['entry_price']):.3f}  {r['result'] or 'open':<5} {clv_txt}  {r['outcome'][:60]}")
 
@@ -1201,6 +1326,8 @@ def main() -> None:
                         datefmt="%Y-%m-%d %H:%M:%S", force=True)
     if args.report:
         report()
+        import nba_maker
+        nba_maker.report()
         return
     lock = open(os.path.join(HERE, ".nba_agent.lock"), "w")
     try:
