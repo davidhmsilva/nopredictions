@@ -23,7 +23,7 @@ Yes-equivalent price: a trade on the other token at q is this token at 1 - q.
 A print exactly at the bid, or the ask coming down to it, depends on the
 queue, so it is only recorded (`touched_at`). A fill writes a 1u paper trade at
 the bid, no fee. Unfilled bids expire at tip-off and stay in nba_maker_orders.
-Every order, filled or not, gets the close (the CLOB's price history at the
+Every order, filled or not, gets the close (Polymarket's price history at the
 last point at or before tip-off) and Polymarket's resolution, so filled vs
 expired measures adverse selection directly.
 
@@ -230,12 +230,20 @@ def fetch_trades(condition_id: str, start: int, end: int) -> list[dict] | None:
     return out
 
 
+PRICES_HISTORY = "https://data-api.polymarket.com/v2/prices-history"
+
+
 def fetch_history(token_id: str, start: int, end: int) -> list[dict] | None:
+    """[{t, p}] at 1-minute buckets, `end` inclusive; None when the read
+    failed. data-api v2 (the CLOB's /prices-history shut down 2026-10-30):
+    `end` is exclusive there, a bucket's price is the price AT its start, and
+    1-minute points are kept ~7 days, far longer than a close waits."""
     try:
-        r = requests.get(f"{na.CLOB}/prices-history", params={"market": token_id, "startTs": start,
-                                                             "endTs": end, "fidelity": 1}, timeout=20)
+        r = requests.get(PRICES_HISTORY, params={"token_id": token_id, "start": start,
+                                                 "end": end + 1, "bucket_seconds": 60}, timeout=20)
         r.raise_for_status()
-        return r.json().get("history") or []
+        return [{"t": x["timestamp"], "p": x["price"]} for x in r.json().get("data") or []
+                if x.get("timestamp") is not None and x["timestamp"] <= end]
     except Exception as exc:                                         # noqa: BLE001
         log.warning(f"prices-history {token_id[:10]}: {exc}")
         return None
