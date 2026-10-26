@@ -13,11 +13,13 @@ at/just before kickoff from two sources, in priority:
                       for that token in market_observations. Free, fine-grained,
                       in our own DB. (Matches YES bets, where our bought token ==
                       the YES token the observer stores.)
-  2. 'clob_history' — Polymarket CLOB /prices-history for the bought token, last
-                      point with t <= kickoff. Universal (YES and NO), and backfills
-                      the period before the observer existed. Coarse for resolved
-                      markets (PM serves >=12h granularity once a market settles) —
-                      pm_closing_at records exactly how stale the point used is.
+  2. 'clob_history' — Polymarket's price history for the bought token (data-api
+                      v2 since the CLOB endpoint shut down on 2026-10-30; the tag
+                      keeps its name), the last point at or before kickoff.
+                      Universal (YES and NO), and backfills the period before the
+                      observer existed. Coarse for old markets (3h buckets past
+                      ~90 days) — pm_closing_at records exactly how stale the
+                      point used is.
 
   pm_clv = entry_odds * pm_closing_price - 1   (same units as clv; on the bought
   token, so correct for YES and NO).
@@ -44,6 +46,8 @@ import psycopg2.extras
 import requests
 from dotenv import load_dotenv
 
+import pm_prices
+
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../ingest/.env"))
 
 logging.basicConfig(
@@ -54,7 +58,6 @@ logging.basicConfig(
 log = logging.getLogger("pm_clv")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-CLOB_API = os.getenv("POLYMARKET_CLOB_API", "https://clob.polymarket.com").rstrip("/")
 GAMMA_API = os.getenv("POLYMARKET_GAMMA_API", "https://gamma-api.polymarket.com").rstrip("/")
 
 # Real PM closing-line value almost never exceeds this in absolute terms; beyond it
@@ -177,41 +180,16 @@ def _gamma_token(mkt: dict | None, is_no: bool) -> str | None:
     return str(raw[1] if is_no else raw[0])
 
 
-def _clob_prices_history(token_id: str) -> list[tuple[int, float]]:
-    """Full price history for a token via the public CLOB endpoint. [(unix_ts, price)]."""
-    try:
-        r = requests.get(
-            f"{CLOB_API}/prices-history",
-            params={"market": token_id, "interval": "max"},
-            timeout=20,
-        )
-        if not r.ok:
-            return []
-        data = r.json()
-    except (requests.RequestException, ValueError):
-        return []
-    out = []
-    for pt in data.get("history") or []:
-        t, p = pt.get("t"), _f(pt.get("p"))
-        if t is None or p is None:
-            continue
-        out.append((int(t), p))
-    out.sort()
-    return out
-
-
 def _closing_from_clob(token_id: str | None, kickoff: datetime) -> tuple[float | None, datetime | None]:
-    """PM closing price = last /prices-history point at/just before kickoff."""
+    """PM closing price = the last price-history point at/just before kickoff.
+    `closing_at` is that point's own time: on a market older than ~90 days
+    data-api v2 only has 3h buckets, so it can sit hours before kickoff."""
     if not token_id:
         return None, None
-    pts = _clob_prices_history(token_id)
-    if not pts:
+    pt = pm_prices.price_as_of(token_id, _to_unix(kickoff))
+    if not pt:
         return None, None
-    ko_ts = _to_unix(kickoff)
-    before = [(t, p) for t, p in pts if t <= ko_ts]
-    if not before:
-        return None, None
-    t, p = before[-1]
+    t, p = pt
     return p, datetime.fromtimestamp(t, tz=timezone.utc)
 
 

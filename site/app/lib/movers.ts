@@ -35,6 +35,7 @@ import { unstable_cache } from 'next/cache'
 import type { ScoutFixture } from './scout'
 import type { BoardSport } from './boardRow'
 import { SPORT_META, type SportBoardData, type SportKey } from './sportsMeta'
+import { historyUrl, parseHistory } from './pmHistory'
 
 /** Below this, a "mover" is two people rather than a market. */
 export const MIN_VOLUME_USD = 1_000
@@ -240,25 +241,20 @@ export function moversMeta(candidates: MoverCandidate[], shown: number): MoversM
 
 // ── the price path ───────────────────────────────────────────────────────────
 
-const CLOB_HISTORY = 'https://clob.polymarket.com/prices-history'
-
 /** Hours of history behind each sparkline. Matches the 24h the move is
  *  measured over, so the line and the number describe the same window. */
 const SPARK_HOURS = 24
 
-/** At most this many points; hourly is plenty for a 24-hour line. */
-const SPARK_FIDELITY = 60
+/** One point an hour is plenty for a 24-hour line. */
+const SPARK_BUCKET_S = 3600
 
 async function pathOf(tokenId: string): Promise<number[]> {
   const now = Math.floor(Date.now() / 1000)
-  const url =
-    `${CLOB_HISTORY}?market=${tokenId}` +
-    `&startTs=${now - SPARK_HOURS * 3600}&endTs=${now}&fidelity=${SPARK_FIDELITY}`
+  const url = historyUrl(tokenId, { start: now - SPARK_HOURS * 3600, end: now, bucketS: SPARK_BUCKET_S })
   try {
     const r = await fetch(url, { cache: 'no-store' })
     if (!r.ok) return []
-    const b = (await r.json()) as { history?: { t: number; p: number }[] }
-    return (b.history ?? []).map((h) => h.p).filter((p) => Number.isFinite(p))
+    return parseHistory(await r.json()).map((h) => h.p)
   } catch {
     // A line we could not draw is a line we do not draw. The row keeps its
     // numbers, which are the part that matters.

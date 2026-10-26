@@ -8,9 +8,10 @@
 // - The fixture list is Gamma's CLOSED soccer events for one UTC day, bounded
 //   by `end_date_min/max` as plain dates (a fixture's endDate IS its kick-off;
 //   see CLAUDE.md, "Gamma's four traps").
-// - The price is the CLOB's own price history for each of the three "Yes"
+// - The price is Polymarket's own price history for each of the three "Yes"
 //   tokens, read at the last point at or before kick-off. Measured on
-//   2026-09-27: a point inside the kick-off minute on 97 of 98 fixtures, the
+//   2026-09-27 (on the CLOB endpoint, data-api v2 since it shut down on
+//   2026-10-30): a point inside the kick-off minute on 97 of 98 fixtures, the
 //   three summing to 1.005 at the median. They are normalised to sum to 1.
 // - The outcome is Polymarket's RESOLUTION of the three questions — exactly
 //   one "Yes" paid — never read off the score. Extra time and penalties change
@@ -21,9 +22,9 @@
 import { getSql } from './db'
 import { competitionOf, pmLiveOf } from './scout'
 import { devig3, n, resolveTeams } from './teamform'
+import { historyUrl, parseHistory } from './pmHistory'
 
 const GAMMA = 'https://gamma-api.polymarket.com'
-const CLOB = 'https://clob.polymarket.com'
 const PAGE = 100
 const MAX_PAGES = 15
 /** Six to eight at once was clean on the history endpoint (0 failures in 294). */
@@ -160,16 +161,22 @@ function splitTitle(title: string): { home: string; away: string } | null {
   return { home: m[1].trim(), away: m[2].trim() }
 }
 
+/** A kick-off price older than this is not a kick-off price. data-api v2
+ *  keeps 5-minute points ~60 days and 30-minute ~90, then only 3h buckets:
+ *  measured 2026-10-26, 2026-09-20 priced 207/207 at most 5 min before
+ *  kick-off, while 2026-07-25 had only points 180 min before it. Those come
+ *  back unpriced rather than priced three hours early. */
+const MAX_PRICE_AGE_S = 30 * 60
+
+/** The last price at or before kick-off, no older than MAX_PRICE_AGE_S. */
 async function priceAt(token: string, kickoffSec: number): Promise<{ p: number; t: number } | null> {
-  const url =
-    `${CLOB}/prices-history?market=${encodeURIComponent(token)}` +
-    `&startTs=${kickoffSec - 3 * 3600}&endTs=${kickoffSec + 60}&fidelity=1`
+  const url = historyUrl(token, { asOf: kickoffSec })
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const j = (await getJson(url)) as { history?: Array<{ t: number; p: number }> }
-      const pre = (j.history ?? []).filter((x) => x.t <= kickoffSec)
-      const last = pre[pre.length - 1]
-      return last ? { p: last.p, t: last.t } : null
+      const last = parseHistory(await getJson(url))
+        .filter((x) => x.t <= kickoffSec)
+        .pop()
+      return last && last.t >= kickoffSec - MAX_PRICE_AGE_S ? { p: last.p, t: last.t } : null
     } catch {
       await new Promise((r) => setTimeout(r, 600 * (attempt + 1)))
     }

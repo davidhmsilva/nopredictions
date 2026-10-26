@@ -3,7 +3,7 @@ wc_overs_backfill — reconstruct in-play over_2.5 price curves for past WC matc
 
 For every finished WC match we have a Polymarket "O/U 2.5" market for:
   1. Fetch the Over token id + game_start_time from CLOB /markets/{condition_id}
-  2. Fetch /prices-history (interval=max) for that token
+  2. Fetch the token's price history (pm_prices, data-api v2)
   3. Fetch the fixture from api-football (date + team name match)
   4. Get /fixtures/events → build a minute→score timeline
   5. Walk the price snapshots; tag each with elapsed minute + score
@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / "ingest" / ".env")
 
 sys.path.insert(0, str(ROOT / "agent"))
+import pm_prices  # noqa: E402
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 CLOB = os.getenv("POLYMARKET_CLOB_API", "https://clob.polymarket.com").rstrip("/")
@@ -124,34 +125,13 @@ def over_token(mkt: dict) -> Optional[str]:
 
 
 def prices_history(token_id: str, start_ts: int | None = None, end_ts: int | None = None) -> list[tuple[int, float]]:
-    params: dict = {"market": token_id, "fidelity": 1}
+    """1-minute path in a window, else the whole history. data-api v2 keeps
+    1-minute points only ~7 days, so for the 2026 World Cup the minute paths
+    are in ingest/data/price_paths_v1/soccer_jul (archived from the old CLOB
+    endpoint before it shut down on 2026-10-30)."""
     if start_ts is not None and end_ts is not None:
-        params["startTs"] = start_ts
-        params["endTs"] = end_ts
-    else:
-        params["interval"] = "max"
-    try:
-        r = requests.get(
-            f"{CLOB}/prices-history",
-            params=params,
-            timeout=20,
-        )
-        if not r.ok:
-            return []
-        data = r.json()
-    except (requests.RequestException, ValueError):
-        return []
-    out = []
-    for pt in data.get("history") or []:
-        t, p = pt.get("t"), pt.get("p")
-        if t is None or p is None:
-            continue
-        try:
-            out.append((int(t), float(p)))
-        except (TypeError, ValueError):
-            continue
-    out.sort()
-    return out
+        return pm_prices.history(token_id, start=start_ts, end=end_ts, bucket_s=60)
+    return pm_prices.history(token_id, interval="max")
 
 
 NAME_ALIASES = {
