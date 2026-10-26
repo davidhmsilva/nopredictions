@@ -359,6 +359,31 @@ python stage_i_kalshi.py --series KXEPLGAME             # one competition
   Unverified against the Member Agreement. Data ingestion is unaffected;
   real-money execution from PT may simply not be possible.
 
+### Polymarket price history moved to data-api v2 (2026-10-26)
+
+`GET clob.polymarket.com/prices-history` shuts down on **2026-10-30 00:00
+UTC**. Every caller now reads `data-api.polymarket.com/v2/prices-history`
+through one helper per side: `agent/pm_prices.py` and
+`site/app/lib/pmHistory.ts` (`agent/nba_maker.py` carries its own, on its
+branch).
+- `token_id`, not `market`. `start`/`end`, with `end` **exclusive**. The
+  window's terminal point is stamped at the edge (end=KO came back at
+  KO+1), so the helpers clip it. `bucket_seconds` replaces `fidelity`.
+  `as_of` returns the last point at or before an instant.
+- A bucket's price is the price **at its start** (10/10 against 1-minute
+  points), so "the last point at or before kick-off" has no lookahead.
+- ⚠️ **Retention:** 1-minute ≥ 7 days, 5-minute ≥ 60, 30-minute ≥ 90, then
+  only 3h / 12h buckets. On 2026-07-25 the only kick-off point was 180 min
+  early. `pmResults.priceAt` refuses a price older than 30 min (Sept 20:
+  207/207 priced, July 25: 0). `pm_clv_backfill` keeps the stale point and
+  records its time in `pm_closing_at`.
+- **The old minute history is archived** by `ingest/stage_m_archive.py`
+  (run on Hetzner before the shutdown, output under
+  `data/price_paths_v1/<tier>/`). Tiers: soccer 10-03→10-26, soccer July
+  (World Cup), the 96h before kick-off for every Stage M token, NFL from
+  2025-09, NBA from 2025-10, and soccer June→10-02. Every traded market,
+  KO−96h → KO+3h (US sports +5h), only price changes kept.
+
 ### Betfair historical opening prices — PARKED
 Not strictly required — Pinnacle opening odds serve as the entry price proxy and
 Pinnacle closing as the CLV benchmark. Can be added later if needed.
