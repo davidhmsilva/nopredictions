@@ -674,6 +674,7 @@ export function looksLive(points: PricePoint[]): boolean {
 // ── the watch card ───────────────────────────────────────────────────────────
 
 import LATE_GOALS from './late_goals.json'
+import LATE_CALIBRATION from './late_goals_calibration.json'
 
 interface LateCell { n: number; p: number; p2: number }
 interface LateTable {
@@ -697,19 +698,40 @@ export function bucketOf(pOver25: number | null): string {
   return 'hi'
 }
 
-/** Measured P(at least `needed` more goals) from (minute, goals so far, bucket).
+// The table runs LOW on the fixtures Polymarket lists: out of sample, the real
+// rate beat it by +2.0pp on one more goal and +3.3pp on two, in every minute
+// band (agent/late_goals_recalibrate.py, 1,189 fixtures). Uncorrected, every
+// Under on the page read cheap and every Over rich for that reason alone.
+// The correction is keyed to the table it was fitted on: a rebuilt table with
+// no refit gets no correction rather than one fitted on other numbers.
+interface LateRung { a: number; b: number; fixtures: number }
+interface LateCalibration { table_built_at: string; fitted_at: string; rungs: Record<string, LateRung> }
+const LATE_CAL = LATE_CALIBRATION as unknown as LateCalibration
+const LATE_CAL_LIVE = LATE_CAL.table_built_at === LATE.built_at
+
+function recalibrate(p: number, minute: number, needed: 1 | 2): number {
+  const r = LATE_CAL.rungs[String(needed)]
+  if (!LATE_CAL_LIVE || !r || p <= 0 || p >= 1) return p
+  const z = Math.log(p / (1 - p)) + r.a + (r.b * (minute - 55)) / 35
+  return 1 / (1 + Math.exp(-z))
+}
+
+/** P(at least `needed` more goals) from (minute, goals so far, bucket).
  *
  *  Snaps to the 2-minute grid and falls back to the pooled cell when the
  *  bucketed one is thin. Returns null off the grid rather than extrapolating —
  *  and never derives the two-goal number from the one-goal number, because
  *  football is underdispersed against Poisson late on (empirical P(>=2) is
- *  0.63x the Poisson value by 86'). */
+ *  0.63x the Poisson value by 86').
+ *
+ *  `p` is the table's frequency after the Polymarket-fixture correction;
+ *  `raw` is the frequency itself, `calibrated` whether the two differ. */
 export function lateGoalRate(
   minute: number,
   goals: number,
   pOver25: number | null,
   needed: 1 | 2 = 1
-): { p: number; n: number; bucket: string } | null {
+): { p: number; raw: number; calibrated: boolean; n: number; bucket: string } | null {
   const grid = LATE.minutes
   const tm = grid.reduce((a, b) => (Math.abs(b - minute) < Math.abs(a - minute) ? b : a))
   if (Math.abs(tm - minute) > 3) return null
@@ -717,7 +739,11 @@ export function lateGoalRate(
   const field = needed === 1 ? 'p' : 'p2'
   for (const bucket of [bucketOf(pOver25), 'all']) {
     const cell = LATE.cells[`${tm}|${goals}|${bucket}`]
-    if (cell && cell.n >= LATE.min_cell_n) return { p: cell[field], n: cell.n, bucket }
+    if (cell && cell.n >= LATE.min_cell_n) {
+      const raw = cell[field]
+      const p = recalibrate(raw, minute, needed)
+      return { p, raw, calibrated: p !== raw, n: cell.n, bucket }
+    }
   }
   return null
 }
