@@ -64,6 +64,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import db_txn                                                       # noqa: E402
 import late_goals_table as lgt  # noqa: E402
+import pm_prices                                                    # noqa: E402
 from edge_engine import taker_fee_pp  # noqa: E402
 
 logging.basicConfig(
@@ -858,14 +859,10 @@ def settle(conn) -> int:
         return 0
 
     def _price(token_id):
-        try:
-            r = requests.get("https://clob.polymarket.com/prices-history",
-                             params={"market": token_id, "interval": "max", "fidelity": 60},
-                             timeout=12)
-            hist = (r.json() or {}).get("history") or []
-            return _f(hist[-1].get("p")) if hist else None
-        except Exception:
-            return None
+        # The latest observation, which on a resolved market is the
+        # settlement point data-api v2 appends once it settles on-chain.
+        pt = pm_prices.price_as_of(token_id, int(time.time()), timeout=12)
+        return _f(pt[1]) if pt else None
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         finals = list(pool.map(lambda p: _price(p[1]), pending))

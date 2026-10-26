@@ -120,6 +120,7 @@ export interface Headline {
 
 import type { Look, Pulse } from './looks'
 import { shortTeam } from './teamname'
+import { historyUrl, parseHistory } from './pmHistory'
 
 export interface GameData {
   slug: string
@@ -266,15 +267,11 @@ export async function fetchBook(tokenId: string): Promise<BookSide | null> {
 export async function fetchHistory(
   tokenId: string,
   hours = 24,
-  fidelity = 5
+  bucketMin = 5
 ): Promise<PricePoint[]> {
   try {
-    const startTs = Math.floor(Date.now() / 1000) - hours * 3600
-    const data = (await getJson(
-      `${CLOB_API}/prices-history?market=${encodeURIComponent(tokenId)}` +
-        `&startTs=${startTs}&fidelity=${fidelity}`
-    )) as { history?: Array<{ t: number; p: number }> }
-    return (data.history ?? []).map((h) => ({ t: h.t, p: h.p }))
+    const start = Math.floor(Date.now() / 1000) - hours * 3600
+    return parseHistory(await getJson(historyUrl(tokenId, { start, bucketS: bucketMin * 60 })))
   } catch {
     return []
   }

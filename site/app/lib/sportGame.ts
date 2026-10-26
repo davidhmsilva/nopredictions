@@ -18,6 +18,7 @@
 import { unstable_cache } from 'next/cache'
 import { espnPathOf, getSportBoard } from './sports'
 import type { SportKey } from './sportsMeta'
+import { historyUrl, parseHistory } from './pmHistory'
 import type {
   GameTeam,
   Injury,
@@ -204,10 +205,9 @@ function winProbOf(list: any[] | undefined): number[] {
 async function historyOf(token: string): Promise<PricePoint[]> {
   const now = Math.floor(Date.now() / 1000)
   try {
-    const b = await getJson<{ history?: { t: number; p: number }[] }>(
-      `https://clob.polymarket.com/prices-history?market=${token}&startTs=${now - 72 * 3600}&endTs=${now}&fidelity=30`
+    return parseHistory(
+      await getJson<unknown>(historyUrl(token, { start: now - 72 * 3600, end: now, bucketS: 1800 }))
     )
-    return (b.history ?? []).filter((h) => Number.isFinite(h.p) && Number.isFinite(h.t))
   } catch {
     return []
   }
