@@ -42,6 +42,15 @@ case "$job" in
     AF_COUNTER_NAME=sweep exec python settled_sweep_observer.py --interval 30 \
       >> settled_sweep_observer.log 2>&1 ;;
 
+  record-looks)
+    # The Game Center's CHEAP cards, recorded forward (db/081). Node, not
+    # Python: it builds each payload with the page's own route handler. Boards
+    # come from the publisher (file + Caddy), so it never sweeps on its own.
+    cd "$ROOT/site" && NP_PUBLISHER=1 BOARDS_DIR=/srv/boards \
+      BOARDS_URL="${LOOKS_BOARDS_URL:-https://65-21-144-241.sslip.io/b/ea069b6b52c9516bc58fc6172ef04e16}" \
+      NODE_OPTIONS=--max-old-space-size=384 \
+      exec npx tsx scripts/record-looks.ts >> "$AGENT/record_looks.log" 2>&1 ;;
+
   # ── periodic jobs (Type=oneshot, driven by a .timer) ────────────────────────
   pressure-settle)
     AF_COUNTER_NAME=pressure_settle exec python pressure_agent.py --settle >> pressure_agent.log 2>&1 ;;
@@ -91,6 +100,11 @@ case "$job" in
   drift-monitor)
     # Pre-Match Drift: exit on +10% target / -5% stop / force-close before kick-off
     exec python drift_monitor.py >> drift_monitor.log 2>&1 ;;
+
+  looks-settle)
+    # settle look_observations on Polymarket's resolution of each token
+    cd "$ROOT/site" && NP_PUBLISHER=1 NODE_OPTIONS=--max-old-space-size=256 \
+      exec npx tsx scripts/record-looks.ts --settle >> "$AGENT/record_looks.log" 2>&1 ;;
 
   # ── by hand: any agent script with the server's env and venv ────────────────
   py)

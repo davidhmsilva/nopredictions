@@ -1,0 +1,12 @@
+# site/scripts/record-looks.ts --settle — pays the Game Center's CHEAP cards on PM's resolution (db/081)
+[Unit]
+Description=NOPREDICTIONS timer looks-settle
+
+[Timer]
+OnCalendar=*:20/30
+Persistent=true
+AccuracySec=1s
+Unit=np-job@looks-settle.service
+
+[Install]
+WantedBy=timers.target
