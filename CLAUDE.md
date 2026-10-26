@@ -2322,6 +2322,48 @@ example hit a sign-in wall, so a visitor never saw what either one does.
   report behind "Show the full analysis". `WalletProfile.recent` is site-only;
   the Python has no equivalent and `--verify-site` does not read it.
 
+## The Game Center's CHEAP cards — corrected, and on the record (2026-10-26)
+
+Asked by the user: "if I back every CHEAP card long-term, do I make money?"
+Not known, and the cards were biased towards saying yes on Unders.
+
+**The late-goal table runs low on the fixtures Polymarket lists.** Measured on
+`pressure_observations` (PM-listed, api-football finals, one row per fixture
+per even minute), out of sample by date: the real rate beat the table by
+**+2.0pp on one more goal and +3.3pp on two**, in every minute band (+10pp on
+the 143 Big-5 fixtures, so it is not only the imported leagues). Every Under
+therefore read cheap and every Over rich for that alone.
+`agent/late_goals_recalibrate.py` fits `logit(p') = logit(p) + a + b·(m−55)/35`
+per rung on 1,189 fixtures (a = +0.13 / +0.22) and writes
+`site/app/lib/late_goals_calibration.json`. Out of sample the bias falls to
+−0.8 / −0.6pp and log loss improves. `gamecenter.lateGoalRate` applies it
+**only if the calibration's `table_built_at` matches the table's** — rebuild the
+table, refit this. `looks.ts` now uses that one lookup (it had its own copy);
+cards say "corrected for PM games". ⚠️ The pressure agents' own copy of the
+table is untouched.
+
+**A disputed score builds no goal card.** Rizespor v Trabzonspor, 33': the
+live score said 1 goal, the ladder already priced 2, and the page called Under
+2.5 at 10.00 "+18.9pp cheap". When the live total and a certain ladder total
+disagree, `buildLooks` builds nothing — a wrong score always looks like edge
+(the sweep's phantom goals, again).
+
+**The forward record** — `look_observations` (db/081, RLS on, no grants):
+`site/scripts/record-looks.ts` builds each live fixture's payload with the
+page's own route handler and writes every CHEAP card on a real book, once per
+(fixture, card, score), with the raw and corrected fair. `--settle` pays on
+the CLOB `winner` flag of the token; `--report` prints hit vs ask vs fair and
+1u net of the fee. Read hit vs ask first; a yield needs thousands of rows.
+
+```bash
+cd site && set -a && source .env.local && set +a
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts --dry-run   # one cycle, nothing written
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts             # forever, 60s (BOARDS_DIR reads the publisher's scout.json)
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts --settle
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts --report
+cd ../agent && python late_goals_recalibrate.py --dry-run  # refit report
+```
+
 ## Results against the price — Yesterday · Today · Tomorrow (2026-09-29)
 
 `/results/<day>`: every finished Polymarket soccer fixture of a day, with the
