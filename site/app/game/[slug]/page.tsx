@@ -376,6 +376,7 @@ function LookRow({ look }: { look: Look }) {
       <div className="gc-look-flags">
         {look.n != null && <span className="gc-flag gc-flag-ok">measured · n={look.n.toLocaleString()}</span>}
         {look.imported && <span className="gc-flag gc-flag-warn">imported rate</span>}
+        {look.calibrated && <span className="gc-flag">corrected for PM games</span>}
         {look.isMid && <span className="gc-flag gc-flag-warn">not executable</span>}
         {!look.isMid && look.depthUsd != null && look.depthUsd < 100 && (
           <span className="gc-flag gc-flag-warn">thin</span>

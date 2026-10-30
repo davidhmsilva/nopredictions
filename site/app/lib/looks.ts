@@ -8,10 +8,10 @@
 // thing for a companion to say quickly, and a much better thing than a model
 // output we already know loses to Polymarket on Brier score in 6 groups of 6.
 
-import LATE_GOALS from './late_goals.json'
 import FIRST_HALF from './first_half.json'
 import {
   bucketOf,
+  lateGoalRate,
   matchTotalLine,
   takerFeePp,
   type BookSide,
@@ -22,16 +22,6 @@ import {
 } from './gamecenter'
 
 // ── the measured tables ──────────────────────────────────────────────────────
-
-interface LateCell { n: number; p: number; p2: number }
-interface LateTable {
-  built_at: string
-  minutes: number[]
-  buckets: Array<{ name: string; lo: number; hi: number }>
-  min_cell_n: number
-  cells: Record<string, LateCell>
-}
-const LATE = LATE_GOALS as unknown as LateTable
 
 interface HalfCell { n: number; p: number }
 interface HalfTable {
@@ -47,30 +37,6 @@ const HALF = FIRST_HALF as unknown as HalfTable
 // league — the look carries a flag and the page shows it.
 const MEASURED_UNIVERSE =
   /premier league|la ?liga|serie a|bundesliga|ligue 1|rfpl|russian premier/i
-
-/** Measured P(at least `needed` more goals) given (minute, goals, pre-match bucket).
- *
- *  Snaps to the table's 2-minute grid and falls back to the pooled cell when the
- *  bucketed one is thin. Never derives the two-goal number from the one-goal
- *  number: football is underdispersed against Poisson late on, so P(>=2) runs
- *  0.63x the Poisson value by 86'. The table carries a measured p2. */
-export function lateRate(
-  minute: number,
-  goals: number,
-  pOver25: number | null,
-  needed: 1 | 2 = 1
-): { p: number; n: number; bucket: string } | null {
-  const tm = LATE.minutes.reduce((a, b) =>
-    Math.abs(b - minute) < Math.abs(a - minute) ? b : a
-  )
-  if (Math.abs(tm - minute) > 3) return null
-  const field = needed === 1 ? 'p' : 'p2'
-  for (const bucket of [bucketOf(pOver25), 'all']) {
-    const cell = LATE.cells[`${tm}|${goals}|${bucket}`]
-    if (cell && cell.n >= LATE.min_cell_n) return { p: cell[field], n: cell.n, bucket }
-  }
-  return null
-}
 
 /** Measured P(a goal before half time | still 0-0 at `minute`).
  *
@@ -122,6 +88,10 @@ export interface Look {
   isMid: boolean
   /** True when the measured rate comes from leagues other than this one. */
   imported: boolean
+  /** True when the rate was corrected for the matches Polymarket lists. */
+  calibrated: boolean
+  /** The table's own frequency, before that correction. */
+  fairRawProb: number | null
   /** One line. Not a paragraph. */
   why: string
   /** Everything that would otherwise clutter the line, behind a click. */
@@ -161,6 +131,8 @@ function makeLook(
     n: number
     tier: LookTier
     imported: boolean
+    calibrated?: boolean
+    fairRawProb?: number
     why: (edgePp: number, fair: number, ask: number) => string
     detail: string[]
   }
@@ -195,6 +167,8 @@ function makeLook(
     depthUsd,
     isMid: p.isMid,
     imported: args.imported,
+    calibrated: args.calibrated ?? false,
+    fairRawProb: args.fairRawProb ?? args.fairProb,
     why: args.why(edgePp, args.fairProb, p.ask),
     detail: args.detail,
     tokenId: args.outcome?.tokenId ?? null,
@@ -234,11 +208,20 @@ export function buildLooks(
   //    table below is keyed on the total anyway.
   const clocked = live?.clockSource === 'api-football' || live?.clockSource === 'polymarket'
   const minute = clocked ? live!.minute : null
-  const goals = clocked
-    ? live!.homeGoals + live!.awayGoals
-    : board.certain
-      ? board.goals
-      : null
+  //
+  // ⚠️ When the live score and the over ladder BOTH claim a total and disagree,
+  //    no goal card is built. One of the two is behind, and the card that
+  //    results is wrong exactly where it looks best: on 2026-10-26 Rizespor v
+  //    Trabzonspor read 1 goal at 33' while the ladder already priced the
+  //    second, and the page called Under 2.5 at 10.00 "+18.9pp cheap". The
+  //    sweep's phantom goals (in_match entries 84% right against 99.9% on all
+  //    rows) are the same selection: a wrong score always looks like edge.
+  const liveGoals = clocked ? live!.homeGoals + live!.awayGoals : null
+  const scoreDisputed =
+    liveGoals != null && board.certain && board.goals != null && board.goals !== liveGoals
+  const goals = scoreDisputed
+    ? null
+    : liveGoals ?? (board.certain ? board.goals : null)
 
   const imported = !MEASURED_UNIVERSE.test(competition ?? '')
   const universeNote = imported
@@ -250,7 +233,7 @@ export function buildLooks(
   // ── a. the goal ladder, one and two rungs above the current score.
   if (minute != null && goals != null) {
     for (const needed of [1, 2] as const) {
-      const rate = lateRate(minute, goals, preOver25, needed)
+      const rate = lateGoalRate(minute, goals, preOver25, needed)
       if (!rate) continue
       const line = goals + needed - 0.5
       const g = groups.find((x) => matchTotalLine(x.question) === line)
@@ -269,6 +252,14 @@ export function buildLooks(
           : `The pre-match total still predicts a late goal once the state is fixed: at 75' ` +
             `with one goal scored, the lowest bucket paid 2.23 and the highest 1.89, on n=4,444 ` +
             `with disjoint confidence intervals. That is why the bucket is in the lookup.`,
+        ...(rate.calibrated
+          ? [
+              `Corrected from the raw ${(rate.raw * 100).toFixed(0)}% (for ${label}) to ` +
+                `${(rate.p * 100).toFixed(0)}%. On the matches Polymarket lists, the historical ` +
+                `table ran low at every minute: out of sample the real rate beat it by about ` +
+                `${needed === 1 ? '2' : '3'}pp, and this correction removes most of that.`,
+            ]
+          : []),
       ]
 
       const over = makeLook({
@@ -277,13 +268,17 @@ export function buildLooks(
         group: g,
         outcome: sideOf(g, /^over$/i),
         fairProb: rate.p,
+        fairRawProb: rate.raw,
         n: rate.n,
         tier: 'measured',
         imported,
+        calibrated: rate.calibrated,
         why: (edge, fair, ask) =>
           edge >= MIN_EDGE_PP
             ? `${rate.n.toLocaleString()} matches in this exact state delivered ${label} ` +
-              `${(fair * 100).toFixed(0)}% of the time. Polymarket wants ${dec(ask).toFixed(2)}.`
+              `${(rate.raw * 100).toFixed(0)}% of the time` +
+              (rate.calibrated ? `, ${(fair * 100).toFixed(0)}% once corrected` : '') +
+              `. Polymarket wants ${dec(ask).toFixed(2)}.`
             : edge <= -MIN_EDGE_PP
               ? `Polymarket asks ${dec(ask).toFixed(2)} where the measured rate paid ` +
                 `${dec(fair).toFixed(2)}. The over is the expensive side here.`
@@ -298,14 +293,17 @@ export function buildLooks(
         group: g,
         outcome: sideOf(g, /^under$/i),
         fairProb: 1 - rate.p,
+        fairRawProb: 1 - rate.raw,
         n: rate.n,
         tier: 'measured',
         imported,
+        calibrated: rate.calibrated,
         why: (edge, fair, ask) =>
           edge >= MIN_EDGE_PP
             ? `${label.charAt(0).toUpperCase() + label.slice(1)} failed to arrive in ` +
-              `${(fair * 100).toFixed(0)}% of ${rate.n.toLocaleString()} matches in this state. ` +
-              `Polymarket wants ${dec(ask).toFixed(2)}.`
+              `${((1 - rate.raw) * 100).toFixed(0)}% of ${rate.n.toLocaleString()} matches in this state` +
+              (rate.calibrated ? `, ${(fair * 100).toFixed(0)}% once corrected` : '') +
+              `. Polymarket wants ${dec(ask).toFixed(2)}.`
             : edge <= -MIN_EDGE_PP
               ? `Polymarket asks ${dec(ask).toFixed(2)} where the measured rate paid ` +
                 `${dec(fair).toFixed(2)}. The under is the expensive side here.`
