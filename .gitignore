@@ -77,6 +77,9 @@ agent/.nfl_agent.lock
 # nba_agent: the same pair
 agent/.nba_odds_cache.json
 agent/.nba_agent.lock
+# unl_agent: the same pair
+agent/.unl_odds_cache.json
+agent/.unl_agent.lock
 agent/.af_tmp_*
 
 # Row-level audit dumps — 12.8MB of CSV whose rows all still exist in Postgres.
@@ -103,3 +106,16 @@ agent/.nfl_live_recorder.lock
 
 # close_model.py team-state cache, rebuilt every 6h
 agent/data/close_model_teams.json
+
+# Stage M price paths and other downloaded research data (re-fetchable, large)
+ingest/data/
+agent/data/pm_inplay_cal/
+
+# Cross-venue arb scans (cross_venue_arb_sports.py)
+agent/data/arb_scan/
+agent/.luna_sharp_move_state.json
+agent/.luna_sharp_move_state.json.tmp
+
+# Strategy factory daily grid dumps (factory_cli.py grid, 06:00): 10-70MB each,
+# rewritten every day and rebuilt from the tapes on demand
+reports/factory_grid_*.csv
