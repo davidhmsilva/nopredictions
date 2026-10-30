@@ -1,8 +1,8 @@
-/** The Lab's free half: the bet picker and the popular tests.
+/** Create's free half: the bet picker and the ready-made agents.
  *
  *  Client-safe — the page draws the picker from these lists, and the server
  *  turns the same choices into a spec. Neither path calls a model, so neither
- *  spends a Lab use: the quota exists because a written theory costs a Claude
+ *  spends a build: the quota exists because a written idea costs a Claude
  *  call, and a picked one costs one cached SQL query.
  *
  *  🔑 The server never runs a spec the browser sent. It receives an example id

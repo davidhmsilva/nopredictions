@@ -1,23 +1,7 @@
 'use client'
 
-/** The shared frame for a tool page — the Lab and the Wallet analyser.
- *
- *  Both do the same job: a headline, a box you type into and some shortcuts. They were built at
- *  different times and shared nothing — `np-page-head` / `np-h1` / `bt-form` /
- *  `bt-chip` on one, `scanner-hero` / `scanner-h1` / `analyze-input-row` /
- *  `wallet-known-chip` on the other, with the Wallet not even using AppShell.
- *  The result was two pages of visibly different scale sitting one tab apart:
- *  the Lab's heading was two thirds the size of the Wallet's, its eyebrow grey
- *  where the other was green, its container a different width.
- *
- *  🔑 Making them consistent by CONSTRUCTION rather than by matching numbers in
- *     two stylesheets is the point. The next tool page gets it for free, and
- *     the two cannot drift apart again.
- *
- *  Scale and colour follow the Wallet (the bigger heading, the green eyebrow),
- *  and the section headings follow Dropping Odds — the green left rule — so
- *  all three tabs read as one product.
- */
+/** The shared frame for a tool page: the eyebrow, the headline, the chips.
+ *  Made once, so the next tool page gets the same scale and colour for free. */
 
 import type { ReactNode } from 'react'
 
@@ -39,35 +23,7 @@ export function ToolHead({
   )
 }
 
-/** The paste box and its button. One shape, so the Lab's loud filled green and
- *  the Wallet's quieter outline stop being two different ideas about what a
- *  primary action looks like. */
-export function ToolForm({
-  onSubmit,
-  children,
-  cta,
-  disabled,
-}: {
-  onSubmit: (e: React.FormEvent) => void
-  /** The input itself, so each page keeps its own validation and placeholder. */
-  children: ReactNode
-  cta: string
-  disabled?: boolean
-}) {
-  return (
-    <form className="tp-form" onSubmit={onSubmit}>
-      {children}
-      <button type="submit" className="tp-go" disabled={disabled}>
-        {cta}
-      </button>
-    </form>
-  )
-}
-
-/** Shortcuts under the box. Two shapes, because the two pages have genuinely
- *  different content: the Lab's are whole sentences to try, the Wallet's are
- *  named wallets with a one-line reason. A single shape would have squeezed
- *  one of them. */
+/** Shortcuts under the box: whole sentences to try. */
 export function ToolChips({ label, children }: { label?: string; children: ReactNode }) {
   return (
     <div className="tp-chips">

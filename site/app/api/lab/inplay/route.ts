@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { currentUser } from '../../../lib/supabaseAuth'
 import { claimUse, refundUse, refusalMessage } from '../../../lib/plan'
-import { ClaudeDeclined, askJson } from '../../../lib/claudeJson'
+import { ClaudeDeclined, askJson, readFailureMessage } from '../../../lib/claudeJson'
 import { LEAGUE_CODES } from '../../../lib/backtest'
 import { InplayParseSchema, cleanInplay, describeInplay } from '../../../lib/inplaySpec'
 import { INPLAY_SHAPE, INPLAY_SYSTEM } from '../../../lib/inplayPrompt'
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   } catch (err) {
     console.error('inplay parse error', err instanceof ClaudeDeclined ? 'declined' : err)
     await refund()
-    return NextResponse.json({ ok: false, error: 'The agent could not read this rule. Try rephrasing it.' }, { status: 502 })
+    return NextResponse.json({ ok: false, error: readFailureMessage(err) }, { status: 502 })
   }
 
   if (!parsed.supported || !parsed.spec) {

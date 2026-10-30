@@ -1,13 +1,17 @@
-/** A server render never waits long for a board.
+/** A server render never waits long for the database.
  *
- *  Warm, every board answers from the shared cache in well under a second.
- *  Cold, one sweep can take 7-12s (measured on production: a cold home page
- *  at 12.7s, the same page warm at 0.26s). Past the deadline the page is
- *  rendered without that board — the browser loads it, as it always did —
- *  and the sweep keeps running, so it warms the cache for the next visitor. */
+ *  The home page and the Marketplace read published agents while they render.
+ *  Usually that is well under a second, but the database has hours where a
+ *  one-row read takes a minute (measured 2026-10-30, 16:00-18:00 UTC). Past the
+ *  deadline the page goes out without them and the browser asks instead, so a
+ *  slow database costs a list and never the page. Null means "no answer in
+ *  time, or it failed"; it never means "there are none". */
 export function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([
-    p.catch(() => null),
+    p.catch((err) => {
+      console.error('server read failed', err)
+      return null
+    }),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
   ])
 }

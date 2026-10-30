@@ -4,6 +4,7 @@ import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
 import { runSpec, type SpecResult } from '../../lib/labRun'
 import { currentUser } from '../../lib/supabaseAuth'
 import { claimUse, refundUse, refusalMessage } from '../../lib/plan'
+import { readFailureMessage } from '../../lib/claudeJson'
 import {
   LEAGUES,
   LEAGUE_CODES,
@@ -186,7 +187,7 @@ export async function POST(request: Request) {
     console.error('parse error', err)
     await refund()
     return NextResponse.json(
-      { ok: false, error: 'The agent failed to parse this hypothesis. Try rephrasing.' },
+      { ok: false, error: readFailureMessage(err) },
       { status: 502 },
     )
   }

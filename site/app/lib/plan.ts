@@ -1,11 +1,14 @@
 /** Plans, quotas, and the one place that decides whether an action is allowed.
  *
- *  The shape the product settled on:
+ *  The shape since the app became agents only (2026-10-28):
  *
- *    no account   Scout · Agent · Game Center            unlimited
- *    free         + Lab and Wallet                       3 a day, each
- *    pro          + Lab and Wallet unlimited, alerts,
- *                   a synced watchlist                   $19/mo · $190/yr
+ *    no account   home · the Marketplace · simple agents on Create, to look at
+ *    free         + build agents from your own words      3 a day
+ *                 + keep 5 agents, run 1, copy, publish
+ *    pro          + builds unlimited, keep 50, run 10     $19/mo · $190/yr
+ *
+ *  The agent limits are lib/agents' (AGENT_LIMITS in planTerms); this file
+ *  meters the one thing that costs a model call.
  *
  *  🔑 Every read and write here goes over DATABASE_URL, never over the anon
  *     key. `usage_events` has RLS on with NO policies (db/044), so the browser

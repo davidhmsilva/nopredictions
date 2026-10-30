@@ -30,9 +30,9 @@ export default function TermsPage() {
 
       <h2>2. What the Service is — and is not</h2>
       <p>
-        NOPREDICTIONS is an information and research tool. It shows prices published by prediction
-        markets such as Polymarket and Kalshi, compares them, and adds sports data and analysis
-        tools.
+        NOPREDICTIONS is a tool for building, running and sharing paper-trading agents for
+        prediction markets. It turns a betting idea into a strategy, tests it on historical odds,
+        and simulates it on prices published by prediction markets such as Polymarket and Kalshi.
       </p>
       <ul>
         <li>
@@ -81,9 +81,9 @@ export default function TermsPage() {
 
       <h2>6. Plans and payment</h2>
       <p>
-        <b>Free.</b> The odds pages and match pages are free. A free account includes{' '}
-        {FREE_DAILY_LIMIT.lab} Lab tests and {FREE_DAILY_LIMIT.wallet} wallet reads a day, a limited
-        number of agents and a watchlist.
+        <b>Free.</b> Browsing the Marketplace is free. A free account includes{' '}
+        {FREE_DAILY_LIMIT.lab} agents a day built from your own words, and a limited number of
+        agents kept and running.
       </p>
       <p>
         <b>Pro.</b> Pro costs US${PRICING.monthlyUsd} a month or US${PRICING.yearlyUsd} a year, plus
@@ -122,8 +122,11 @@ export default function TermsPage() {
 
       <h2>8. Your content and ours</h2>
       <p>
-        The theories you write in the Lab and the agents you save are yours. You let us store and
-        run them so the Service can work for you. We do not publish them without your permission.
+        The ideas you describe and the agents you build are yours. You let us store and run them
+        so the Service can work for you. We do not publish them without your permission. If you
+        publish an agent to the Marketplace, anyone can see its strategy, the words you wrote and
+        its record, and copy it into their own account to run; you can unpublish it at any time,
+        which stops new copies but does not remove copies already made.
         Everything else on the Service — the software, design, text and analysis — belongs to us or
         our licensors.
       </p>

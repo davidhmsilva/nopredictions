@@ -46,9 +46,9 @@ function safeNext(raw: string | null): string {
 
 /** What the account is for. Every line is something that exists today. */
 const REASONS: { k: string; v: string }[] = [
-  { k: 'Lab', v: 'Three theories a day, replayed over 111,475 real matches against Pinnacle’s close.' },
-  { k: 'Wallet', v: 'Three traders a day, every fill rebuilt into completed round trips.' },
-  { k: 'Watchlist', v: 'The fixtures you star, kept.' },
+  { k: 'Create', v: 'Three agents a day from your own words: the AI writes the strategy and tests it over 111,475 real matches.' },
+  { k: 'Run', v: 'Five agents kept, one running, paper-trading the games that fit at real Polymarket prices.' },
+  { k: 'Copy', v: 'Any agent on the Marketplace, into your account, in one press.' },
 ]
 
 function LoginPageInner() {
@@ -288,9 +288,8 @@ function LoginPageInner() {
             </>
           ) : (
             <>
-              An account changes nothing about what this site claims. The agent is
-              still paper and still says so on{' '}
-              <Link href="/agent">its own record</Link>.
+              An account changes nothing about what this site claims: agents paper-trade,
+              and every one shows its whole record.
             </>
           )}
         </p>
@@ -303,8 +302,7 @@ function LoginPageInner() {
           {mode === 'signup' ? 'It takes an email and a password.' : 'Welcome back.'}
         </h1>
         <p className="lg-sub">
-          The boards, Dropping odds, the Game Center and the agent’s record never needed
-          one and never will. An account is for the two tools that do real work.
+          Browsing the Marketplace never needs one. An account is where your agents live.
         </p>
 
         <dl className="lg-reasons">

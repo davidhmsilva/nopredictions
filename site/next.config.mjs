@@ -18,24 +18,41 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   async redirects() {
+    // None of these is permanent: a browser caches a 308 for good, and this
+    // site has changed shape three times in two months.
+    const to = (destination) => (source) => ({ source, destination, permanent: false })
     return [
       // The landing page is now the homepage; keep the old URL working.
-      { source: '/landing', destination: '/', permanent: false },
+      to('/')('/landing'),
 
-      // Routes that moved in the SaaS split. `/dashboard` was linked from the
-      // old landing page as "LIVE TRACK RECORD" and `/test` was the hidden
-      // Hypothesis Tester people were sent to by hand — both are out there in
-      // links we do not control, so neither may 404.
+      // Older moves, still linked from places we do not control.
       // The public record is gone (2026-09-11): the pressure arms are the
-      // operator's private agents, on /agent behind a sign-in. Both old record
-      // URLs land there. Not permanent — /agent/ours was permanent-redirect
-      // bait once already, and a browser caches a 308 for good.
-      { source: '/dashboard', destination: '/agent', permanent: false },
-      { source: '/agent/ours', destination: '/agent', permanent: false },
-      { source: '/test', destination: '/lab', permanent: true },
-      // The scanner is gone rather than moved: the Game Center does what it did
-      // and takes the same pasted URL, so its traffic belongs on the board.
-      { source: '/scanner', destination: '/', permanent: true },
+      // operator's private agents, on /agent behind a sign-in.
+      to('/agent')('/dashboard'),
+      to('/agent')('/agent/ours'),
+
+      // The Lab became Create (2026-10-28): the same idea box, now the first
+      // step of building an agent. /test was the Lab's name before that.
+      to('/create')('/lab'),
+      to('/create')('/test'),
+
+      // Everything that was not about agents left the product on 2026-10-28,
+      // by the operator's decision: the odds boards, the Game Center, team
+      // pages, results, dropping odds, the insights articles and the scanner
+      // all land on the home page. The Wallet read a trader's record; the
+      // nearest thing now is an agent's record, on the Marketplace.
+      ...[
+        '/scanner',
+        '/soccer',
+        '/:sport(nfl|cfb|mlb|nba|nhl|wnba)/:path*',
+        '/game/:path*',
+        '/team/:path*',
+        '/teams',
+        '/results/:path*',
+        '/dropping-odds',
+        '/insights/:path*',
+      ].map(to('/')),
+      to('/marketplace')('/wallet/:path*'),
     ]
   },
 }

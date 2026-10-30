@@ -4,7 +4,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: 'Pricing — NOPREDICTIONS',
   description:
-    'Odds comparison is free, forever. Pro removes the daily limits on the Lab and the Wallet. 14-day money-back guarantee.',
+    'Build AI betting agents free: three a day from your own words, one running at a time. Pro removes the daily limit and runs ten at once. 14-day money-back guarantee.',
   alternates: { canonical: '/pricing' },
 }
 

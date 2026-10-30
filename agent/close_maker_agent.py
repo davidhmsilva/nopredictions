@@ -302,7 +302,7 @@ def clob_winner(condition_id: str) -> dict[str, float] | None:
 
 class Teams:
     """Our team ids for ESPN's names, league by league. ESPN's own spelling
-    first (site/app/lib/team_names.json, written from ESPN's team list), then
+    first (agent/team_names.json, written from ESPN's team list), then
     the alias-aware scorer over canonical names and every stored alias. Only
     teams last seen in that league compete, and a tie resolves nothing."""
 
@@ -315,7 +315,7 @@ class Teams:
             for tid, canon, aliases in cur.fetchall():
                 names[tid] = [canon, *aliases]
         try:
-            with open(os.path.join(HERE, "../site/app/lib/team_names.json")) as fh:
+            with open(os.path.join(HERE, "team_names.json")) as fh:
                 for tid, d in json.load(fh).items():
                     names.setdefault(int(tid), []).extend(x for x in (d.get("name"), d.get("short")) if x)
         except OSError:

@@ -1,4 +1,5 @@
-/** The signed-in user's agents: list them, or save a new one from the Lab.
+/** The signed-in user's agents: list them, or save a new one built on Create —
+ *  with `deploy: true`, saved and switched on in one step.
  *
  *  Signed out is a 401 here, unlike /api/me — there is nothing to show someone
  *  who has no agents, and the page turns the 401 into a sign-in prompt.
@@ -41,7 +42,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const r = await saveLabAgent(user.id, { hypothesis, interpretation, spec: body.spec })
+    const r = await saveLabAgent(user.id, {
+      hypothesis,
+      interpretation,
+      spec: body.spec,
+      deploy: body.deploy === true,
+    })
     return NextResponse.json(r, { status: r.ok ? 201 : r.status })
   } catch (err) {
     console.error('/api/agents POST failed', err)

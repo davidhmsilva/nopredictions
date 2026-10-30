@@ -1,8 +1,10 @@
 'use client'
 
 /** /agent/<id> — one of the signed-in user's agents: its record, its curve,
- *  its bets, and the controls that work on it. Someone else's id and a missing
- *  one read the same ("not found"), because the API answers both with a 404. */
+ *  its strategy, its bets, and the controls that work on it (run, pause,
+ *  publish, rename, archive). Someone else's id and a missing one read the
+ *  same ("not found"), because the API answers both with a 404. Its public
+ *  face, once published, is /marketplace/<id>. */
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -91,6 +93,19 @@ export default function AgentPage({ params }: { params: { id: string } }) {
               onArchive: async () => {
                 if (!window.confirm(`Archive "${name}"? It stops running; its record is kept.`)) return
                 if (await act('DELETE')) router.push('/agent')
+              },
+              onPublish: async (publish) => {
+                if (
+                  publish &&
+                  !window.confirm(
+                    `Publish "${name}" to the Marketplace? Anyone will see its strategy and its record, and can copy it. You can unpublish any time; copies already made stay with whoever made them.`
+                  )
+                )
+                  return
+                if (await act('PATCH', { is_public: publish })) load()
+              },
+              onRename: async (newName) => {
+                if (await act('PATCH', { name: newName })) load()
               },
             }}
           />

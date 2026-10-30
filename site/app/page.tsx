@@ -1,38 +1,24 @@
 import type { Metadata } from 'next'
-import { HomeBoard } from './components/HomeBoard'
-import { rankRows, rowFromScout, rowFromSportGame } from './lib/boardRow'
-import { getBoard } from './lib/scoutCache'
-import { getSportBoard } from './lib/sports'
-import { SPORT_KEYS } from './lib/sportsMeta'
+import { AppShell } from './components/AppShell'
+import { HomeView } from './components/HomeView'
+import { listPublished } from './lib/agents'
 import { within } from './lib/deadline'
-
-/** How long the server waits for the boards before sending the page anyway. */
-const SERVER_WAIT_MS = 3000
 
 export const metadata: Metadata = { alternates: { canonical: '/' } }
 
-/** Regenerated at most once a minute (ISR), from the boards the publisher
- *  writes (lib/remoteBoard), so the games are in the HTML and a crawler
- *  walking the site does not cost a render per hit.
- *
- *  ⚠️ This only works because the board read is a cacheable fetch. With the
- *     old in-process sweep (`cache: 'no-store'`) Next abandoned the static
- *     render and the page was built EMPTY — /nfl with 0 games in its HTML. */
-export const revalidate = 60
+/** Re-rendered at most every five minutes (ISR): the page is the same for
+ *  everyone, and the Marketplace's top agents move when games settle. */
+export const revalidate = 300
 
-/** How many of the biggest games the server puts in the page. Enough for the
- *  cards, the top ten and a search engine; the browser loads the rest. */
-const SERVER_ROWS = 40
+/** How long the server waits for the Marketplace before sending the page. */
+const SERVER_WAIT_MS = 3000
 
-/** Home: the biggest games in every sport, then a way into each one. */
+/** Home: the idea box, how an idea becomes an agent, and the agents anyone
+ *  can copy. The odds boards that were here until 2026-10-28 are gone. */
 export default async function HomePage() {
-  const [soccer, ...sports] = await Promise.all([
-    within(getBoard(), SERVER_WAIT_MS),
-    ...SPORT_KEYS.map((k) => within(getSportBoard(k), SERVER_WAIT_MS)),
-  ])
-  const rows = rankRows([
-    ...(soccer?.fixtures ?? []).map(rowFromScout),
-    ...sports.flatMap((b, i) => (b?.games ?? []).map((g) => rowFromSportGame(g, SPORT_KEYS[i]))),
-  ]).slice(0, SERVER_ROWS)
-  return <HomeBoard initial={rows.length ? rows : null} />
+  return (
+    <AppShell>
+      <HomeView initial={await within(listPublished(), SERVER_WAIT_MS)} />
+    </AppShell>
+  )
 }
