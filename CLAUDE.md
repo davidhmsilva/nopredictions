@@ -116,6 +116,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── close_maker_agent.py           ← Close Forecast: paper maker bids on PM from that forecast ✅ NEW
 │   ├── factory/v2/                    ← Factory v2, pre-match: families, CLV, power gate, locked holdout ✅ NEW 2026-10-10
 │   ├── pm_prematch_flow.py            ← who moves PM's 1X2 in the 96h before KO, and are they right (H-PM-FLOW) ✅ NEW
+│   ├── team_watch.py                  ← watch list: is the market slow on clubs running above their prices? CLV ✅ NEW 2026-10-11
 │   ├── espn_stats.py                  ← free live stats, no key — fallback ✅ NEW
 │   ├── injury_tracker.py              ← real-time player injury / suspension data ✅
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
@@ -2945,6 +2946,33 @@ python pm_prematch_flow.py --report     # --save also writes reports/pm_flow_wal
 - Profile the informed wallets with `wallet_analyzer.py`: what they buy, maker share, timing relative to line-ups, copyability.
 - Timestamped Pinnacle prices, to settle who leads.
 - Buying PM below the PM/Pinnacle blend as a **maker**: no fee, so the cost is the half-spread. The expected move is ~0.5 × the gap, +0.76pp at 1-2pp gaps.
+
+## Team watch list — is the market slow on a team having a good season? (2026-10-11)
+
+The operator's thesis: when a club improves, the market is slow to move off its
+past odds and stats. So you can back it during that season and drop it when the
+season ends. A good season that does not repeat is not luck. The thesis is
+measured by CLV (tens of games), not by yield. A one-club P&L is never quoted as
+"you'd need N seasons".
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python team_watch.py --report --save   # refresh Football-Data, read Polymarket, write reports/team_watch_<date>.md
+python -m pytest tests/test_team_watch.py -q
+```
+
+- **Lists.**
+  - `frozen`: 29 clubs, in `team_watch.json`, frozen on 10-11. Picked by back-every-match ROI over the last 12 months, last season and this season. Only games after the freeze count.
+  - `dynamic`: from game 6 of a season, the club's season-to-date points are at least +0.30 per game above what the closing prices expected. It is computed from earlier games only.
+  - Membership is keyed on the club, not the league, because promoted clubs change league.
+- **CLV sources.**
+  - Football-Data: the pre-close price (Friday for weekend games, Tuesday for midweek), best and average odds, against the power de-vigged Betfair Exchange close.
+  - Polymarket: `venue_market_quotes` (db/071), from the first tradable quote to the last before kick-off, net of the 5% fee.
+- **Read `move`** (the pp change in win probability from entry to close), not CLV, when comparing with the control. The watched clubs are more often favourites, and favourites carry less margin.
+- **Names.** All 472 Polymarket fixtures in our leagues resolve on both sides. `PM_TO_FD` holds the exact spellings the scorer must not guess: Dundee FC ties with Dundee United, Paris FC with Paris SG. `team_aliases.json` targets are DB names, not always Football-Data's ("Leipzig"), so a target is scored again within the league.
+- **First reading**, 2025-26 reconstructed: the dynamic list's Friday→close move was **−0.11pp [−0.28, +0.07]** over 1,582 games and 188 clubs, against −0.02 for the control. The bookmakers' Friday price does not lag these clubs.
+  - This agrees with the 168k-game test (memory: finding-back-a-team-roi). Neither results nor shots on target carry to the next game at the close, and Pinnacle's OPEN over-credits form.
+  - Still open: Polymarket (33 fixtures in), and detectors beyond box-score stats (xG trend, line-ups, coach change).
 
 ## Every in-play soccer market, every minute (2026-09-13)
 
