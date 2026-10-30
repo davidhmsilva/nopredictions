@@ -1,8 +1,8 @@
 'use client'
 
-/** The list of a user's agents, drawn as a Scout board: the running ones get a
- *  card, every one gets a row. Presentational — the page fetches, this draws —
- *  so the same view can be rendered from any source of AgentSummary rows. */
+/** "My agents": the running ones get a card, every one gets a row, and each
+ *  says whether it is on the Marketplace or a copy of someone else's.
+ *  Presentational — the page fetches, this draws. */
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -42,13 +42,27 @@ function sorted(agents: AgentSummary[], key: SortKey): AgentSummary[] {
   }
 }
 
+/** On the Marketplace, or a copy — the two things about an agent that are
+ *  not its status. */
+function Marks({ a }: { a: AgentSummary }) {
+  return (
+    <>
+      {a.is_public && <span className="np-badge is-info" title="Published on the Marketplace">PUBLIC</span>}
+      {a.copied_from != null && <span className="np-badge" title="Copied from the Marketplace">COPY</span>}
+    </>
+  )
+}
+
 function AgentCard({ a }: { a: AgentSummary }) {
   const settled = settledOf(a)
   return (
     <Link href={`/agent/${a.id}`} className="ag-card">
       <div className="ag-card-top">
         <span className="ag-kind">{sinceText(a)}</span>
-        <StatusBadge a={a} />
+        <span className="ag-hero-badges">
+          <Marks a={a} />
+          <StatusBadge a={a} />
+        </span>
       </div>
       <div className="ag-card-name">{a.name}</div>
       <Sparkline values={a.spark} />
@@ -106,16 +120,17 @@ export function AgentsBoard({ agents, limits }: { agents: AgentSummary[]; limits
     <>
       <div className="sc-head ag-head">
         <div>
-          <p className="sc-eyebrow">AGENTS · Paper trading</p>
+          <p className="sc-eyebrow">MY AGENTS · Paper trading</p>
           <h1 className="sc-h1">Your agents</h1>
           <p className="sc-h1-sub">
             Each one places practice bets on today&apos;s Polymarket games at the real price —
-            logged before kickoff and settled on the result. No real money, ever. Run anything,
-            watch what it does, and keep what works.
+            logged before kick-off and settled on the result. Run them, pause them, rename them,
+            and publish the ones worth copying to the Marketplace.
           </p>
         </div>
         <div className="ag-head-cta">
-          <Link href="/lab" className="np-btn np-btn-primary">New agent →</Link>
+          <Link href="/create" className="np-btn np-btn-primary">Create an agent →</Link>
+          <Link href="/marketplace" className="np-btn">Copy one</Link>
           <span className="ag-limits np-num">
             {limits.unlimited
               ? `${running.length} running · no limits`
@@ -126,12 +141,13 @@ export function AgentsBoard({ agents, limits }: { agents: AgentSummary[]; limits
 
       {agents.length === 0 ? (
         <div className="ag-empty">
-          <b>No agents yet.</b> Write a theory in the Lab — &ldquo;back home favourites in La
-          Liga&rdquo;, &ldquo;overs when both teams scored last time&rdquo; — see how it would have
-          done, and save it as an agent. Switch it on and it starts paper-trading the next games
-          that fit.
-          <div>
-            <Link href="/lab" className="np-btn np-btn-primary">Open the Lab →</Link>
+          <b>No agents yet.</b> Describe an idea — &ldquo;back home favourites in La Liga after a
+          loss&rdquo;, &ldquo;overs when both teams scored last time&rdquo; — and the AI turns it into
+          a strategy, shows what it would have made, and deploys it. Or copy an agent someone
+          already runs.
+          <div className="ag-cta-row">
+            <Link href="/create" className="np-btn np-btn-primary">Create an agent →</Link>
+            <Link href="/marketplace" className="np-btn">Browse the Marketplace</Link>
           </div>
         </div>
       ) : (
@@ -199,6 +215,9 @@ export function AgentsBoard({ agents, limits }: { agents: AgentSummary[]; limits
                           <Link href={`/agent/${a.id}`} className="ag-row-name" onClick={(e) => e.stopPropagation()}>
                             {a.name}
                           </Link>
+                          {(a.is_public || a.copied_from != null) && (
+                            <span className="ag-row-marks"><Marks a={a} /></span>
+                          )}
                           <span className="ag-row-sub">{sub}</span>
                         </td>
                         <td className="ag-c-status"><StatusBadge a={a} /></td>

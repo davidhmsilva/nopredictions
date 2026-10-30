@@ -15,6 +15,8 @@ and the answer moves only when a season of matches lands. Same convention as
 first_half.json and late_goals.json.
 
     python priced_like_table.py            # rebuild site/app/lib/priced_like.json
+
+⚠️ Nothing reads that file since the Game Center left the site (2026-10-28).
     python priced_like_table.py --dry-run  # print, write nothing
 
 ⚠️ De-vig is proportional on BOTH sides of the O/U and across all three 1X2

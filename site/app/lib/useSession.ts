@@ -3,11 +3,11 @@
 /** Who is signed in, and what is left of their day.
  *
  *  One fetch of /api/me, shared by every component that asks in the same page
- *  load — the header, the Lab's counter and the Wallet's counter all want the
- *  same answer, and three requests for it would be three auth round trips.
+ *  load — the header and Create's counter want the same answer, and two
+ *  requests for it would be two auth round trips.
  *
- *  `refresh()` exists because the counters move: a Lab run spends one, and the
- *  number in the header has to follow without a page reload.
+ *  `refresh()` exists because the counter moves: building an agent spends one,
+ *  and the number on the page has to follow without a reload.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -24,9 +24,9 @@ export interface Quota {
 export interface Me {
   user: { id: string; email: string | null } | null
   plan: 'free' | 'pro'
-  limits: { lab: number; wallet: number }
+  limits: { lab: number }
+  /** Agent builds left today ('lab' is the metered feature's stored name). */
   lab: Quota | null
-  wallet: Quota | null
 }
 
 /** Module-level, so a page that mounts the header and two panels pays once. */
@@ -40,9 +40,8 @@ function load(force = false): Promise<Me> {
         (): Me => ({
           user: null,
           plan: 'free',
-          limits: { lab: 3, wallet: 3 },
+          limits: { lab: 3 },
           lab: null,
-          wallet: null,
         })
       )
   }

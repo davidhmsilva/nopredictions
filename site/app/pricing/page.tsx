@@ -2,11 +2,10 @@
 
 /** What each plan is, and one honest sentence about what it is not.
  *
- *  🔑 The claim this page must never make is that Pro finds you an edge. The
- *     agent is paper, no arm is near its verdict gate, and that is written on
- *     /agent/ours in a banner. What Pro removes is a limit on tools that
- *     MEASURE — that is a real thing to sell, and it is the only thing sold
- *     here.
+ *  🔑 The claim this page must never make is that Pro makes an agent win.
+ *     Agents paper-trade and no strategy here has passed its verdict gate.
+ *     What Pro sells is capacity — more agents built from your own words,
+ *     kept and running at once — and that is the only thing sold here.
  *
  *  The two cards used to carry two independent lists, which meant the rows did
  *  not line up and nobody could actually compare the plans — the one job a
@@ -18,7 +17,7 @@ import { useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { AppShell } from '../components/AppShell'
 import { useSession } from '../lib/useSession'
-import { PRICING, QUOTA_RESET_TEXT } from '../lib/planTerms'
+import { AGENT_LIMITS, FREE_DAILY_LIMIT, PRICING, QUOTA_RESET_TEXT } from '../lib/planTerms'
 
 // From planTerms, the same constants the server and Stripe read. This page
 // used to type its own 19 and 190, and nothing kept the two in step.
@@ -27,34 +26,34 @@ const YEARLY_USD = PRICING.yearlyUsd
 
 type Period = 'monthly' | 'yearly'
 
+const FREE = AGENT_LIMITS.free
+const PRO = AGENT_LIMITS.pro
+const BUILDS = FREE_DAILY_LIMIT.lab
+
 /** One row per thing that EXISTS. Anything planned goes under the table, named
  *  as planned — a matrix row that is a dash in both columns reads as "Pro does
  *  not get this either", which is true but is not what a comparison is for. */
 const MATRIX: { k: string; free: string; pro: string; href?: string }[] = [
-  { k: 'Polymarket and Kalshi odds side by side, the better price marked', free: '✓', pro: '✓', href: '/' },
-  { k: 'NFL, college football, MLB, NBA, NHL, WNBA and soccer', free: '✓', pro: '✓', href: '/nfl' },
-  { k: 'Live scores on every game', free: '✓', pro: '✓' },
-  { k: 'A full match page for every soccer game', free: '✓', pro: '✓', href: '/soccer' },
-  { k: 'Dropping odds — where the money moved', free: '✓', pro: '✓', href: '/dropping-odds' },
-  { k: 'Insights — what our research found, misses included', free: '✓', pro: '✓', href: '/insights' },
-  // The agent's paper record left this table on 2026-09-13. It is the
-  // operator's own and private now, and it was never what a plan sells.
-  { k: 'Lab — test a betting idea on 111,475 real games', free: '3 a day', pro: 'Unlimited', href: '/lab' },
-  { k: 'Wallet — any Polymarket trader’s full record', free: '3 a day', pro: 'Unlimited', href: '/wallet' },
-  { k: 'Watchlist', free: 'This browser', pro: 'Every device' },
+  { k: 'Build an agent from your own words — the AI writes the strategy and backtests it', free: `${BUILDS} a day`, pro: 'Unlimited', href: '/create' },
+  { k: 'Simple agents from the picker, and the ready-made ones', free: '✓', pro: '✓', href: '/create' },
+  { k: 'Agents you keep', free: String(FREE.saved), pro: String(PRO.saved) },
+  { k: 'Agents running at the same time', free: String(FREE.running), pro: String(PRO.running) },
+  { k: 'Copy agents from the Marketplace', free: '✓', pro: '✓', href: '/marketplace' },
+  { k: 'Publish your agents to the Marketplace', free: '✓', pro: '✓', href: '/marketplace' },
+  { k: 'Every bet, the profit curve and the closing-line value of each agent', free: '✓', pro: '✓', href: '/agent' },
 ]
 
 /** The three lines on each card. Short on purpose: the card is the decision,
  *  the table below is the detail. */
 const FREE_POINTS = [
-  'Odds on every game, in every sport',
-  'Three Lab tests and three wallet reads a day',
+  `${BUILDS} agents a day from your own words`,
+  `Keep ${FREE.saved} agents, run ${FREE.running} at a time — copies included`,
   'No card, ever',
 ]
 const PRO_POINTS = [
   'Everything in Free',
-  'Lab and Wallet with no daily limit',
-  'Watchlist that follows you to any device',
+  'Build as many agents as you like',
+  `Keep ${PRO.saved}, run ${PRO.running} at the same time`,
 ]
 
 export default function PricingPage() {
@@ -102,10 +101,10 @@ export default function PricingPage() {
       <div className="pr-page">
         <header className="tp-head">
           <span className="tp-eyebrow">PRICING</span>
-          <h1 className="tp-h1">Compare odds free, forever.</h1>
+          <h1 className="tp-h1">Build agents free. Run more with Pro.</h1>
           <p className="tp-sub">
-            Every odds page on this site is free and always will be. Pro takes the daily limit
-            off the Lab and the Wallet.
+            A free account builds {BUILDS} agents a day from your own words and runs {FREE.running}{' '}
+            at a time. Pro takes the daily limit off building and runs {PRO.running} at once.
           </p>
         </header>
 
@@ -144,7 +143,7 @@ export default function PricingPage() {
             {signedIn ? (
               <div className="pr-cta-done">You are on this plan.</div>
             ) : (
-              <Link href="/login?mode=signup&next=%2Flab" className="np-btn pr-cta">
+              <Link href="/login?mode=signup&next=%2Fcreate" className="np-btn pr-cta">
                 Create a free account
               </Link>
             )}
@@ -240,8 +239,8 @@ export default function PricingPage() {
             ))}
           </div>
           <p className="pr-reset">
-            Free counts reset at {QUOTA_RESET_TEXT}. A refused run never costs you one — if
-            a test fails on our side, you get it back.
+            Free builds reset at {QUOTA_RESET_TEXT}. A refused build never costs you one — if
+            it fails on our side, you get it back.
           </p>
         </section>
 
@@ -250,16 +249,16 @@ export default function PricingPage() {
             matrix row that is a dash in both columns reads as a Pro limitation
             instead of an unbuilt feature. */}
         <div className="pr-next">
-          <strong>Coming later, and not part of Pro today:</strong> email alerts when a game on
-          your watchlist is about to start or its price moves. When they arrive they go to Pro,
-          and they&apos;ll move into the table above.
+          <strong>Coming later, and not part of Pro today:</strong> an email when one of your
+          agents places a bet. When it arrives it goes to Pro, and it&apos;ll move into the table
+          above.
         </div>
 
         <div className="np-note pr-honest">
-          <strong>What Pro is not.</strong> It isn&apos;t a tip service — nothing here tells you
-          what to bet. We don&apos;t place bets and we never hold your money. You&apos;re paying for
-          unlimited use of two tools: testing a betting idea against real results, and reading
-          any trader&apos;s record from their actual trades.
+          <strong>What Pro is not.</strong> It isn&apos;t a tip service, and it doesn&apos;t make an
+          agent profitable. Agents paper-trade — practice bets at real prices — and we never place
+          real bets or hold your money. You&apos;re paying for more agents: built from your own
+          words, kept, and running at the same time.
         </div>
       </div>
     </AppShell>

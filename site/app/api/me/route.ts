@@ -1,13 +1,12 @@
 /** Who is asking, what they may do, and how much of it is left.
  *
- *  One request rather than three: the header needs the email, the Lab needs
- *  its remaining count and the Wallet needs its own, and they all render on
- *  the same page load.
+ *  One request for the header and for Create's counter, which render on the
+ *  same page load.
  *
- *  Signed out is a 200 with `user: null`, not a 401. Being signed out is the
- *  normal state of this site — Scout, Agent and the Game Center never ask —
- *  and a header that logs an error on every anonymous visit is noise that
- *  hides the errors that matter.
+ *  Signed out is a 200 with `user: null`, not a 401. Being signed out is a
+ *  normal way to browse this site — the home page and the Marketplace never
+ *  ask — and a header that logs an error on every anonymous visit is noise
+ *  that hides the errors that matter.
  */
 
 import { NextResponse } from 'next/server'
@@ -24,22 +23,16 @@ export async function GET() {
       plan: 'free',
       limits: FREE_DAILY_LIMIT,
       lab: null,
-      wallet: null,
     })
   }
 
   let plan: 'free' | 'pro' = 'free'
   let lab: Entitlement | null = null
-  let wallet: Entitlement | null = null
   try {
-    ;[plan, lab, wallet] = await Promise.all([
-      planOf(user.id),
-      entitlement(user.id, 'lab'),
-      entitlement(user.id, 'wallet'),
-    ])
+    ;[plan, lab] = await Promise.all([planOf(user.id), entitlement(user.id, 'lab')])
   } catch (err) {
     // The database being unreachable must not sign anyone out. The header
-    // still shows who they are; the counters just have nothing to say.
+    // still shows who they are; the counter just has nothing to say.
     console.error('/api/me entitlement lookup failed', err)
   }
 
@@ -48,6 +41,5 @@ export async function GET() {
     plan,
     limits: FREE_DAILY_LIMIT,
     lab,
-    wallet,
   })
 }

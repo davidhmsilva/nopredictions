@@ -1,10 +1,8 @@
-# Alpha Football — Site Setup
+# NOPREDICTIONS — site setup
 
-## Stack
-- **Next.js 14** (App Router)
-- **Tailwind CSS**
-- **Supabase JS** (real-time data)
-- **TypeScript**
+The app: Create, My agents, Marketplace. Next.js 14 (App Router), Supabase auth and
+Postgres, Stripe, deployed on Vercel. See `../CLAUDE.md` for what it is and how it fits
+together.
 
 ## Run locally
 
@@ -14,6 +12,10 @@ npm install
 npm run dev
 # → http://localhost:3000
 ```
+
+`.env.local` needs at least `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and
+`DATABASE_URL`. Add `ANTHROPIC_API_KEY` to build agents from written ideas. Without it
+the picker and the ready-made agents on Create still run: they call no model.
 
 ## Deploy to Vercel
 
@@ -29,54 +31,21 @@ npm install -g vercel
 vercel --prod
 ```
 
-Add these env vars in the Vercel dashboard:
+Environment variables on Vercel:
+
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://pnpjyrvvbzsdrwtymyzz.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<your anon key>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<the anon key>
+DATABASE_URL=<postgres connection string; every read of agents goes over it>
+ANTHROPIC_API_KEY=<for reading ideas and writing strategies>
 ```
 
-## Supabase: enable public read access (RLS)
+`BOARDS_URL` and `CRON_SECRET` served the odds boards and the results cron, which left
+on 2026-10-28, and can be removed.
 
-The site uses the **anon key** to read data. If RLS is enabled on your tables,
-run these policies in the Supabase SQL editor:
-
-```sql
--- Allow public reads on all site-facing tables
-alter table strategies enable row level security;
-create policy "Public read" on strategies for select using (true);
-
-alter table research_hypotheses enable row level security;
-create policy "Public read" on research_hypotheses for select using (true);
-
-alter table matches enable row level security;
-create policy "Public read" on matches for select using (true);
-
-alter table leagues enable row level security;
-create policy "Public read" on leagues for select using (true);
-
-alter table match_odds enable row level security;
-create policy "Public read" on match_odds for select using (true);
-```
-
-## Wire up the newsletter
-
-The subscribe form currently just shows a confirmation message. To actually
-capture emails, add a server action or API route and connect to:
-- **Resend** (recommended — simple, free tier)
-- **Mailchimp / ConvertKit** — if you want a full list manager
-
-## What's live vs coming soon
-
-| Section | Data | Status |
-|---------|------|--------|
-| Live Bets | `strategies` table | Empty — shows launch state |
-| Leaderboard | `strategies` table | Empty — shows DB stats |
-| Strategies | `research_hypotheses` | Empty — shows planned hypotheses |
-| Newsletter | Static form | UI ready, needs email provider |
-| About | Real DB stats + static copy | ✅ Live data |
-
-Once the agent starts generating and promoting hypotheses, all sections
-auto-populate — no code changes needed.
+⚠️ **The anon key reads almost nothing, on purpose.** Strategies and paper trades have no
+public read (db/050): the Marketplace reads them on the server, over `DATABASE_URL`, with
+`is_public` in the SQL. Do not add a "public read" policy to make a page work.
 
 ---
 
@@ -153,7 +122,7 @@ and only once SMTP actually delivers.
 **Test BOTH orders — they are different code paths and only one of them is the
 common case.**
 
-- *Signed in, then pay.* `/account` should read PRO and the Lab's counter
+- *Signed in, then pay.* `/account` should read PRO and Create's counter
   should disappear.
 - *Pay first, no account* — the funnel the pricing page leads with. Type an
   email on `/pricing`, pay, land on `/welcome`, then create an account with

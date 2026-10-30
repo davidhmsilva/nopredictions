@@ -12,7 +12,7 @@
  *  and a bar answers it before the sentence is read.
  */
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '../components/AppShell'
@@ -61,6 +61,85 @@ function Meter({ label, href, q }: { label: string; href: string; q: Quota | nul
   )
 }
 
+/** The name published agents carry on the Marketplace. Empty goes back to
+ *  the pseudonym; the email is never shown, whatever is set here. */
+function PublicName() {
+  const [loaded, setLoaded] = useState(false)
+  const [value, setValue] = useState('')
+  const [shownAs, setShownAs] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null)
+
+  useEffect(() => {
+    fetch('/api/me/name', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) {
+          setValue(d.public_name ?? '')
+          setShownAs(d.shown_as)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true))
+  }, [])
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setNote(null)
+    try {
+      const r = await fetch('/api/me/name', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_name: value }),
+      })
+      const d = await r.json()
+      if (d.ok) {
+        setValue(d.public_name ?? '')
+        setShownAs(d.shown_as)
+        setNote({ ok: true, text: 'Saved.' })
+      } else {
+        setNote({ ok: false, text: d.error ?? 'Could not save it.' })
+      }
+    } catch {
+      setNote({ ok: false, text: 'Network error — nothing changed.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="ac-card">
+      <div className="ac-card-head">
+        <h2>Public name</h2>
+      </div>
+      <p className="ac-card-note">
+        What agents you publish on the Marketplace are shown under — never your email.
+        {shownAs && (
+          <>
+            {' '}Right now: <b>{shownAs}</b>.
+          </>
+        )}
+      </p>
+      <form className="ac-name" onSubmit={save}>
+        <input
+          className="np-input"
+          value={value}
+          maxLength={32}
+          placeholder={loaded ? 'Leave empty to stay anonymous' : 'Loading…'}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={!loaded || busy}
+          aria-label="Public name"
+        />
+        <button type="submit" className="np-btn" disabled={!loaded || busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </form>
+      {note && <p className={note.ok ? 'ac-card-foot' : 'np-form-error'}>{note.text}</p>}
+    </section>
+  )
+}
+
 function AccountInner() {
   const router = useRouter()
   const params = useSearchParams()
@@ -106,9 +185,8 @@ function AccountInner() {
           <span className="tp-eyebrow">ACCOUNT</span>
           <h1 className="tp-h1">You are not signed in.</h1>
           <p className="tp-sub">
-            The boards, Dropping odds, the Game Center and the agent’s record all work
-            without an account. The Lab and the Wallet need one — three of each a
-            day, free, no card.
+            The Marketplace works without an account. Building, running and copying
+            agents needs one — free, no card.
           </p>
         </header>
         <div className="ac-actions">
@@ -149,8 +227,8 @@ function AccountInner() {
 
           <p className="ac-card-note">
             {isPro
-              ? 'No daily limit on the Lab or the Wallet, and a watchlist that follows you to any device.'
-              : 'Three Lab tests and three wallet reads a day. The board, the movers and the record are unlimited and always will be.'}
+              ? 'No daily limit on building agents, and ten running at the same time.'
+              : 'Three agents a day from your own words, five kept and one running at a time. Copying and publishing are free.'}
           </p>
 
           <div className="ac-card-actions">
@@ -179,16 +257,17 @@ function AccountInner() {
           </div>
 
           <div className="ac-meters">
-            <Meter label="Lab" href="/lab" q={me.lab} />
-            <Meter label="Wallet" href="/wallet" q={me.wallet} />
+            <Meter label="Agent builds" href="/create" q={me.lab} />
           </div>
 
           {!isPro && (
             <p className="ac-card-foot">
-              A run that fails on our side never costs you one — it is given back.
+              A build that fails on our side never costs you one — it is given back.
             </p>
           )}
         </section>
+
+        <PublicName />
       </div>
 
       <div className="ac-actions">

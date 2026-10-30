@@ -22,7 +22,7 @@ export function QuotaStrip({
 }: {
   quota: Quota | null
   signedIn: boolean
-  feature: 'Lab test' | 'wallet read'
+  feature: 'agent build'
   /** Where to come back to after signing in. */
   next: string
 }) {
