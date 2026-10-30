@@ -1,0 +1,22 @@
+# Long-running NOPREDICTIONS processes. Instance = a daemon case in np-job.sh:
+#   np-daemon@pressure-daemon   np-daemon@settled-sweep
+[Unit]
+Description=NOPREDICTIONS daemon %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=np
+Group=np
+ExecStart=/opt/nopredictions/deploy/hetzner/np-job.sh %i
+Restart=always
+RestartSec=30
+# The wrapper and the agent it starts share this cgroup, so a stop kills both
+# and no orphan agent survives to double-write (pressure_daemon.sh's D3).
+KillMode=control-group
+TimeoutStopSec=20
+Nice=0
+
+[Install]
+WantedBy=multi-user.target
