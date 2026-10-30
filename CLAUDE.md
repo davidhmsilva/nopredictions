@@ -68,20 +68,20 @@ This pipeline IS the product. Each step, and where it lives:
 
 | kind | markets | conditions | leagues |
 |---|---|---|---|
-| **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team home or away, rest days, points in the last 5, goals in the last 5, seasons | the 22 in `LEAGUES` |
+| **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team, rest days, its last game (result and margin), runs (won, unbeaten, lost, winless, up to 10), points in the last 5 overall and at this end, goals scored, conceded and total in the last 5, seasons. On the home or away team, or on "the team" at either end and its opponent (`flatLegs`) | the 22 in `LEAGUES` |
 | **Live rule** (`lib/inplaySpec.ts`) | a team to win, the draw, one more goal | team, kick-off odds, minute window, score, pressure, price; exit: hold, sell after a goal, sell at a minute | any fixture on the pressure poll, or named leagues |
 | **Backtest only** | NBA moneyline, spread, total | 2014-15 → 2021-22, consensus close | cannot deploy: no NBA boards here |
 
 Not possible yet, and the model says so: other sports live, corners, cards, BTTS,
-handicaps, half-time markets pre-match, cups and European competitions, player-level
-anything, "lost their last game" (form is points over 5).
+handicaps, half-time markets pre-match, other goal lines, league-table position, cups and
+European competitions, player-level anything.
 
 🔑 **Widening this language is the most valuable engineering work in the project**,
 because it decides how many people's ideas become agents at all. A new pre-match
 condition has to land in all of: `lib/backtest.ts` (`Spec`, `FILTER_FIELDS`), the prompt
-in `/api/backtest`, `cleanSpec`, `run_backtest` and `run_backtest_recent` in SQL (⚠️ the
-WHERE clause of the second is a copy of the first, db/074), `describeSpec`, and
-`pick()` / `form_verdict()` in `agent/lab_strategy_runner.py`. A condition the runner
+in `/api/backtest`, `cleanSpec`, `bt_recent_games_fit` in SQL (db/083, read by both
+`run_backtest` and `run_backtest_recent`), `describeSpec`, and `pick()` / `form_verdict()`
+in `agent/lab_strategy_runner.py`. A condition the runner
 cannot read must be in `run_blocker` on BOTH sides, so it tests and honestly refuses
 to deploy rather than trading a different rule.
 

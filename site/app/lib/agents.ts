@@ -37,10 +37,11 @@ import {
   LEAGUE_CODES,
   computeStats,
   isNbaMarket,
+  namesItsTeam,
   verdict,
-  type RawBacktest,
   type Spec,
 } from './backtest'
+import { rawBacktest } from './labRun'
 import { accountOf } from './plan'
 import { AGENT_LIMITS } from './planTerms'
 import { cleanInplay, isInplaySpec, type InplaySpec } from './inplaySpec'
@@ -192,7 +193,7 @@ export interface AgentLimits {
 // ── the spec a client may send ──────────────────────────────────────────────
 
 const MARKETS = ['1x2', 'ou25', 'nba_ml', 'nba_spread', 'nba_total'] as const
-const SIDES = ['home', 'draw', 'away', 'over', 'under'] as const
+const SIDES = ['home', 'draw', 'away', 'over', 'under', 'team', 'opponent'] as const
 const NUMERIC_KEYS: string[] = [
   'season_start',
   'season_end',
@@ -217,12 +218,14 @@ export function cleanSpec(input: unknown): Spec | null {
     const v = s[k]
     out[k] = typeof v === 'string' && v.trim() ? v.trim().slice(0, 60) : null
   }
+  if (typeof s.team === 'string' && s.team.trim()) out.team = s.team.trim().slice(0, 60)
   if (s.game_type === 'regular' || s.game_type === 'playoff') out.game_type = s.game_type
   for (const k of NUMERIC_KEYS) {
     const v = s[k]
     if (typeof v === 'number' && Number.isFinite(v)) out[k] = v
   }
-  return out as unknown as Spec
+  const spec = out as unknown as Spec
+  return namesItsTeam(spec) ? spec : null
 }
 
 /** Why this spec cannot run live, or null when it can. Said to the user as
@@ -704,10 +707,7 @@ export async function saveLabAgent(
   const sql = getSql()
   let backtest: SavedBacktest | null = null
   if (!isInplaySpec(spec)) {
-    const rows = isNbaMarket(spec.market)
-      ? await sql`select run_backtest_nba(${sql.json(spec as never)}) as r`
-      : await sql`select run_backtest(${sql.json(spec as never)}) as r`
-    const stats = computeStats(rows[0].r as RawBacktest)
+    const stats = computeStats(await rawBacktest(spec))
     backtest = { stats, verdict: verdict(stats), ran_at: new Date().toISOString() }
   }
 

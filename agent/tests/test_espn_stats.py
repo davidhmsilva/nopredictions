@@ -140,6 +140,13 @@ def test_team_games_are_from_the_teams_side_and_oldest_first():
     ]}))
     assert [(g.goals_for, g.goals_against) for g in games] == [(2, 0), (0, 2)]
     assert games[0].kickoff < games[1].kickoff
+    assert [g.home for g in games] == [False, True]
+
+
+def test_a_game_with_no_end_on_it_is_neither_home_nor_away():
+    event = _sched_event("2026-10-24T16:30Z", "363", 1, "367", 0)
+    del event["competitions"][0]["competitors"][0]["homeAway"]
+    assert espn.team_games("eng.1", "363", session=_Session({"events": [event]}))[0].home is None
 
 
 def test_only_finished_games_with_a_score_count():
