@@ -15,6 +15,9 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './app/lib/supabaseEnv'
 
+/** How long a page waits for the auth server before it renders anyway. */
+const AUTH_TIMEOUT_MS = 2500
+
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
@@ -36,7 +39,17 @@ export async function middleware(request: NextRequest) {
   })
 
   // The call itself is the refresh — its return value is not needed here.
-  await supabase.auth.getUser()
+  //
+  // ⚠️ Bounded, because this runs in front of every page and the auth server
+  // needs Postgres to answer. On 2026-10-30 the database stopped taking
+  // connections, getUser() never returned, and Vercel killed the middleware at
+  // 25s: a 504 on every page for anyone with a session cookie, while the same
+  // page opened in 0.16s without one. A refresh missed here happens on the next
+  // request; a page that does not open is the whole site down.
+  await Promise.race([
+    supabase.auth.getUser().catch(() => null),
+    new Promise((resolve) => setTimeout(resolve, AUTH_TIMEOUT_MS)),
+  ])
   return response
 }
 
