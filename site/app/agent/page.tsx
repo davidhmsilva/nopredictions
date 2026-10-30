@@ -1,11 +1,11 @@
 'use client'
 
-/** Agents — the signed-in user's own, and nobody else's.
+/** My agents — the signed-in user's own, and nobody else's.
  *
  *  Private by construction: everything here comes from /api/agents, which reads
- *  on the server with the owner check in the SQL. There is no public record; a
- *  public leaderboard of agents users choose to publish is the next step, and
- *  until it exists this page offers no publish button.
+ *  on the server with the owner check in the SQL. An agent its owner publishes
+ *  also gets a public page on the Marketplace (/marketplace/<id>); this page is
+ *  where it is run, paused, published and archived.
  *
  *  Every agent is drawn the same way, wherever it came from (2026-09-19): a
  *  card while it runs, a row always, and a page of its own at /agent/<id>.
@@ -58,17 +58,17 @@ export default function AgentsPage() {
         {data.state === 'signed_out' ? (
           <div className="sc-head ag-head">
             <div>
-              <p className="sc-eyebrow">AGENTS · Paper trading</p>
-              <h1 className="sc-h1">Theories that keep working after you look away</h1>
+              <p className="sc-eyebrow">MY AGENTS · Paper trading</p>
+              <h1 className="sc-h1">Your ideas, working while you look away</h1>
               <p className="sc-h1-sub">
-                Write a theory in the Lab, see how it would have done, and switch it on. From then
-                on it places practice bets on today&apos;s games at the real price — logged before
-                kickoff, settled on the result — and you watch its record build. No real money,
-                ever.
+                Describe an idea and the AI turns it into an agent. Deploy it and it places practice
+                bets on today&apos;s games at the real price — logged before kick-off, settled on the
+                result — and you watch its record build. Or copy one from the Marketplace.
               </p>
               <div className="ag-cta-row">
                 <Link href="/login?next=%2Fagent" className="np-btn np-btn-primary">Sign in to see yours →</Link>
-                <Link href="/lab" className="np-btn">Start in the Lab</Link>
+                <Link href="/create" className="np-btn">Create an agent</Link>
+                <Link href="/marketplace" className="np-btn">Browse the Marketplace</Link>
               </div>
             </div>
           </div>
@@ -76,7 +76,7 @@ export default function AgentsPage() {
           <AgentsBoard agents={data.agents} limits={data.limits} />
         ) : (
           <div className="sc-head">
-            <p className="sc-eyebrow">AGENTS · Paper trading</p>
+            <p className="sc-eyebrow">MY AGENTS · Paper trading</p>
             <h1 className="sc-h1">Your agents</h1>
             {data.state === 'loading' ? (
               <div className="np-empty">Loading your agents…</div>

@@ -1,5 +1,5 @@
 # Long-running NOPREDICTIONS processes. Instance = a daemon case in np-job.sh:
-#   np-daemon@pressure-daemon   np-daemon@settled-sweep   np-daemon@record-looks
+#   np-daemon@pressure-daemon   np-daemon@settled-sweep
 [Unit]
 Description=NOPREDICTIONS daemon %i
 After=network-online.target

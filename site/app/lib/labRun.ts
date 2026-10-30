@@ -1,13 +1,13 @@
-/** Run one Lab spec in Postgres. Server only.
+/** Backtest one agent's strategy in Postgres. Server only.
  *
- *  Shared by the written-theory route (`/api/backtest`, after Claude has turned
+ *  Shared by the written-idea route (`/api/backtest`, after Claude has turned
  *  the words into a spec) and the free one (`/api/lab/quick`, where the spec
- *  comes from a fixed list). One path, so a picked test and the same test typed
- *  out cannot come back with different numbers.
+ *  comes from a fixed list). One path, so a picked strategy and the same one
+ *  typed out cannot come back with different numbers.
  */
 
+import { unstable_cache } from 'next/cache'
 import { getSql } from './db'
-import { sharedCache } from './sharedCache'
 import {
   NBA_CAVEATS,
   computeStats,
@@ -67,7 +67,7 @@ export async function runSpec(spec: Spec): Promise<SpecResult> {
 
 /** The free tests repeat — six examples and a finite picker — and the data under
  *  them changes when Stage A adds a season, not by the minute. A day is plenty. */
-export const runSpecCached = sharedCache(
+export const runSpecCached = unstable_cache(
   (key: string) => runSpec(JSON.parse(key) as Spec),
   ['lab-quick-v1'],
   { revalidate: 24 * 3600 },

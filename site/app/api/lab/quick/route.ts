@@ -3,7 +3,7 @@ import { featuredById, pickedSpec, type Picked } from '../../../lib/labQuick'
 import { runSpecCached, specKey } from '../../../lib/labRun'
 import type { Spec } from '../../../lib/backtest'
 
-// The free half of the Lab: a popular test or the bet picker. No account, no
+// Create's free half: a ready-made agent or the bet picker. No account, no
 // quota — neither calls a model — and the spec is always built HERE from a
 // fixed list, never taken from the request, so everything that can run is
 // cacheable. See lib/labQuick.

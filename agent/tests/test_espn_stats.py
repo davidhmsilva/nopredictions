@@ -118,6 +118,55 @@ def test_a_goalless_opening_with_possession_does_report_stats():
     assert fx.has_stats
 
 
+# ── a team's finished games ──────────────────────────────────────────────────
+
+def _sched_event(date, home_id, home_score, away_id, away_score, completed=True):
+    def side(team_id, where, score):
+        out = {"id": team_id, "homeAway": where}
+        if score is not None:
+            out["score"] = {"value": float(score), "displayValue": str(score)}
+        return out
+    return {"date": date, "competitions": [{
+        "status": {"type": {"completed": completed}},
+        "competitors": [side(home_id, "home", home_score), side(away_id, "away", away_score)],
+    }]}
+
+
+def test_team_games_are_from_the_teams_side_and_oldest_first():
+    # ESPN lists the newest first, and the team is home in one and away in the other.
+    games = espn.team_games("eng.1", "363", session=_Session({"events": [
+        _sched_event("2026-10-24T16:30Z", "363", 0, "367", 2),
+        _sched_event("2026-10-17T11:30Z", "368", 0, "363", 2),
+    ]}))
+    assert [(g.goals_for, g.goals_against) for g in games] == [(2, 0), (0, 2)]
+    assert games[0].kickoff < games[1].kickoff
+
+
+def test_only_finished_games_with_a_score_count():
+    games = espn.team_games("eng.1", "363", session=_Session({"events": [
+        _sched_event("2026-10-31T12:30Z", "363", None, "360", None, completed=False),
+        _sched_event("2026-10-24T16:30Z", "363", None, "367", None),     # "completed", no score
+        _sched_event("2026-10-17T11:30Z", "368", 0, "363", 2),
+    ]}))
+    assert len(games) == 1 and games[0].goals_for == 2
+
+
+def test_a_failed_request_is_none_and_no_games_is_empty():
+    class Down:
+        def get(self, *a, **k):
+            raise RuntimeError("no route")
+    assert espn.team_games("eng.1", "363", session=Down()) is None
+    assert espn.team_games("eng.1", "306", 2025, session=_Session({"events": []})) == []
+
+
+def test_the_scoreboard_carries_espns_team_ids():
+    event = _event([_competitor("home", "A", 0), _competitor("away", "B", 0)])
+    for comp, tid in zip(event["competitions"][0]["competitors"], ("11", "22")):
+        comp["team"]["id"] = tid
+    fx = espn.fetch_league("x", _Session(_payload(event)))[0]
+    assert (fx.home_id, fx.away_id) == ("11", "22")
+
+
 # ── fixture matching ─────────────────────────────────────────────────────────
 
 def _fx(home, away):

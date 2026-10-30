@@ -16,10 +16,20 @@ import type { z } from 'zod'
 
 const MODEL = 'claude-opus-5-5'
 // Opus 5.5 can decline; the fallback re-runs the same request on Opus 4.8
-// inside the same call rather than leaving the Lab with nothing to show.
+// inside the same call rather than leaving Create with nothing to show.
 const FALLBACK = [{ model: 'claude-opus-4-8' }]
 
 export class ClaudeDeclined extends Error {}
+
+/** Why reading an idea failed, in the user's terms. Rephrasing can only help
+ *  when the model read the words and could not use them. When the API itself
+ *  refused (no credit, an outage, a timeout), telling someone to change their
+ *  idea sends them chasing a fault that is ours. */
+export function readFailureMessage(err: unknown): string {
+  return err instanceof Anthropic.APIError || (err as Error)?.message === 'ANTHROPIC_API_KEY not set'
+    ? 'The AI that reads ideas is unavailable right now. Nothing was spent — try again in a few minutes.'
+    : 'We could not turn that into a strategy. Try saying it a different way.'
+}
 
 function firstObject(text: string): unknown {
   const a = text.indexOf('{')

@@ -14,7 +14,7 @@ export default function PrivacyPage() {
       title="Privacy Policy"
       lede={
         <>
-          We collect as little as we can. You can use every odds page without an account, and we run
+          We collect as little as we can. You can browse the Marketplace without an account, and we run
           no advertising or analytics trackers. This page lists everything we do keep, and why.
         </>
       }
@@ -38,16 +38,14 @@ export default function PrivacyPage() {
           your card; we never see or store card details.
         </li>
         <li>
-          <b>Daily limits.</b> When you run a Lab test or a wallet read, we record that it happened
-          and when, so the daily limit works.
+          <b>Daily limits.</b> When you build an agent from your own words, we record that it
+          happened and when, so the daily limit works.
         </li>
         <li>
-          <b>What you create.</b> Theories you write in the Lab, agents you save and their paper
-          records, and — on Pro — your watchlist, so it follows you between devices.
-        </li>
-        <li>
-          <b>Wallets you look up.</b> A Polymarket wallet address is public blockchain data. We
-          fetch its public history to build the report you asked for.
+          <b>What you create.</b> The ideas you describe, the agents you build or copy, and their
+          paper records. If you publish an agent, its strategy, the words you wrote and its record
+          are shown on the Marketplace under your public name, or a pseudonym if you set none —
+          never your email.
         </li>
         <li>
           <b>Newsletter.</b> Your email address, only if you subscribe.
@@ -61,17 +59,16 @@ export default function PrivacyPage() {
       <h2>3. Stored in your browser</h2>
       <p>
         We use only what the Service needs to work. The session cookies set when you sign in keep
-        you signed in. Your browser&apos;s local storage remembers your odds format, your watchlist
-        (on the free plan) and the email you typed at checkout, so it can be filled in on the
-        sign-in page. There are no advertising, tracking or analytics cookies, which is why there is
+        you signed in. Your browser&apos;s local storage remembers your odds format and the email you
+        typed at checkout, so it can be filled in on the sign-in page. There are no advertising, tracking or analytics cookies, which is why there is
         no cookie banner.
       </p>
 
       <h2>4. Why, and on what legal basis</h2>
       <ul>
         <li>
-          <b>To provide the Service you asked for</b> — your account, Pro, the Lab, the Wallet and
-          your agents. Legal basis: performance of our contract with you.
+          <b>To provide the Service you asked for</b> — your account, Pro, building and running your
+          agents, and the Marketplace. Legal basis: performance of our contract with you.
         </li>
         <li>
           <b>To keep the Service safe</b> and stop abuse of the free limits. Legal basis: our
@@ -93,8 +90,8 @@ export default function PrivacyPage() {
         <li><b>Vercel</b> — website hosting.</li>
         <li><b>Stripe</b> — payments and subscriptions.</li>
         <li>
-          <b>Anthropic</b> — AI. The text of a theory you submit to the Lab is sent to Anthropic&apos;s
-          Claude to be interpreted. The match briefs are written from public sports data only.
+          <b>Anthropic</b> — AI. The text of an idea you submit on Create is sent to Anthropic&apos;s
+          Claude to be turned into a strategy.
         </li>
       </ul>
       <p>

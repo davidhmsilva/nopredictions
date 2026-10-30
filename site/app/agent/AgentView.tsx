@@ -1,14 +1,20 @@
 'use client'
 
-/** One agent, drawn like a Game Center page: a hero with what it is and its
- *  controls, the tiles, the curve, the trades. Presentational — the page
- *  fetches and acts, this draws. */
+/** One agent: a hero with what it is and its controls, the tiles, the curve,
+ *  the strategy, the trades. Presentational — the page fetches and acts, this
+ *  draws.
+ *
+ *  Two modes. 'owner' is /agent/<id>: run, pause, publish, rename, archive.
+ *  'public' is /marketplace/<id>: the same page with the author's name and a
+ *  Copy button where the controls were, and nothing that only the owner may
+ *  change. */
 
 import Link from 'next/link'
+import { useState, type FormEvent } from 'react'
 import type { AgentDetail, AgentOrder, AgentSummary, DriftPosition } from '../lib/agents'
 import { dateText, dayTimeText, oddsText, useOddsFormat } from '../lib/display'
 import { EquityChart, StatusBadge, ago, pct, pickOf, settledOf, sinceText, tone, units } from './parts'
-import { describeInplay, isInplaySpec } from '../lib/inplaySpec'
+import { StrategyCard } from '../components/StrategyCard'
 
 /** Any verdict needs this many settled bets (CLAUDE.md, rule 4). */
 const VERDICT_N = 200
@@ -183,22 +189,96 @@ export interface AgentActions {
   onRun: () => void
   onPause: () => void
   onArchive: () => void
+  /** Put it on the Marketplace, or take it off. */
+  onPublish: (publish: boolean) => void
+  onRename: (name: string) => void
 }
 
-function Hero({ a, actions }: { a: AgentSummary; actions?: AgentActions }) {
-  // Only agents built in the Lab are switched from here; the others run on
+export type AgentMode = 'owner' | 'public'
+
+function Rename({ name, busy, onSave, onCancel }: {
+  name: string
+  busy: boolean
+  onSave: (name: string) => void
+  onCancel: () => void
+}) {
+  const [v, setV] = useState(name)
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    const t = v.trim()
+    if (t && t !== name) onSave(t)
+    else onCancel()
+  }
+  return (
+    <form className="ag-rename" onSubmit={submit}>
+      <input
+        className="np-input"
+        value={v}
+        maxLength={90}
+        onChange={(e) => setV(e.target.value)}
+        aria-label="Agent name"
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus
+      />
+      <button type="submit" className="np-btn np-btn-primary" disabled={busy || !v.trim()}>Save</button>
+      <button type="button" className="np-btn np-btn-ghost" onClick={onCancel}>Cancel</button>
+    </form>
+  )
+}
+
+function Hero({ a, actions, mode, aside }: {
+  a: AgentSummary
+  actions?: AgentActions
+  mode: AgentMode
+  aside?: React.ReactNode
+}) {
+  const [renaming, setRenaming] = useState(false)
+  // Only agents built on Create are switched from here; the others run on
   // their own schedule. The page does not say which is which — it just offers
   // the controls that work.
-  const controllable = a.source === 'lab' && actions
+  const controllable = mode === 'owner' && a.source === 'lab' && actions
   const theory = a.theory && a.theory !== a.name ? a.theory : null
   const interp = a.interpretation && a.interpretation !== a.name && a.interpretation !== a.theory ? a.interpretation : null
+  // A rule is what the record was earned on, so it is never edited in place: a
+  // changed idea is a new agent, starting from these words on Create.
+  const variation = a.theory ? `/create?draft=${encodeURIComponent(a.theory.slice(0, 500))}` : null
+  const copies = a.copies > 0 ? `copied ${a.copies.toLocaleString('en-US')} time${a.copies === 1 ? '' : 's'}` : null
   return (
     <div className="gc-hero">
       <div className="gc-hero-top">
         <span className="gc-hero-comp">{sinceText(a)}</span>
-        <StatusBadge a={a} />
+        <span className="ag-hero-badges">
+          {mode === 'owner' && a.is_public && <span className="np-badge is-info">ON THE MARKETPLACE</span>}
+          {a.copied_from != null && <span className="np-badge">COPY</span>}
+          <StatusBadge a={a} />
+        </span>
       </div>
-      <h1 className="ag-hero-name">{a.name}</h1>
+      {renaming && actions ? (
+        <Rename
+          name={a.name}
+          busy={actions.busy}
+          onSave={(n) => {
+            setRenaming(false)
+            actions.onRename(n)
+          }}
+          onCancel={() => setRenaming(false)}
+        />
+      ) : (
+        <h1 className="ag-hero-name">{a.name}</h1>
+      )}
+      {(mode === 'public' || a.copied_from != null || copies) && (
+        <p className="ag-hero-by">
+          {mode === 'public' ? (
+            <>by <b>{a.author}</b></>
+          ) : a.copied_from != null ? (
+            <>
+              Copied from{' '}
+              {a.copied_from_name ? <Link href={`/marketplace/${a.copied_from}`}>{a.copied_from_name}</Link> : 'the Marketplace'}
+            </>
+          ) : null}
+          {copies && <>{mode === 'public' || a.copied_from != null ? ' · ' : ''}{copies}</>}
+        </p>
+      )}
       {theory && <p className="ag-hero-theory">&ldquo;{theory}&rdquo;</p>}
       {interp && <p className="ag-hero-theory">Tested as: {interp}</p>}
       <div className="ag-hero-foot">
@@ -219,10 +299,29 @@ function Hero({ a, actions }: { a: AgentSummary; actions?: AgentActions }) {
                 Run it
               </button>
             )}
+            {/* A copy stays private: the Marketplace credits whoever had the idea. */}
+            {a.copied_from == null && (
+              <button className="np-btn" disabled={actions.busy} onClick={() => actions.onPublish(!a.is_public)}>
+                {a.is_public ? 'Unpublish' : 'Publish'}
+              </button>
+            )}
+            {variation && <Link className="np-btn np-btn-ghost" href={variation}>Build a variation</Link>}
+            <button className="np-btn np-btn-ghost" disabled={actions.busy} onClick={() => setRenaming(true)}>Rename</button>
             <button className="np-btn np-btn-ghost" disabled={actions.busy} onClick={actions.onArchive}>Archive</button>
           </div>
         )}
+        {mode === 'public' && variation && (
+          <Link className="ag-variation" href={variation}>Build your own variation</Link>
+        )}
+        {mode === 'public' && aside}
       </div>
+      {mode === 'owner' && a.is_public && (
+        <p className="ag-note">
+          On the Marketplace as <b>{a.author}</b>: anyone can read its strategy and its record, and copy it.{' '}
+          <Link href={`/marketplace/${a.id}`}>See its public page</Link> ·{' '}
+          <Link href="/account">Change your public name</Link>
+        </p>
+      )}
       {a.run_blocker && <p className="ag-note"><b>Cannot run live yet.</b> {a.run_blocker}</p>}
       {actions?.error && <p className="ag-hero-error">{actions.error}</p>}
     </div>
@@ -276,7 +375,18 @@ function Tiles({ a }: { a: AgentSummary }) {
   )
 }
 
-export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: AgentActions }) {
+export function AgentView({
+  detail,
+  actions,
+  mode = 'owner',
+  aside,
+}: {
+  detail: AgentDetail
+  actions?: AgentActions
+  mode?: AgentMode
+  /** Public mode: what sits where the owner's controls would (the Copy button). */
+  aside?: React.ReactNode
+}) {
   const fmt = useOddsFormat()
   const { agent: a, trades, curve, positions } = detail
   const isDriftDetail = (positions?.length ?? 0) > 0 || (detail.legacy_positions ?? 0) > 0
@@ -285,8 +395,12 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
 
   return (
     <>
-      <Link href="/agent" className="ag-back">← Your agents</Link>
-      <Hero a={a} actions={actions} />
+      {mode === 'public' ? (
+        <Link href="/marketplace" className="ag-back">← Marketplace</Link>
+      ) : (
+        <Link href="/agent" className="ag-back">← Your agents</Link>
+      )}
+      <Hero a={a} actions={actions} mode={mode} aside={aside} />
 
       <section className="gc-section">
         <Tiles a={a} />
@@ -303,23 +417,11 @@ export function AgentView({ detail, actions }: { detail: AgentDetail; actions?: 
         <EquityChart curve={curve} />
       </section>
 
-      {isInplaySpec(a.spec) && (() => {
-        const r = describeInplay(a.spec)
-        return (
-          <section className="gc-section">
-            <h2 className="gc-h2">The rule</h2>
-            <p className="gc-quiet">It buys when:</p>
-            <ul className="lq-rule">
-              {r.entry.map((e, i) => (
-                <li key={i}>{e}</li>
-              ))}
-            </ul>
-            <p className="gc-quiet">
-              {r.exit} A live rule has no replay over past seasons — the record above is its only test.
-            </p>
-          </section>
-        )
-      })()}
+      {a.spec && (
+        <section className="gc-section">
+          <StrategyCard spec={a.spec} />
+        </section>
+      )}
 
       {bt && (
         <section className="gc-section">

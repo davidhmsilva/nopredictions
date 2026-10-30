@@ -1556,7 +1556,7 @@ def main() -> int:
     ap.add_argument("--report", action="store_true",
                     help="write reports/wallet_<name>_<date>.md")
     ap.add_argument("--verify-site", metavar="BASE_URL",
-                    help="compare against the site's /api/wallet for the same address")
+                    help="compare against a deployment's /api/wallet (the route left the site on 2026-10-28)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 

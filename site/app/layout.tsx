@@ -3,14 +3,13 @@ import './globals.css'
 import { Analytics } from '@vercel/analytics/next'
 
 // What the site leads with, in one place, so the browser tab, a search result
-// and a link pasted on X all say the same thing. Since 2026-10-15 it leads with
-// the agent, like the hero; the description still names both venues, because
-// those are the words people search, and says the agent paper-trades.
-const TITLE = 'NOPREDICTIONS — Build an AI trading agent for prediction markets'
+// and a link pasted on X all say the same thing. Since 2026-10-28 the site is
+// agents only: describe an idea, get an agent that trades it, or copy one.
+const TITLE = 'NOPREDICTIONS — Turn your betting idea into an AI agent'
 const DESCRIPTION =
-  'Describe a strategy in plain English. Your AI agent backtests it on a decade of real games, then paper-trades it on Polymarket and Kalshi. Free odds on every game.'
+  'Describe a betting idea in your own words. The AI turns it into a strategy, tests it on 14 years of real odds, and deploys it as an agent that paper-trades on Polymarket. Or copy an agent from the Marketplace.'
 const CARD =
-  'Your own AI agent, hunting edges in prediction markets. Describe a strategy, see if it would have made money, and let it trade the games that fit.'
+  'Your idea, as an AI agent. Describe a strategy, see what it would have made, deploy it — or copy an agent someone already runs.'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.nopredictions.com'),

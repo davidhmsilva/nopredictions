@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import requests
 
@@ -145,6 +146,9 @@ class EspnFixture:
     detail: str
     home_stats: EspnTeamStats = field(default_factory=EspnTeamStats)
     away_stats: EspnTeamStats = field(default_factory=EspnTeamStats)
+    # ESPN's own team ids, for asking about a team's earlier games (team_games).
+    home_id: str = ""
+    away_id: str = ""
 
     @property
     def live(self) -> bool:
@@ -228,8 +232,78 @@ def fetch_league(code: str, session: requests.Session | None = None) -> list[Esp
             detail=str(status.get("detail") or ""),
             home_stats=_stats_of(home),
             away_stats=_stats_of(away),
+            home_id=str((home.get("team") or {}).get("id") or ""),
+            away_id=str((away.get("team") or {}).get("id") or ""),
         ))
     return out
+
+
+@dataclass(frozen=True)
+class TeamGame:
+    """One finished league game, from one team's side."""
+    kickoff: datetime
+    goals_for: int
+    goals_against: int
+
+
+def team_games(code: str, team_id: str, season: int | None = None,
+               session: requests.Session | None = None) -> list[TeamGame] | None:
+    """One team's finished games in one league, oldest first. One request.
+
+    The endpoint is league-scoped, which is what the backtest's history is:
+    `matches` holds league games, never the cups. `season` is the year it starts
+    (2025 = 2025-26); left out, ESPN answers with the current one.
+
+    ⚠️ Use this, not the five-letter `form` on the scoreboard: on 2026-10-30 that
+    string disagreed with the team's own results on 65 of 86 teams, while the
+    W-D-L from these games matched ESPN's published record on 86 of 86.
+
+    🔑 None means "ESPN did not answer", and [] means "this team played no game
+    here" (a promoted club asked about last season). They are not the same fact,
+    and a caller that reads a failed request as "no games" trades on nothing."""
+    get = (session or requests).get
+    try:
+        res = get(f"{BASE}/{code}/teams/{team_id}/schedule",
+                  params={"season": season} if season else None, timeout=_TIMEOUT)
+        res.raise_for_status()
+        data = res.json()
+    except Exception as exc:                       # noqa: BLE001 — the caller fails closed
+        log.warning("[espn] %s team %s schedule unreachable: %s", code, team_id, exc)
+        return None
+
+    out: list[TeamGame] = []
+    for ev in data.get("events") or []:
+        comps = (ev.get("competitions") or [{}])[0]
+        if not ((comps.get("status") or {}).get("type") or {}).get("completed"):
+            continue
+        sides = comps.get("competitors") or []
+        own = next((c for c in sides if str(c.get("id")) == str(team_id)), None)
+        opp = next((c for c in sides if str(c.get("id")) != str(team_id)), None)
+        if own is None or opp is None or len(sides) != 2:
+            continue
+        gf, ga = _score_of(own), _score_of(opp)
+        try:
+            when = datetime.fromisoformat(str(ev.get("date")).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        # A "completed" row with no score is a postponement or an award. It is
+        # not a game the backtest's history would hold either.
+        if gf is None or ga is None:
+            continue
+        out.append(TeamGame(kickoff=when, goals_for=gf, goals_against=ga))
+    return sorted(out, key=lambda g: g.kickoff)
+
+
+def _score_of(competitor: dict) -> int | None:
+    """The scoreboard writes a score as "2"; the schedule as {"value": 2.0,
+    "displayValue": "2"}. No score at all is None, never 0."""
+    raw = competitor.get("score")
+    if isinstance(raw, dict):
+        raw = raw.get("displayValue", raw.get("value"))
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def live_fixtures(codes: list[str] | None = None) -> list[EspnFixture]:

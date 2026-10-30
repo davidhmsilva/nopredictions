@@ -5,8 +5,9 @@ Display names for the site's clubs — ESPN's spelling, keyed by our teams.id.
 abbreviates: "Sp Lisbon", "Ath Madrid", "Nott'm Forest", "M'gladbach",
 "Sociedad", "Peterboro". Those are the keys the models join on and must not
 change, but nobody searches for them and a page titled with them is found by
-nobody. This writes site/app/lib/team_names.json, which the site reads through
-lib/teamDisplay.ts for every name it SHOWS; matching keeps using the canonical.
+nobody. This writes agent/team_names.json — the site read it for every name it
+SHOWED until its team pages went (2026-10-28); close_maker_agent.py still reads
+it to match ESPN's names. Matching keeps using the canonical.
 
 Every club listed on /teams (a domestic league match in the last 120 days) is
 matched against ESPN's team list for the same league, one league at a time. A
@@ -41,7 +42,9 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "site" / "app" / "lib" / "team_names.json"
+# It lived in site/app/lib until 2026-10-28, when the team pages that showed
+# these names left the site. close_maker_agent.py still reads it.
+OUT = ROOT / "agent" / "team_names.json"
 
 # Our league code → ESPN's.
 LEAGUES = {

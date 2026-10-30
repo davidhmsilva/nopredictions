@@ -6,12 +6,23 @@
  *  two numbers that nothing kept equal. Now there is one of each.
  */
 
-export type MeteredFeature = 'lab' | 'wallet'
+/** The one metered thing: building an agent from a user's own words, which
+ *  costs a Claude call. Still keyed 'lab' — `usage_events.feature` holds that
+ *  string, and renaming it would quietly reset everyone's day. The Wallet's
+ *  meter went with the Wallet (2026-10-28). */
+export type MeteredFeature = 'lab'
 
 /** What a free account gets per day, per feature. */
 export const FREE_DAILY_LIMIT: Record<MeteredFeature, number> = {
   lab: 3,
-  wallet: 3,
+}
+
+/** How many agents a plan may keep and run at once — copies included. The
+ *  operator's account is unlimited. Here rather than in lib/agents because the
+ *  pricing page prints them, and lib/agents talks to Postgres. */
+export const AGENT_LIMITS: Record<'free' | 'pro', { saved: number; running: number }> = {
+  free: { saved: 5, running: 1 },
+  pro: { saved: 50, running: 10 },
 }
 
 /** Price, in one place, so the pricing page and Stripe cannot drift apart. */

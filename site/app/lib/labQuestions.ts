@@ -1,5 +1,6 @@
-/** The Lab's first step: before anything is tested, read the theory and ask
- *  the few questions whose answers change what gets tested.
+/** Create's first step (the Lab's, before 2026-10-28): before anything is
+ *  built, read the idea and ask the few questions whose answers change what
+ *  the agent would do.
  *
  *  Each answer is a short CLARIFICATION appended to the theory, so the step
  *  after this one reads a sentence that says what the user meant, and the
@@ -47,7 +48,7 @@ export function clarify(theory: string, chosen: string[]): string {
 
 const LEAGUE_NAMES = LEAGUES.map((l) => `${l.name} (${l.country})`).join(', ')
 
-export const PLAN_SYSTEM = `You are the first step of a sports-betting research tool. A user has written a theory. Before it is tested, you decide which kind of rule it is and ask the FEW questions whose answers change what gets tested — the way a sharp analyst would before writing any code.
+export const PLAN_SYSTEM = `You are the strategist of an AI agent builder for sports betting. A user has described an idea — a bet they believe makes money — and wants it turned into an agent that trades it. Before the strategy is written and tested, you decide which kind of rule it is and ask the FEW questions whose answers change what the agent would do — the way a sharp analyst would before writing any code.
 
 # The two kinds of rule the tool can run
 

@@ -1,4 +1,5 @@
-/** In-play Lab agents: the rule language, shared by the site and the runner.
+/** Live rules: the language of an agent that trades during the match, shared
+ *  by the site and the runner.
  *
  *  A pre-match Lab spec (lib/backtest.ts) is a filter over finished games. An
  *  in-play spec is a TRIGGER on a live match plus an EXIT: enter the first
@@ -170,12 +171,17 @@ function band(lo: number | null, hi: number | null): string {
   return ''
 }
 
+/** What a live rule buys, lower-case, as the middle of a sentence. */
+export function inplayBuyText(s: InplaySpec): string {
+  const who = s.team ? TEAM_TEXT[s.team] : null
+  return s.market === 'win' ? `${who} to win` : s.market === 'draw' ? 'the draw' : 'one more goal in the match'
+}
+
 /** The rule in plain English, built from the spec itself — so what the page
  *  says will run is exactly what will run, not the model's paraphrase. */
 export function describeInplay(s: InplaySpec): { entry: string[]; exit: string; summary: string } {
   const who = s.team ? TEAM_TEXT[s.team] : null
-  const buy =
-    s.market === 'win' ? `${who} to win` : s.market === 'draw' ? 'the draw' : 'one more goal in the match'
+  const buy = inplayBuyText(s)
   const entry: string[] = []
   if (s.team && (s.ko_odds_min || s.ko_odds_max))
     entry.push(`${who} was ${band(s.ko_odds_min, s.ko_odds_max)} to win at kick-off`)

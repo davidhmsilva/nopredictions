@@ -8,7 +8,7 @@ import { AppShell } from './AppShell'
 
 export const OPERATOR = 'NOPREDICTIONS'
 export const CONTACT_EMAIL = 'nopredictions.info@gmail.com'
-export const LEGAL_UPDATED = '24 September 2026'
+export const LEGAL_UPDATED = '28 October 2026'
 
 const PAGES = [
   { href: '/terms', label: 'Terms of Service' },
