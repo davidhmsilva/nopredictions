@@ -158,6 +158,25 @@ def test_only_finished_games_with_a_score_count():
     assert len(games) == 1 and games[0].goals_for == 2
 
 
+def test_play_offs_are_not_league_games_but_a_second_phase_is():
+    # `matches` has no promotion, relegation or European play-offs, and does have
+    # the Belgian and Greek "Playoff Round". Season names vary by league.
+    def game(day, season_type):
+        return {**_sched_event(f"2026-05-{day}T16:30Z", "363", 1, "367", 0), "seasonType": {"name": season_type}}
+    games = espn.team_games("eng.1", "363", session=_Session({"events": [
+        game(10, "Regular Season"),
+        game(11, "2025-26 English Premier League"),
+        game(12, "Playoff Round"),
+        game(13, "Promotion Semifinals"),
+        game(14, "Promotion Final"),
+        game(15, "Relegation Finals"),
+        game(16, "Conference League Playoffs - Final"),
+        game(17, "European Competition Playoffs"),
+        _sched_event("2026-05-18T16:30Z", "363", 1, "367", 0),
+    ]}))
+    assert [g.kickoff.day for g in games] == [10, 11, 12, 18]
+
+
 def test_a_failed_request_is_none_and_no_games_is_empty():
     class Down:
         def get(self, *a, **k):

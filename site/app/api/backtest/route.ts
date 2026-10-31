@@ -150,6 +150,18 @@ function sanitizeSpec(spec: Spec): { spec: Spec; warnings: string[] } {
     if (dropped) warnings.push('A condition on "the team" needs a rule about one team — ignored.')
   }
 
+  // Each sport's function ignores the other's figures, which would test a broader
+  // rule than the one described. Dropped here, so the page shows what really ran.
+  const otherSport = nba
+    ? /_(form_pts5|avg_tg5|avg_gf5|avg_ga5|venue_pts5|last_gd|win_run|unbeaten_run|loss_run|winless_run)_(min|max)$/
+    : /_(form_w5|avg_tp5)_(min|max)$|^(spread|total)_(min|max)$/
+  for (const k of Object.keys(s)) {
+    if (otherSport.test(k)) {
+      delete (s as unknown as Record<string, unknown>)[k]
+      warnings.push(`A condition that only exists for ${nba ? 'football' : 'the NBA'} was ignored.`)
+    }
+  }
+
   // A run is only counted so far back. A bound past that could never be met.
   for (const k of Object.keys(s)) {
     const o = s as unknown as Record<string, unknown>

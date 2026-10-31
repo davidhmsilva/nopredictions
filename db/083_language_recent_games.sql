@@ -28,7 +28,8 @@
 -- ⚠️ ORDER. A site that sends one of these keys to the old run_backtest gets a
 --    result for a BROADER rule, silently; so does a runner that does not know it.
 --      1. this file
---      2. SELECT refresh_bt_features();    -- run it off-peak: TRUNCATE + INSERT
+--      2. SELECT refresh_bt_features();    -- off-peak: TRUNCATE + INSERT, ~25s in
+--                                             which a test waits. Must return 101469.
 --      3. the server pulls the runner
 --      4. the site deploys
 --
@@ -179,7 +180,15 @@ BEGIN
            COALESCE(af.winless_run,  CASE WHEN af.run_n = 10 THEN 10 END)
     FROM matches m
     JOIN seasons s   ON s.id = m.season_id
-    JOIN leagues l   ON l.id = s.league_id AND l.code <> 'USA-NBA'
+    -- The Lab's 22 leagues, by name. Stage K (2026-10-03) put Pinnacle closes on 17
+    -- more, which no refresh had picked up: left open, this would add 59,387 rows
+    -- and every "all leagues" test would start counting bets the runner never
+    -- places. A new league joins LEAGUES, PM_COMPETITIONS and this list together.
+    JOIN leagues l   ON l.id = s.league_id AND l.code IN (
+        'ENG-PR', 'ENG-CH', 'ENG-L1', 'ENG-L2', 'ENG-CON',
+        'ESP-LL', 'ESP-L2', 'ITA-SA', 'ITA-SB', 'GER-BL1', 'GER-BL2',
+        'FRA-L1', 'FRA-L2', 'NED-ED', 'POR-PL', 'BEL-JPL', 'TUR-SL', 'GRE-SL',
+        'SCO-PR', 'SCO-CH', 'SCO-L1', 'SCO-L2')
     JOIN teams th    ON th.id = m.home_team_id
     JOIN teams ta    ON ta.id = m.away_team_id
     JOIN pin_close pc ON pc.match_id = m.id AND pc.home_odds IS NOT NULL

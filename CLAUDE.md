@@ -80,8 +80,10 @@ European competitions, player-level anything.
 because it decides how many people's ideas become agents at all. A new pre-match
 condition has to land in all of: `lib/backtest.ts` (`Spec`, `FILTER_FIELDS`), the prompt
 in `/api/backtest`, `cleanSpec`, `bt_recent_games_fit` in SQL (db/083, read by both
-`run_backtest` and `run_backtest_recent`), `describeSpec`, and `pick()` / `form_verdict()`
-in `agent/lab_strategy_runner.py`. A condition the runner
+`run_backtest` and `run_backtest_recent`), `refresh_bt_features` for its column,
+`describeSpec`, and `form_of` / `TEAM_FIGURES` in `agent/lab_strategy_runner.py`. Then
+check parity: the SQL against `form_of` on the same results, and `form_of` over ESPN
+against `matches`. A condition the runner
 cannot read must be in `run_blocker` on BOTH sides, so it tests and honestly refuses
 to deploy rather than trading a different rule.
 
@@ -95,10 +97,16 @@ Each of these is a way a live trade silently stops being the rule the user teste
 - Trust Polymarket's title order for home and away. Anything that names a side needs
   ESPN to confirm it, or the fixture is skipped: a side error inverts the bet.
 - Buy into a broken book: spread > 5pp or under $50 of ask depth.
-- Guess a team's form. Rest days and last-5 figures are read live from ESPN by the
-  backtest's own definitions (`form_of`, league games only, 5 games or nothing, only
-  games before this kick-off). A team it cannot read fails the rule, like a NULL in
-  the backtest. A failed request is `None`, never "no games".
+- Guess a team's form. Everything a rule can ask about a team's recent games is read
+  live from ESPN by the backtest's own definitions (`form_of`, league games only, 5
+  games or nothing, only games before this kick-off). A team it cannot read fails the
+  rule, like a NULL in the backtest. A failed request is `None`, never "no games".
+  ⚠️ A club that changed division has no history in ESPN's league-scoped feed, so a form
+  rule does not fire on it until it has played enough games in the new one.
+- Trust an ESPN league code because it answers. `sco.3` and `sco.4` return a season
+  frozen in September 2025, so Scottish League One and Two can only run rules that do
+  not name a side.
+- Walk past a bound it does not know. `unreadable_bounds` pauses the rule instead.
 - Settle by "first outcome won", which books a lost Under as a win.
 
 ---

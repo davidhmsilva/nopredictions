@@ -183,7 +183,7 @@ export default function CreatePage() {
 
   async function runBacktest(theory: string) {
     setStatus('Writing your strategy…')
-    timers.current.push(setTimeout(() => setStatus('Testing it over 111,475 real games…'), 3500))
+    timers.current.push(setTimeout(() => setStatus('Testing it over 101,469 real games…'), 3500))
     try {
       const res = await fetch('/api/backtest', {
         method: 'POST',

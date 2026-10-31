@@ -464,8 +464,10 @@ def test_a_relative_rules_bound_lands_on_the_team_it_means(monkeypatch):
     assert "away last_gd" in lr.form_verdict(leg, away, home)
 
 
-def test_every_lab_league_can_have_its_sides_confirmed():
-    assert set(lr.ESPN_CODE) == set(lr.LAB_CODES)
+def test_every_lab_league_with_a_current_espn_feed_can_have_its_sides_confirmed():
+    # sco.3 and sco.4 answer, with a season that stopped on 2025-09-27.
+    assert set(lr.LAB_CODES) - set(lr.ESPN_CODE) == {"SCO-L1", "SCO-L2"}
+    assert not set(lr.ESPN_CODE) - set(lr.LAB_CODES)
 
 
 def test_the_language_is_the_same_in_all_of_its_places():
@@ -485,6 +487,16 @@ def test_the_language_is_the_same_in_all_of_its_places():
         for side in ("home", "away"):
             assert f"{side}_{figure} " in sql, f"{side}_{figure} column"
             assert f"'{side}_{figure}_min'" in sql and f"'{side}_{figure}_max'" in sql, f"{side}_{figure} bounds"
+
+
+def test_the_backtest_holds_exactly_the_leagues_the_runner_trades():
+    # bt_features is what "all leagues" means in a test. A league in it that the
+    # runner does not trade is a bet the backtest counted and no agent can place.
+    site = open(os.path.join(REPO, "site", "app", "lib", "backtest.ts")).read()
+    sql = open(os.path.join(REPO, "db", "083_language_recent_games.sql")).read()
+    listed = re.search(r"AND l\.code IN \((.*?)\)", sql, re.S).group(1)
+    assert set(re.findall(r"'([A-Z0-9-]+)'", listed)) == set(lr.LAB_CODES)
+    assert set(re.findall(r"code: '([A-Z0-9-]+)'", site)) == set(lr.LAB_CODES)
 
 
 def test_only_the_full_match_events_of_a_fixture_are_read():

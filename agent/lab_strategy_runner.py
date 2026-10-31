@@ -122,9 +122,12 @@ PM_COMPETITIONS: dict[str, tuple[set[str], set[str]]] = {
 LAB_CODES = frozenset(PM_COMPETITIONS)
 
 # Where ESPN can confirm home/away. A league missing here can still run a rule
-# that does not care about sides (draw, over, under), and nothing else. All 22
-# since 2026-10-30: the last five answered with their own fixtures, schedules and
-# standings, and held 13 of the 107 fixtures on that day's board.
+# that does not care about sides (draw, over, under), and nothing else.
+#
+# ⚠️ Scottish League One and Two are out on purpose. ESPN answers sco.3 and sco.4
+#    happily, with the 2025-26 season frozen on 2025-09-27 (checked 2026-10-31): a
+#    fixture it still lists could confirm the wrong way round, and a team's form
+#    would be a year old. A code answering is not a code being current.
 ESPN_CODE = {
     "ENG-PR": "eng.1", "ENG-CH": "eng.2", "ENG-L1": "eng.3", "ENG-L2": "eng.4",
     "ENG-CON": "eng.5",
@@ -132,7 +135,7 @@ ESPN_CODE = {
     "GER-BL1": "ger.1", "GER-BL2": "ger.2", "FRA-L1": "fra.1", "FRA-L2": "fra.2",
     "NED-ED": "ned.1", "POR-PL": "por.1", "BEL-JPL": "bel.1", "TUR-SL": "tur.1",
     "GRE-SL": "gre.1",
-    "SCO-PR": "sco.1", "SCO-CH": "sco.2", "SCO-L1": "sco.3", "SCO-L2": "sco.4",
+    "SCO-PR": "sco.1", "SCO-CH": "sco.2",
 }
 
 _TITLE_RE = re.compile(r"^(.+?)\s+vs\.?\s+(.+?)$", re.I)
