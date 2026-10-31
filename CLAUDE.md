@@ -68,20 +68,22 @@ This pipeline IS the product. Each step, and where it lives:
 
 | kind | markets | conditions | leagues |
 |---|---|---|---|
-| **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team home or away, rest days, points in the last 5, goals in the last 5, seasons | the 22 in `LEAGUES` |
+| **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team, rest days, its last game (result and margin), runs (won, unbeaten, lost, winless, up to 10), points in the last 5 overall and at this end, goals scored, conceded and total in the last 5, seasons. On the home or away team, or on "the team" at either end and its opponent (`flatLegs`) | the 22 in `LEAGUES` |
 | **Live rule** (`lib/inplaySpec.ts`) | a team to win, the draw, one more goal | team, kick-off odds, minute window, score, pressure, price; exit: hold, sell after a goal, sell at a minute | any fixture on the pressure poll, or named leagues |
 | **Backtest only** | NBA moneyline, spread, total | 2014-15 → 2021-22, consensus close | cannot deploy: no NBA boards here |
 
 Not possible yet, and the model says so: other sports live, corners, cards, BTTS,
-handicaps, half-time markets pre-match, cups and European competitions, player-level
-anything, "lost their last game" (form is points over 5).
+handicaps, half-time markets pre-match, other goal lines, league-table position, cups and
+European competitions, player-level anything.
 
 🔑 **Widening this language is the most valuable engineering work in the project**,
 because it decides how many people's ideas become agents at all. A new pre-match
 condition has to land in all of: `lib/backtest.ts` (`Spec`, `FILTER_FIELDS`), the prompt
-in `/api/backtest`, `cleanSpec`, `run_backtest` and `run_backtest_recent` in SQL (⚠️ the
-WHERE clause of the second is a copy of the first, db/074), `describeSpec`, and
-`pick()` / `form_verdict()` in `agent/lab_strategy_runner.py`. A condition the runner
+in `/api/backtest`, `cleanSpec`, `bt_recent_games_fit` in SQL (db/083, read by both
+`run_backtest` and `run_backtest_recent`), `refresh_bt_features` for its column,
+`describeSpec`, and `form_of` / `TEAM_FIGURES` in `agent/lab_strategy_runner.py`. Then
+check parity: the SQL against `form_of` on the same results, and `form_of` over ESPN
+against `matches`. A condition the runner
 cannot read must be in `run_blocker` on BOTH sides, so it tests and honestly refuses
 to deploy rather than trading a different rule.
 
@@ -95,10 +97,16 @@ Each of these is a way a live trade silently stops being the rule the user teste
 - Trust Polymarket's title order for home and away. Anything that names a side needs
   ESPN to confirm it, or the fixture is skipped: a side error inverts the bet.
 - Buy into a broken book: spread > 5pp or under $50 of ask depth.
-- Guess a team's form. Rest days and last-5 figures are read live from ESPN by the
-  backtest's own definitions (`form_of`, league games only, 5 games or nothing, only
-  games before this kick-off). A team it cannot read fails the rule, like a NULL in
-  the backtest. A failed request is `None`, never "no games".
+- Guess a team's form. Everything a rule can ask about a team's recent games is read
+  live from ESPN by the backtest's own definitions (`form_of`, league games only, 5
+  games or nothing, only games before this kick-off). A team it cannot read fails the
+  rule, like a NULL in the backtest. A failed request is `None`, never "no games".
+  ⚠️ A club that changed division has no history in ESPN's league-scoped feed, so a form
+  rule does not fire on it until it has played enough games in the new one.
+- Trust an ESPN league code because it answers. `sco.3` and `sco.4` return a season
+  frozen in September 2025, so Scottish League One and Two can only run rules that do
+  not name a side.
+- Walk past a bound it does not know. `unreadable_bounds` pauses the rule instead.
 - Settle by "first outcome won", which books a lost Under as a win.
 
 ---

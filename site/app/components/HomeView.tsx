@@ -17,8 +17,8 @@ import { relationOf, useMarketplaceMe } from '../lib/useMarketplaceMe'
 import { MarketCard } from '../marketplace/MarketCard'
 
 const EXAMPLES = [
-  'Back home favourites in La Liga when they are in poor form',
-  'Draws in Serie B when both teams are in poor form',
+  'Back the favourite after it lost its last game',
+  'Draws in Serie B when both teams have gone 3 games without a win',
   'Back a 1.30-1.50 favourite that is pressing while level, sell after the next goal',
 ]
 
@@ -75,7 +75,7 @@ export function HomeView({ initial }: { initial: AgentSummary[] | null }) {
           <textarea
             id="hm-idea-box"
             className="cr-idea-box"
-            placeholder="e.g. Back home favourites in La Liga when they are in poor form"
+            placeholder="e.g. Back the favourite in La Liga after it lost its last game"
             value={idea}
             maxLength={500}
             rows={3}

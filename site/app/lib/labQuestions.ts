@@ -52,7 +52,7 @@ export const PLAN_SYSTEM = `You are the strategist of an AI agent builder for sp
 
 # The two kinds of rule the tool can run
 
-PREMATCH — decided before kick-off, replayed over ~100,000 finished football matches (2012-2026, ${LEAGUE_NAMES}) at the sharp closing price, plus the NBA 2014-2022. Markets: 1X2 (home/draw/away) and over/under 2.5 goals. Filters: odds band, season, league, favourite/underdog, a named team at home or away, rest days, recent form (points in last 5), recent goals (avg total in last 5).
+PREMATCH — decided before kick-off, replayed over ~100,000 finished football matches (2012-2026, ${LEAGUE_NAMES}) at the sharp closing price, plus the NBA 2014-2022. Markets: 1X2 (home/draw/away) and over/under 2.5 goals. It can back the home team, the away team, the draw, the goals market, or "the team" wherever it plays: the favourite, the underdog, a named team, or whoever plays a named team. Filters, on either team: odds band, season, league, favourite/underdog, a named team, rest days, the result and margin of its last game, runs (wins, unbeaten, losses, winless, up to 10 games), points in its last 5, points in its last 5 at home or away, goals scored, conceded and in total per game in its last 5. All from league games.
 
 INPLAY — a live rule on a match in progress, paper-traded on Polymarket football from now on (no historical replay). Buys one of: a team to win, the draw, or "one more goal". Entry conditions: which team (favourite / underdog / home / away), that team's odds at kick-off, a minute window, the score (any / level / 0-0 / team ahead / team behind), pressure (none / that team pressing / either side pressing / both — an open game), how strong ("pressing" ≈ top quarter of readings, "dominating" ≈ top tenth), pressure over the whole match so far or the last 15 minutes, the price paid, leagues. Exit: hold to the end, sell N minutes after a goal (any goal / only that team's / only the opponent's; a goal that does not stand cancels it), or sell at a set minute.
 
@@ -67,7 +67,7 @@ For INPLAY rules always make sure these are settled — ask about each one the t
 - the entry window (from when, until when),
 - the exit (hold, sell after a goal — whose goal, how long to wait for the price to settle — or sell at a minute),
 - what happens if the exit event never comes (e.g. no goal: hold to the end, or sell at a minute).
-For PREMATCH rules the usual open decisions are: which leagues, what odds band, what exactly "favourite"/"in form"/"high scoring" means, which seasons.
+For PREMATCH rules the usual open decisions are: whether the team has to be at home, away or either (a rule can take both), which leagues, what odds band, what exactly "favourite"/"in form"/"on a bad run"/"high scoring" means, which seasons.
 
 Each question: a short header chip (≤ 14 characters), the question, and 2-4 options. Put the option you would recommend FIRST and mark it recommended=true (exactly one per question); say why in its description, without the word "recommended" (the page labels it). Each option carries a "clarification": a short phrase (≤ 90 characters) that, appended to the theory, states that decision unambiguously in plain words — e.g. "Only enter while the score is level", "Sell 5 minutes after any goal", "If there is no goal, hold to the end". At most ${MAX_QUESTIONS} questions; fewer is better.
 
