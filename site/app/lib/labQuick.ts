@@ -52,7 +52,9 @@ export interface Featured {
 
 /** Chosen to show the range of answers, not to flatter the product: one that
  *  made money and probably should not be trusted, one that made money and
- *  the price agreed, one that loses heavily, and three that are the margin. */
+ *  the price agreed, one that loses heavily, and three that are the margin.
+ *  The last three show what a rule can ask about a team's recent games, and they
+ *  are the way to see that with no model call; none of them made money. */
 export const FEATURED: Featured[] = [
   {
     id: 'draws-serie-b',
@@ -83,6 +85,21 @@ export const FEATURED: Featured[] = [
     id: 'la-liga-bad-form',
     title: 'La Liga teams in bad form, at home',
     spec: { ...base('1x2', 'home', ['ESP-LL']), home_form_pts5_max: 4 },
+  },
+  {
+    id: 'favourite-after-a-loss',
+    title: 'The favourite, after it lost its last game',
+    spec: { ...base('1x2', 'team', null), fav_status: 'favorite', team_last_gd_max: -1 },
+  },
+  {
+    id: 'home-unbeaten-run',
+    title: 'Home teams unbeaten in 5 or more',
+    spec: { ...base('1x2', 'home', null), home_unbeaten_run_min: 5 },
+  },
+  {
+    id: 'under-solid-defences',
+    title: 'Under 2.5 when both defences have been solid',
+    spec: { ...base('ou25', 'under', null), home_avg_ga5_max: 0.8, away_avg_ga5_max: 0.8 },
   },
 ]
 

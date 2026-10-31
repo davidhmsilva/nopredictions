@@ -3522,3 +3522,43 @@ same decision with more candidates.
 - Betfair API docs (benchmark): https://developer.betfair.com/
 - Supabase docs: https://supabase.com/docs
 - Anthropic API docs: https://docs.anthropic.com
+
+## Widening the strategy language: what was measured (2026-10-31)
+
+**Demand has no direct measure yet.** One account, 0 `usage_events`, and a refused idea left
+no trace, which is why `lab_ideas` exists now (db/084). All 9 saved Lab agents are the
+operator's, and #35/#36 are one idea in two rows: the language could not say "at either end".
+
+**Polymarket volume by family, as a proxy for what people bet.** Over the year of
+`venue_market_history` (all rows of each family, linked or not): O/U 2.5 $753M, O/U 3.5
+$380M, O/U 1.5 $276M, BTTS $240M, O/U 4.5 $172M, O/U 0.5 $105M, O/U 5.5 $80M. So the other
+goal lines together trade ~1.4x O/U 2.5, and BTTS ~1/3 of it. A 56-fixture sample of the 22
+leagues on Gamma said 3.4x; it was too small, use the year. On 107 upcoming fixtures, every
+goal line, BTTS, half-time result, exact score and spreads were listed on 100%.
+
+**Goal lines and BTTS can replay at REAL prices, not modelled ones.** Linked to `matches`,
+with a real Polymarket taker price: BTTS 3,717 fixtures, O/U 1.5 3,674, O/U 3.5 3,693, O/U 4.5
+3,032, O/U 0.5 881, O/U 5.5 861, from 2025-10 (0.5 and 5.5 from 2026-05). Kalshi's real ask
+adds about 2,400 on BTTS, 1.5 and 3.5. The table stops at 2026-09-29: it needs its daily
+job. Half-time result is not in it (the family CHECK has moneyline, totals, spreads, btts),
+so half-time would ship as "no replay".
+
+**`refresh_bt_features()` was a trap.** Stage K put Pinnacle closes on 17 more leagues on
+2026-10-03, and no refresh had run since. A plain refresh would have added 59,387 rows (MLS,
+Brasileirão, J1, Liga MX...) and every "all leagues" test would have counted bets the runner
+never places. db/083 names the 22. Those 17 are also the cheapest widening left: results and
+closes are already held, and they need only `LEAGUES`, `PM_COMPETITIONS` and `ESPN_CODE`.
+
+**Parity of the live reading.** SQL against `form_of` on the same results: 202,938
+team-matches, 11 figures, 0 differences. `form_of` over ESPN against `matches`, every game of
+2026-27 in the 20 leagues with a current feed, 3,662 team-games:
+- ESPN's season types include play-offs `matches` does not hold. Dropping them (`_POST_SEASON`)
+  took wrong numbers from 125 to 11 on `form_pts5` and 26 to 2 on `last_gd`. "Playoff Round" is
+  the Belgian and Greek second phase and `matches` DOES hold it, so it stays.
+- What remains differs by a number on 0-0.4% of readings per figure (at most 15 of 3,662), all
+  in the first rounds of Alavés, Elche, Toulouse and La Louvière: last season's game counts differ by one.
+- ESPN cannot answer (fails the rule, never a wrong number) on 1.5% for `last_gd`, 7% for
+  `form_pts5` and 14% for `venue_pts5`: clubs that changed division, in their first rounds.
+- `sco.3` and `sco.4` answer with a season frozen on 2025-09-27. A code answering is not a code
+  being current: check `leagues[0].season.year`.
+
