@@ -35,8 +35,10 @@ import { getSql } from './db'
 import {
   FILTER_FIELDS,
   LEAGUE_CODES,
+  VENUE_MARKETS,
   computeStats,
   isNbaMarket,
+  marketTakesSide,
   namesItsTeam,
   verdict,
   type Spec,
@@ -192,8 +194,8 @@ export interface AgentLimits {
 
 // ── the spec a client may send ──────────────────────────────────────────────
 
-const MARKETS = ['1x2', 'ou25', 'nba_ml', 'nba_spread', 'nba_total'] as const
-const SIDES = ['home', 'draw', 'away', 'over', 'under', 'team', 'opponent'] as const
+const MARKETS = ['1x2', 'ou25', ...VENUE_MARKETS, 'nba_ml', 'nba_spread', 'nba_total'] as const
+const SIDES = ['home', 'draw', 'away', 'over', 'under', 'yes', 'no', 'team', 'opponent'] as const
 const NUMERIC_KEYS: string[] = [
   'season_start',
   'season_end',
@@ -207,6 +209,7 @@ export function cleanSpec(input: unknown): Spec | null {
   if (!input || typeof input !== 'object') return null
   const s = input as Record<string, unknown>
   if (!MARKETS.includes(s.market as never) || !SIDES.includes(s.side as never)) return null
+  if (!marketTakesSide(String(s.market), String(s.side))) return null
 
   const out: Record<string, unknown> = { market: s.market, side: s.side }
   const leagues = Array.isArray(s.leagues)
@@ -708,7 +711,7 @@ export async function saveLabAgent(
   let backtest: SavedBacktest | null = null
   if (!isInplaySpec(spec)) {
     const stats = computeStats(await rawBacktest(spec))
-    backtest = { stats, verdict: verdict(stats), ran_at: new Date().toISOString() }
+    backtest = { stats, verdict: verdict(stats, spec.market), ran_at: new Date().toISOString() }
   }
 
   const theory = input.hypothesis.trim().slice(0, 500)

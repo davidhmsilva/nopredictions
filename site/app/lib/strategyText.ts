@@ -10,7 +10,7 @@
  *  their own format.
  */
 
-import { LEAGUES, RUN_CAP, isNbaMarket, isRelative, type Spec } from './backtest'
+import { LEAGUES, RUN_CAP, VENUE_NO_HISTORY, isNbaMarket, isRelative, isVenueMarket, type Spec } from './backtest'
 import { inplayBuyText, isInplaySpec, type InplaySpec } from './inplaySpec'
 
 export interface StrategyText {
@@ -45,6 +45,14 @@ function bet(s: Spec): string {
       return s.side === 'home' ? 'The home team to win' : s.side === 'away' ? 'The away team to win' : 'The draw'
     case 'ou25':
       return s.side === 'over' ? 'Over 2.5 goals in the match' : 'Under 2.5 goals in the match'
+    case 'ou15':
+      return s.side === 'over' ? 'Over 1.5 goals in the match' : 'Under 1.5 goals in the match'
+    case 'ou35':
+      return s.side === 'over' ? 'Over 3.5 goals in the match' : 'Under 3.5 goals in the match'
+    case 'ou45':
+      return s.side === 'over' ? 'Over 4.5 goals in the match' : 'Under 4.5 goals in the match'
+    case 'btts':
+      return s.side === 'yes' ? 'Both teams to score' : 'Both teams to score: no'
     case 'nba_ml':
       return `The ${s.side} team to win the game (moneyline)`
     case 'nba_spread':
@@ -226,7 +234,9 @@ export function describeSpec(s: Spec, odds: (decimal: number) => string): Strate
     ? 'The NBA'
     : s.leagues?.length
       ? s.leagues.map((c) => LEAGUE_NAME.get(c) ?? c).join(', ')
-      : `Every league we cover — ${LEAGUES.length} European competitions`
+      : isVenueMarket(s.market)
+        ? `Every league with Polymarket history — ${LEAGUES.length - VENUE_NO_HISTORY.length} European competitions`
+        : `Every league we cover — ${LEAGUES.length} European competitions`
 
   const how = nba
     ? 'Backtest only for now: there are no NBA games for an agent to trade on this rule yet.'

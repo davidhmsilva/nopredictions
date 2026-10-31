@@ -23,10 +23,10 @@ def _tag(label, slug):
     return {"label": label, "slug": slug}
 
 
-def _mkt(kind, q, outcomes, tokens, prices, cid):
+def _mkt(kind, q, outcomes, tokens, prices, cid, line=None):
     return {"sportsMarketType": kind, "question": q, "outcomes": json.dumps(outcomes),
             "clobTokenIds": json.dumps(tokens), "outcomePrices": json.dumps(prices),
-            "conditionId": cid, "active": True}
+            "conditionId": cid, "active": True, "line": line}
 
 
 def _event():
@@ -35,9 +35,9 @@ def _event():
         _mkt("moneyline", "Will Chelsea win on 2026-09-12?", ["Yes", "No"], ["c1", "c2"], ["0.20", "0.80"], "0xc"),
         _mkt("moneyline", "Will Arsenal vs. Chelsea end in a draw?", ["Yes", "No"], ["d1", "d2"], ["0.25", "0.75"], "0xd"),
         # Under listed FIRST: the side has to come from the label, not the position.
-        _mkt("totals", "Arsenal vs. Chelsea: O/U 2.5", ["Under", "Over"], ["u", "o"], ["0.48", "0.52"], "0xt"),
+        _mkt("totals", "Arsenal vs. Chelsea: O/U 2.5", ["Under", "Over"], ["u", "o"], ["0.48", "0.52"], "0xt", 2.5),
         # Matches an "O/U 2.5" pattern perfectly and is not a goals market at all.
-        _mkt("total_corners", "Arsenal vs. Chelsea: O/U 2.5 Corners", ["Over", "Under"], ["x", "y"], ["0.5", "0.5"], "0xz"),
+        _mkt("total_corners", "Arsenal vs. Chelsea: O/U 2.5 Corners", ["Over", "Under"], ["x", "y"], ["0.5", "0.5"], "0xz", 2.5),
     ]}
 
 
@@ -526,3 +526,203 @@ def test_team_lists_keep_a_two_club_name_out():
     assert lr.team_lists_fail(spec, "FC Porto", "Sporting CP") == "away team excluded"
     assert lr.team_lists_fail(spec, "Casa Pia AC", "FC Porto") == "home team not in list"
     assert lr.team_lists_fail(spec, None, None) == "home team not in list"
+
+
+# ── both teams to score and the other goal lines ─────────────────────────────
+
+def _goals_sibling():
+    """What Gamma really sends for "- More Markets" (checked live 2026-10-31), with
+    the look-alikes that would trade a different bet if they were read as goals."""
+    t = "Arsenal vs. Chelsea"
+    return {"title": f"{t} - More Markets", "startTime": "2026-09-12T14:00:00Z",
+            "tags": [_tag("EPL", "epl")], "markets": [
+        _mkt("totals", f"{t}: O/U 1.5", ["Over", "Under"], ["o15", "u15"], ["0.7", "0.3"], "0x15", 1.5),
+        # The question says 9.5 and the line says 3.5: the field wins, text is never read.
+        _mkt("totals", f"{t}: O/U 9.5", ["Under", "Over"], ["u35", "o35"], ["0.7", "0.3"], "0x35", 3.5),
+        _mkt("totals", f"{t}: O/U 4.5", ["Over", "Under"], ["o45", "u45"], ["0.1", "0.9"], "0x45", 4.5),
+        _mkt("totals", f"{t}: O/U 2.5", ["Over", "Under"], ["o25", "u25"], ["0.5", "0.5"], "0x25", 2.5),
+        # A line no Lab market covers, and a totals market with none at all.
+        _mkt("totals", f"{t}: O/U 5.5", ["Over", "Under"], ["o55", "u55"], ["0.1", "0.9"], "0x55", 5.5),
+        _mkt("totals", f"{t}: O/U 1.5", ["Over", "Under"], ["bad", "bad2"], ["0.1", "0.9"], "0xbad"),
+        # No listed first: the side comes from the label.
+        _mkt("both_teams_to_score", f"{t}: Both Teams to Score", ["No", "Yes"], ["bn", "by"], ["0.45", "0.55"], "0xb"),
+        # Other families that say the same words, all real sportsMarketTypes.
+        _mkt("both_teams_to_score_first_half", f"{t}: Both Teams to Score 1H", ["Yes", "No"], ["fy", "fn"], ["0.1", "0.9"], "0xf"),
+        _mkt("first_half_totals", f"{t}: 1H O/U 1.5", ["Over", "Under"], ["h1", "h2"], ["0.3", "0.7"], "0xh", 1.5),
+        _mkt("soccer_team_totals", f"{t}: Arsenal O/U 1.5", ["Over", "Under"], ["tt1", "tt2"], ["0.4", "0.6"], "0xtt", 1.5),
+        _mkt("spreads", f"{t}: Spread -1.5", ["Arsenal", "Chelsea"], ["s1", "s2"], ["0.4", "0.6"], "0xs", 1.5),
+    ]}
+
+
+def _main_event():
+    return {**_event(), "startTime": "2026-09-12T14:00:00Z", "tags": [_tag("EPL", "epl")],
+            "markets": [m for m in _event()["markets"] if m["sportsMarketType"] == "moneyline"]}
+
+
+def _goal_view(code="ENG-PR"):
+    merged = lr.fixtures_of([_main_event(), _goals_sibling()])
+    assert len(merged) == 1
+    return lr.EventView(code=code, title=merged[0]["title"],
+                        kickoff=datetime(2026, 9, 12, 14, tzinfo=timezone.utc),
+                        markets=lr.parse_markets(merged[0]))
+
+
+def test_each_goal_market_is_read_from_its_family_and_line_never_the_question():
+    m = lr.parse_markets(_goals_sibling())
+    assert m["ou15"]["over"]["token_id"] == "o15" and m["ou15"]["under"]["token_id"] == "u15"
+    assert m["ou25"]["over"]["token_id"] == "o25"
+    # Under listed first, and a question naming another line: read off the fields.
+    assert m["ou35"]["over"]["token_id"] == "o35" and m["ou35"]["under"]["token_id"] == "u35"
+    assert m["ou45"]["under"]["token_id"] == "u45"
+    tokens = {leg["token_id"] for mk in ("ou15", "ou25", "ou35", "ou45", "btts") for leg in m[mk].values()}
+    for lookalike in ("fy", "fn", "h1", "h2", "tt1", "tt2", "s1", "s2", "o55", "u55", "bad", "bad2"):
+        assert lookalike not in tokens
+
+
+def test_both_teams_to_score_takes_its_side_from_the_label():
+    m = lr.parse_markets(_goals_sibling())
+    assert m["btts"]["yes"]["token_id"] == "by" and m["btts"]["no"]["token_id"] == "bn"
+
+
+def test_a_goal_market_with_labels_it_cannot_read_is_not_a_market():
+    bad = {"markets": [_mkt("both_teams_to_score", "x", ["Over", "Under"], ["a", "b"], ["0.5", "0.5"], "0xb"),
+                       _mkt("totals", "x", ["Yes", "No"], ["c", "d"], ["0.5", "0.5"], "0xt", 1.5)]}
+    m = lr.parse_markets(bad)
+    assert m["btts"] is None and m["ou15"] is None
+
+
+def test_siblings_become_one_fixture_with_every_market():
+    halftime = {"title": "Arsenal vs. Chelsea - Halftime Result", "startTime": "2026-09-12T14:00:00Z",
+                "tags": [_tag("EPL", "epl")],
+                "markets": [_mkt("moneyline", "Will the first half end in a draw?", ["Yes", "No"],
+                                 ["ht1", "ht2"], ["0.4", "0.6"], "0xht")]}
+    merged = lr.fixtures_of([_main_event(), _goals_sibling(), halftime])
+    assert len(merged) == 1
+    assert merged[0]["title"] == "Arsenal vs. Chelsea"
+    m = lr.parse_markets(merged[0])
+    # Both halves of the fixture are there, and the half-time event is not.
+    assert m["draw"]["token_id"] == "d1" and m["btts"]["yes"]["token_id"] == "by"
+
+
+def test_the_same_clubs_on_another_day_stay_another_fixture():
+    return_leg = {**_main_event(), "startTime": "2027-01-12T14:00:00Z"}
+    assert len(lr.fixtures_of([_main_event(), return_leg])) == 2
+
+
+def test_one_bet_per_fixture_covers_every_sibling():
+    """An agent that bet on the moneyline has bet on this game, whichever sibling its
+    bet is on: the ids asked about must span both events."""
+    cids = lr.fixture_condition_ids(_goal_view().markets)
+    for bought in ("0xa", "0xc", "0xd", "0x15", "0x25", "0x35", "0x45", "0xb"):
+        assert bought in cids
+    for never in ("0xf", "0xh", "0xtt", "0xs", "0x55", "0xbad"):
+        assert never not in cids
+
+
+def test_the_cycle_asks_already_in_about_the_whole_fixture(monkeypatch):
+    """A trade on the moneyline stops a BTTS bet on the same game, though the two
+    markets sit on different Polymarket events."""
+    asked = []
+    spec = {"market": "btts", "side": "yes", "leagues": None}
+    never = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not get this far"))  # noqa: E731
+    monkeypatch.setattr(lr, "_conn", lambda: object())
+    monkeypatch.setattr(lr, "running_strategies", lambda c: [{"id": 7, "name": "x", "theory": None, "spec": spec}])
+    monkeypatch.setattr(lr, "fetch_upcoming", lambda now: [_main_event(), _goals_sibling()])
+    monkeypatch.setattr(lr, "already_in", lambda c, sid, cids: asked.append(cids) or True)
+    monkeypatch.setattr(lr, "_fetch_book", never)
+    monkeypatch.setattr(lr, "write_trade", never)
+    assert lr.run_once() == 0
+    assert len(asked) == 1 and "0xa" in asked[0] and "0xb" in asked[0]
+
+
+def test_pick_buys_the_token_the_rule_names():
+    v = _goal_view()
+    for market, side, token, words in (
+        ("btts", "yes", "by", "Both teams to score: Yes"),
+        ("btts", "no", "bn", "Both teams to score: No"),
+        ("ou15", "over", "o15", "Over 1.5"),
+        ("ou15", "under", "u15", "Under 1.5"),
+        ("ou35", "over", "o35", "Over 3.5"),
+        ("ou35", "under", "u35", "Under 3.5"),
+        ("ou45", "over", "o45", "Over 4.5"),
+        ("ou45", "under", "u45", "Under 4.5"),
+    ):
+        leg, label, why = lr.pick({"market": market, "side": side, "leagues": None}, v)
+        assert leg["token_id"] == token and label == f"{words} — Arsenal vs. Chelsea" and why == "ok"
+
+
+def test_a_side_the_market_does_not_have_buys_nothing():
+    v = _goal_view()
+    assert lr.pick({"market": "btts", "side": "over", "leagues": None}, v)[0] is None
+    assert lr.pick({"market": "ou15", "side": "yes", "leagues": None}, v)[0] is None
+    assert lr.pick({"market": "ou15", "side": "home", "leagues": None}, v)[0] is None
+
+
+def test_goal_markets_need_no_sides_unless_the_rule_names_one():
+    v = _goal_view()  # ESPN confirmed nothing
+    assert lr.pick({"market": "btts", "side": "yes", "leagues": None}, v)[0] is not None
+    assert lr.pick({"market": "btts", "side": "yes", "leagues": None, "home_team": "Arsenal"}, v)[0] is None
+    assert lr.pick({"market": "btts", "side": "yes", "leagues": None, "home_avg_gf5_min": 1.6}, v)[0] is None
+
+
+def test_a_league_the_replay_never_saw_is_not_traded_on_these_markets():
+    for code in ("SCO-CH", "SCO-L1", "SCO-L2"):
+        v = _goal_view(code)
+        assert lr.pick({"market": "btts", "side": "yes", "leagues": None}, v)[2] == "league"
+        assert lr.pick({"market": "ou35", "side": "over", "leagues": [code]}, v)[2] == "league"
+        # O/U 2.5 was tested at Pinnacle's close in these leagues, and stays.
+        assert lr.pick({"market": "ou25", "side": "over", "leagues": None}, v)[0] is not None
+
+
+def test_a_favourite_on_a_goals_market_takes_no_games_as_the_replay_does():
+    v = _goal_view()
+    v.home, v.away = "Arsenal", "Chelsea"
+    leg, _, why = lr.pick({"market": "btts", "side": "yes", "leagues": None, "fav_status": "favorite"}, v)
+    assert leg is None and why == "favourite filter"
+
+
+def test_a_rule_about_a_named_team_flattens_to_the_same_goal_market():
+    legs = lr.flat_legs({"market": "btts", "side": "yes", "leagues": None, "team": "Arsenal", "team_avg_gf5_min": 2})
+    assert [leg.get("side") for leg in legs] == ["yes", "yes"]
+    assert legs[0]["home_team"] == "Arsenal" and legs[0]["home_avg_gf5_min"] == 2
+    assert legs[1]["away_team"] == "Arsenal" and legs[1]["away_avg_gf5_min"] == 2
+
+
+def test_the_new_markets_run_and_nba_still_does_not():
+    for market, side in (("btts", "yes"), ("btts", "no"), ("ou15", "over"), ("ou35", "under"), ("ou45", "over")):
+        assert lr.run_blocker({"market": market, "side": side, "leagues": None}) is None
+    assert "NBA" in lr.run_blocker({"market": "nba_ml", "side": "home", "leagues": None})
+    assert "NBA" in lr.run_blocker({"market": "ou55", "side": "over", "leagues": None})
+
+
+def test_settlement_reads_the_winner_flag_of_the_token_bought(monkeypatch):
+    """A No on both teams to score: the token bought decides, whichever outcome the
+    market lists first. A market with no winner yet stays open."""
+    class R:
+        def __init__(self, tokens):
+            self.tokens = tokens
+
+        def json(self):
+            return {"tokens": self.tokens}
+    monkeypatch.setattr(lr.requests, "get", lambda *a, **k: R(
+        [{"token_id": "bn", "winner": True}, {"token_id": "by", "winner": False}]))
+    assert lr._clob_winner("0xb") == {"bn": True, "by": False}
+    monkeypatch.setattr(lr.requests, "get", lambda *a, **k: R(
+        [{"token_id": "bn", "winner": False}, {"token_id": "by", "winner": False}]))
+    assert lr._clob_winner("0xb") is None
+
+
+def test_the_site_and_the_runner_list_the_same_markets_and_leagues():
+    src = open(os.path.join(REPO, "site/app/lib/backtest.ts"), encoding="utf-8").read()
+    listed = re.search(r"VENUE_MARKETS = \[(.*?)\]", src).group(1)
+    assert set(re.findall(r"'(\w+)'", listed)) == lr.GOAL_MARKETS - {"ou25"}
+    held = re.search(r"VENUE_NO_HISTORY = \[(.*?)\]", src).group(1)
+    assert set(re.findall(r"'([\w-]+)'", held)) == lr.NO_VENUE_HISTORY
+
+
+def test_the_replay_reads_each_market_at_its_own_line():
+    sql = open(os.path.join(REPO, "db/085_venue_markets.sql"), encoding="utf-8").read()
+    for market, line in (("ou15", "1.5"), ("ou35", "3.5"), ("ou45", "4.5")):
+        assert f"WHEN v.line = {line} THEN '{market}'" in sql
+        assert lr.LINE_OF[market] == float(line)
+

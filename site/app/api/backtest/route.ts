@@ -13,8 +13,13 @@ import {
   NBA_SEASON_MIN,
   ParseResultSchema,
   RUN_CAP,
+  VENUE_NO_HISTORY,
+  VENUE_SEASON_MAX,
+  VENUE_SEASON_MIN,
   isNbaMarket,
   isRelative,
+  isVenueMarket,
+  marketTakesSide,
   namesItsTeam,
   toSqlSpec,
   type Spec,
@@ -38,6 +43,10 @@ const SYSTEM_PROMPT = `You translate a bettor's plain-English sports theory into
 - Leagues available (use these exact codes in spec.leagues):
 ${LEAGUE_LINES}
 - Markets: "1x2" (home / draw / away, 90-minute result) and "ou25" (over / under 2.5 goals; ~48k matches have this price).
+- Four more football markets have no Pinnacle price, so they are replayed over about a year (season ${VENUE_SEASON_MIN} on) at Polymarket's own prices instead. Use them whenever the idea is about them; never approximate one with "ou25":
+  - "btts" — both teams to score. side: yes | no.
+  - "ou15", "ou35", "ou45" — over / under 1.5, 3.5 and 4.5 goals. side: over | under.
+  These four back no team, so side is never home, away, team or opponent, and fav_status is always 'any'. A named team and every condition on recent games still work ("both teams to score when Liverpool play" → market btts, side yes, team "Liverpool"). ${VENUE_NO_HISTORY.join(', ')} have no prices for these.
 
 ## B. NBA (basketball)
 - 10,006 finished games, seasons ${NBA_SEASON_MIN}-15 through ${NBA_SEASON_MAX}-22 ONLY. There is no NBA data after the ${NBA_SEASON_MAX}-22 season.
@@ -63,7 +72,7 @@ Stakes are flat 1 unit per selection in both datasets.
 
   Both sports:
   - "odds": decimal odds on the backed side at the close (e.g. favorites below 1.50 → {"field":"odds","op":"lte","value":1.5}). For nba_spread / nba_total the price is a fixed 1.909, so this filter is pointless there.
-  - "season": season start year. Football 2012..2025; NBA ${NBA_SEASON_MIN}..${NBA_SEASON_MAX} ("since 2018" → gte 2018).
+  - "season": season start year. Football 2012..2025 (${VENUE_SEASON_MIN}..${VENUE_SEASON_MAX} on btts and the ou15, ou35 and ou45 lines); NBA ${NBA_SEASON_MIN}..${NBA_SEASON_MAX} ("since 2018" → gte 2018).
   - "spread" and "total" below are NBA only.
 
   Every figure about a team's recent games is written with one of four prefixes, saying whose it is:
@@ -97,9 +106,9 @@ Only add filters the user actually implied — do not invent extra conditions.
 
 # What you CANNOT test (set supported=false, explain in "reason", and offer the closest testable variant in "suggestion")
 - Other sports (NFL, MLB, NHL, tennis, college...).
-- Football: Asian handicap, BTTS, correct score, corners, cards, half-time markets, cup ties, European competitions (Champions League etc.), derbies/rivalries, xG conditions, league-table position.
+- Football: Asian handicap, other goal lines (0.5, 5.5 and up), correct score, corners, cards, half-time markets, cup ties, European competitions (Champions League etc.), derbies/rivalries, xG conditions, league-table position.
 - NBA: player props, quarter/half markets, series prices, and ANYTHING about a season after ${NBA_SEASON_MAX}-22.
-- Both: player-level anything (injuries, lineups, trades, coaches), referees, weather, in-play/live conditions, and Polymarket prices.
+- Both: player-level anything (injuries, lineups, trades, coaches), referees, weather, in-play/live conditions, and conditions on how a Polymarket price moved.
 - If the theory is vague but clearly testable in spirit, translate it to the nearest concrete spec and note the approximation in "caveats" instead of refusing.
 - If a theory is about a real NBA market but names a season we do not cover, DO NOT refuse outright — set supported=true, run it over ${NBA_SEASON_MIN}-15..${NBA_SEASON_MAX}-22, and say so plainly in "caveats".
 
@@ -126,6 +135,7 @@ function sanitizeSpec(spec: Spec): { spec: Spec; warnings: string[] } {
   const warnings: string[] = []
   let s = { ...spec }
   const nba = isNbaMarket(s.market)
+  const venue = isVenueMarket(s.market)
 
   // A team named on a rule that already says which end it backs is that end's team.
   if (s.team && (s.side === 'home' || s.side === 'away')) {
@@ -186,7 +196,7 @@ function sanitizeSpec(spec: Spec): { spec: Spec; warnings: string[] } {
     warnings.push('favorite/underdog filter only applies to a side that backs a team — ignored.')
   }
 
-  const [lo, hi] = nba ? [NBA_SEASON_MIN, NBA_SEASON_MAX] : [2012, 2025]
+  const [lo, hi] = nba ? [NBA_SEASON_MIN, NBA_SEASON_MAX] : venue ? [VENUE_SEASON_MIN, VENUE_SEASON_MAX] : [2012, 2025]
   if (s.season_start != null) {
     if (s.season_start > hi) {
       warnings.push(
@@ -273,6 +283,12 @@ export async function POST(request: Request) {
   }
 
   const { spec, warnings } = sanitizeSpec(toSqlSpec(parsed.spec))
+  if (!marketTakesSide(spec.market, spec.side)) {
+    const reason = 'That market cannot be backed that way.'
+    const suggestion = 'Both teams to score is yes or no, a goal line is over or under, and neither backs a team.'
+    await noteIdea({ idea: hypothesis, kind: 'prematch', supported: false, reason, suggestion })
+    return NextResponse.json({ ok: true, supported: false, reason, suggestion, entitlement: use })
+  }
   if (!namesItsTeam(spec)) {
     const reason = 'This rule does not say which team it backs, in every game.'
     const suggestion = 'Name a team, or say the favourite or the underdog.'

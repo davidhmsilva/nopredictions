@@ -49,6 +49,38 @@ export function isNbaMarket(market: string): boolean {
   return (NBA_MARKETS as readonly string[]).includes(market)
 }
 
+// Both teams to score and the other goal lines (db/085). Pinnacle's close has no
+// price for them, so they replay over what takers really paid on Polymarket: about a
+// year, in its own table and SQL function. ⚠️ Mirrored in GOAL_MARKETS in
+// agent/lab_strategy_runner.py.
+export const VENUE_MARKETS = ['btts', 'ou15', 'ou35', 'ou45'] as const
+export const VENUE_SEASON_MIN = 2025
+export const VENUE_SEASON_MAX = 2026
+
+/** Never on Polymarket's board in the history, so these markets have no replay
+ *  there and the runner will not trade them. ⚠️ Mirrored in NO_VENUE_HISTORY. */
+export const VENUE_NO_HISTORY = ['SCO-CH', 'SCO-L1', 'SCO-L2'] as const
+
+export const VENUE_CAVEATS = [
+  "This is about a year at Polymarket's own prices, from October 2025 on, not 14 years at Pinnacle's close. A year says less, whatever the number.",
+  "Each bet is at the last price a taker paid in the hour before kick-off, plus the market's own fee: none until about March 2026, then 3% and now 5% of p × (1 − p). A game with no such price is not counted.",
+  'Smaller leagues joined later: League One, League Two and the National League in March 2026, Belgium and Greece in August 2026. The Scottish Championship, League One and League Two have no history, so an agent on these markets does not trade them.',
+  "This replay charges the fee. An agent's paper record does not yet, on any market, so its record reads a little better than the same bets would have paid.",
+]
+
+export function isVenueMarket(market: string): boolean {
+  return (VENUE_MARKETS as readonly string[]).includes(market)
+}
+
+/** Can this market be backed this way? Only the venue markets are strict, because
+ *  only their function refuses: there is no team to back on a goals market, and no
+ *  "yes" on a goal line. */
+export function marketTakesSide(market: string, side: string): boolean {
+  if (market === 'btts') return side === 'yes' || side === 'no'
+  if (isVenueMarket(market)) return side === 'over' || side === 'under'
+  return side !== 'yes' && side !== 'no'
+}
+
 /** What a rule can ask about a team's recent football games. Each is a filter
  *  under home_ and away_ (columns of bt_features, db/024 and db/083) and under
  *  team_ and opp_ (see flatLegs). ⚠️ Mirrored in TEAM_FIGURES in
@@ -78,9 +110,10 @@ type TeamBound = `${(typeof TEAM_PREFIXES)[number]}_${(typeof TEAM_FIGURES)[numb
 // The spec consumed by run_backtest(spec jsonb) / run_backtest_nba(spec jsonb),
 // once flatLegs has made it flat.
 export interface Spec extends Partial<Record<TeamBound, number | null>> {
-  market: '1x2' | 'ou25' | 'nba_ml' | 'nba_spread' | 'nba_total'
-  /** 'team' and 'opponent' back the team the rule is about, or whoever plays it. */
-  side: 'home' | 'draw' | 'away' | 'over' | 'under' | 'team' | 'opponent'
+  market: '1x2' | 'ou25' | (typeof VENUE_MARKETS)[number] | 'nba_ml' | 'nba_spread' | 'nba_total'
+  /** 'team' and 'opponent' back the team the rule is about, or whoever plays it.
+   *  'yes' and 'no' are both teams to score. */
+  side: 'home' | 'draw' | 'away' | 'over' | 'under' | 'yes' | 'no' | 'team' | 'opponent'
   leagues: string[] | null
   // NBA-only
   game_type?: 'regular' | 'playoff' | null
@@ -153,8 +186,8 @@ export const FILTER_FIELDS: string[] = [
 ]
 
 export const ParsedSpecSchema = z.object({
-  market: z.enum(['1x2', 'ou25', 'nba_ml', 'nba_spread', 'nba_total']),
-  side: z.enum(['home', 'draw', 'away', 'over', 'under', 'team', 'opponent']),
+  market: z.enum(['1x2', 'ou25', ...VENUE_MARKETS, 'nba_ml', 'nba_spread', 'nba_total']),
+  side: z.enum(['home', 'draw', 'away', 'over', 'under', 'yes', 'no', 'team', 'opponent']),
   leagues: z.array(z.string()),          // [] = all leagues; ignored for NBA
   game_type: z.enum(['regular', 'playoff', 'any']),  // NBA only
   fav_status: z.enum(['favorite', 'underdog', 'any']),
@@ -221,6 +254,9 @@ export interface RawBacktest {
   last_match: string | null
   seasons: { season: number; n: number; wins: number; pnl: number }[]
   monthly: { month: string; n: number; pnl: number }[]
+  /** Venue markets only: the same bets at the book's mid. A ceiling, never a result:
+   *  nobody buys at the mid. */
+  pnl_mid?: number
 }
 
 /** The result of a rule's legs as one result. They are different bets on different
@@ -255,6 +291,7 @@ export function mergeBacktests(raws: RawBacktest[]): RawBacktest {
     n_open: nOpen,
     pnl_open: nOpen ? sum((r) => r.pnl_open) : null,
     clv_avg: nOpen ? sum((r) => (r.clv_avg ?? 0) * r.n_open) / nOpen : null,
+    pnl_mid: raws.some((r) => r.pnl_mid != null) ? sum((r) => r.pnl_mid) : undefined,
     first_match: edge(raws.map((r) => r.first_match), (a, b) => (new Date(b) < new Date(a) ? b : a)),
     last_match: edge(raws.map((r) => r.last_match), (a, b) => (new Date(b) > new Date(a) ? b : a)),
     seasons: Array.from(seasons.values()).sort((a, b) => a.season - b.season),
@@ -286,6 +323,8 @@ export interface BacktestStats {
   clvPct: number | null
   yieldOpenPct: number | null
   nOpen: number
+  /** Venue markets: the return at the mid, a ceiling. Null elsewhere. */
+  midYieldPct: number | null
   maxDrawdown: number
   firstMatch: string | null
   lastMatch: string | null
@@ -324,6 +363,7 @@ export function computeStats(raw: RawBacktest): BacktestStats {
     clvPct: raw.clv_avg != null ? raw.clv_avg * 100 : null,
     yieldOpenPct: raw.n_open > 0 && raw.pnl_open != null ? (raw.pnl_open / raw.n_open) * 100 : null,
     nOpen: raw.n_open,
+    midYieldPct: n > 0 && raw.pnl_mid != null ? (raw.pnl_mid / n) * 100 : null,
     maxDrawdown: maxDD,
     firstMatch: raw.first_match,
     lastMatch: raw.last_match,
@@ -337,7 +377,8 @@ export type VerdictCode =
   | 'SIGNIFICANTLY_NEGATIVE'
   | 'NO_EDGE'
 
-export function verdict(s: BacktestStats): { code: VerdictCode; label: string; detail: string } {
+export function verdict(s: BacktestStats, market?: string): { code: VerdictCode; label: string; detail: string } {
+  const venue = market != null && isVenueMarket(market)
   if (s.n === 0) {
     return {
       code: 'NO_MATCHES',
@@ -348,7 +389,7 @@ export function verdict(s: BacktestStats): { code: VerdictCode; label: string; d
   if (s.n < 200) {
     return {
       code: 'INSUFFICIENT_SAMPLE',
-      label: 'INSUFFICIENT SAMPLE',
+      label: venue ? 'A RECORD, NOT A RESULT' : 'INSUFFICIENT SAMPLE',
       detail: `Only ${s.n} selections — we require at least 200 before drawing any conclusion. Numbers below are descriptive only.`,
     }
   }
@@ -356,22 +397,25 @@ export function verdict(s: BacktestStats): { code: VerdictCode; label: string; d
     return {
       code: 'EDGE_FOUND',
       label: 'EDGE FOUND — HISTORICALLY PROFITABLE',
-      detail:
-        'Positive yield against the Pinnacle closing line, statistically significant at p < 0.05. Caution: a single test can still be luck or selection bias — verify out of sample before trusting it.',
+      detail: venue
+        ? "Positive yield at Polymarket's own prices over about a year, statistically significant at p < 0.05. Caution: one year and a single test can still be luck or selection bias — verify out of sample before trusting it."
+        : 'Positive yield against the Pinnacle closing line, statistically significant at p < 0.05. Caution: a single test can still be luck or selection bias — verify out of sample before trusting it.',
     }
   }
   if (s.pValue != null && s.pValue < 0.05 && s.yieldPct < 0) {
     return {
       code: 'SIGNIFICANTLY_NEGATIVE',
       label: 'NO EDGE — SIGNIFICANTLY UNPROFITABLE',
-      detail:
-        'This angle loses money at a statistically significant rate. Note: betting the opposite is not automatically profitable — the bookmaker margin cuts both ways.',
+      detail: venue
+        ? 'This angle loses money at a statistically significant rate over about a year. Note: betting the opposite is not automatically profitable — the spread and the fee cut both ways.'
+        : 'This angle loses money at a statistically significant rate. Note: betting the opposite is not automatically profitable — the bookmaker margin cuts both ways.',
     }
   }
   return {
     code: 'NO_EDGE',
     label: 'NO EDGE — HYPOTHESIS REJECTED',
-    detail:
-      'The result is indistinguishable from the bookmaker margin. The market already prices this in.',
+    detail: venue
+      ? 'Over about a year at these prices, the result is indistinguishable from what the spread and the fee cost.'
+      : 'The result is indistinguishable from the bookmaker margin. The market already prices this in.',
   }
 }

@@ -54,7 +54,9 @@ export interface Featured {
  *  made money and probably should not be trusted, one that made money and
  *  the price agreed, one that loses heavily, and three that are the margin.
  *  The last three show what a rule can ask about a team's recent games, and they
- *  are the way to see that with no model call; none of them made money. */
+ *  are the way to see that with no model call; none of them made money. The last
+ *  four show the markets replayed at Polymarket's own prices: one up, one that is a
+ *  record rather than a result (90 bets), one the margin, one that loses. */
 export const FEATURED: Featured[] = [
   {
     id: 'draws-serie-b',
@@ -100,6 +102,26 @@ export const FEATURED: Featured[] = [
     id: 'under-solid-defences',
     title: 'Under 2.5 when both defences have been solid',
     spec: { ...base('ou25', 'under', null), home_avg_ga5_max: 0.8, away_avg_ga5_max: 0.8 },
+  },
+  {
+    id: 'btts-both-scoring',
+    title: 'Both teams to score, when both have been scoring',
+    spec: { ...base('btts', 'yes', null), home_avg_gf5_min: 1.6, away_avg_gf5_min: 1.6 },
+  },
+  {
+    id: 'no-btts-solid-defences',
+    title: 'No to both teams scoring, when both defences have been solid',
+    spec: { ...base('btts', 'no', null), home_avg_ga5_max: 0.8, away_avg_ga5_max: 0.8 },
+  },
+  {
+    id: 'over-1-5',
+    title: 'Over 1.5 goals in every game',
+    spec: base('ou15', 'over', null),
+  },
+  {
+    id: 'over-3-5-high-scoring',
+    title: 'Over 3.5 when both teams have been in high-scoring games',
+    spec: { ...base('ou35', 'over', null), home_avg_tg5_min: 3, away_avg_tg5_min: 3 },
   },
 ]
 

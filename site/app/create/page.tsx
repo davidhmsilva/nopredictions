@@ -37,6 +37,7 @@ import { LabResult, type LabApiResult, type Kept } from './LabResult'
  *  and the last is a live rule. */
 const IDEA_EXAMPLES = [
   'Back the favourite after it lost its last game',
+  'Both teams to score when both have been scoring',
   'Bet against Manchester United when they have gone 3 games without a win',
   'Under 2.5 goals when both teams have conceded under a goal a game in their last 5',
   'Home teams in the Bundesliga with strong home form, unbeaten in 5',
@@ -183,7 +184,7 @@ export default function CreatePage() {
 
   async function runBacktest(theory: string) {
     setStatus('Writing your strategy…')
-    timers.current.push(setTimeout(() => setStatus('Testing it over 101,469 real games…'), 3500))
+    timers.current.push(setTimeout(() => setStatus('Testing it on real games…'), 3500))
     try {
       const res = await fetch('/api/backtest', {
         method: 'POST',
@@ -334,7 +335,7 @@ export default function CreatePage() {
       <div className="tp-page lx-page" ref={topRef}>
         <ToolHead eyebrow="CREATE AN AGENT" title="Describe your idea. Get an agent that trades it.">
           Say the bet you believe in, in your own words. The AI asks what it leaves open, writes it as
-          a strategy with exact rules, shows what it would have made over 14 years of real odds, and
+          a strategy with exact rules, shows what it would have made on up to 14 years of real odds, and
           deploys it as an agent that paper-trades every game that fits.
         </ToolHead>
 
@@ -544,8 +545,10 @@ export default function CreatePage() {
             <li>
               A pre-match strategy is replayed over 101,469 league matches in 22 leagues, 2012 to
               January 2026, each bet at Pinnacle&apos;s closing price — the sharpest price there is,
-              and the hardest to beat. A live rule cannot be replayed, so its record starts when you
-              deploy it.
+              and the hardest to beat. Both teams to score and over/under 1.5, 3.5 and 4.5 have no such
+              close, so they are replayed over about a year at Polymarket&apos;s own prices, the last a
+              taker paid before kick-off plus the fee. A live rule cannot be replayed, so its record
+              starts when you deploy it.
             </li>
             <li>
               A deployed agent places one paper bet of 1 unit per game that fits, at Polymarket&apos;s
