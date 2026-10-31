@@ -1,9 +1,11 @@
 /** One agent: read its record, switch it on or off, publish it, rename it, or
  *  archive it. The owner check lives in every query in lib/agents, not here. */
 
+import { revalidateTag } from 'next/cache'
 import { NextResponse } from 'next/server'
 import { currentUser } from '../../../lib/supabaseAuth'
 import { archiveAgent, getAgent, updateAgent, type RunStatus } from '../../../lib/agents'
+import { MARKETPLACE_TAG } from '../../../lib/marketplaceCache'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +57,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
   try {
     const r = await updateAgent(user.id, id, patch)
+    if (r.ok) revalidateTag(MARKETPLACE_TAG)
     return NextResponse.json(r, { status: r.ok ? 200 : r.status })
   } catch (err) {
     console.error('/api/agents PATCH failed', err)
@@ -69,6 +72,7 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
   if (!id) return NextResponse.json({ ok: false, error: 'No such agent.' }, { status: 404 })
   try {
     const r = await archiveAgent(user.id, id)
+    if (r.ok) revalidateTag(MARKETPLACE_TAG)
     return NextResponse.json(r, { status: r.ok ? 200 : r.status })
   } catch (err) {
     console.error('/api/agents DELETE failed', err)

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { AppShell } from '../components/AppShell'
-import { listPublished } from '../lib/agents'
 import { within } from '../lib/deadline'
+import { publishedAgents } from '../lib/marketplaceCache'
 import { MarketplaceView } from './MarketplaceView'
 
 export const metadata: Metadata = {
@@ -21,7 +21,7 @@ export default async function MarketplacePage() {
   return (
     <AppShell>
       <div className="np-wrap">
-        <MarketplaceView initial={await within(listPublished(), SERVER_WAIT_MS)} />
+        <MarketplaceView initial={await within(publishedAgents(), SERVER_WAIT_MS)} />
       </div>
     </AppShell>
   )

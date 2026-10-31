@@ -1033,6 +1033,32 @@ def _final_goals_api(fixture_ids: list[int]) -> dict[int, int]:
     return out
 
 
+# Three days on, an untraded row with no later poll and no final will not get them.
+# Closed with no outcome, a few thousand per run so the first runs stay light.
+SETTLE_GIVE_UP_DAYS = 3
+_GIVE_UP_BATCH = 5000
+
+
+def _close_hopeless_rows(conn) -> int:
+    """Rows that can never settle were re-read every 30 minutes, for ever: 32,635
+    over 859 fixtures by 2026-10-31, the oldest from August, none of them a trade.
+    `no_api` is the first-half arms' tag for the same state. Nothing is invented:
+    goal_before_ft stays NULL, so no yield, label or calibration row changes."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE pressure_observations
+                  SET final_goals_source = 'no_api', settled_at = now()
+                WHERE id IN (SELECT id FROM pressure_observations
+                              WHERE settled_at IS NULL
+                                AND observed_at < now() - (%s * interval '1 day')
+                                AND entered IS NOT TRUE
+                                AND paper_trade_id IS NULL
+                              LIMIT %s)""",
+            (SETTLE_GIVE_UP_DAYS, _GIVE_UP_BATCH),
+        )
+        return cur.rowcount
+
+
 def settle(conn) -> int:
     """Fill in both horizons for rows whose fixture has moved on.
 
@@ -1041,6 +1067,10 @@ def settle(conn) -> int:
     score, and that comes from api-football, never from our own tape: see
     `_final_goals_api` for the flap that made the tape maximum unsafe.
     """
+    closed = _close_hopeless_rows(conn)
+    if closed:
+        log.info(f"closed {closed} rows with no outcome after {SETTLE_GIVE_UP_DAYS} days")
+
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """SELECT id, fixture_id, minute, goals_total, target_line,
@@ -1064,7 +1094,9 @@ def settle(conn) -> int:
                  FROM pressure_observations
                 WHERE fixture_id = ANY(%s)
                 ORDER BY fixture_id, minute""",
-            ([r["fixture_id"] for r in pending],),
+            # Each fixture once: a 32k-element array with repeats made the planner
+            # expect the whole table.
+            (sorted({r["fixture_id"] for r in pending}),),
         )
         series: dict[int, list[tuple[int, int]]] = {}
         for fid, minute, goals in cur.fetchall():

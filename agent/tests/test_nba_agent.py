@@ -461,3 +461,20 @@ def test_a_fresh_odds_api_line_beats_draftkings_and_a_stale_one_does_not():
     assert na.pick_sharp(pin, 300, None, 45) == (pin, False)     # forced only, never edge
     assert na.pick_sharp(None, None, dk, None) == (dk, True)
     assert na.pick_sharp(None, None, None, 45) == (None, False)
+
+
+def test_the_snapshot_read_asks_by_game_not_the_whole_table():
+    """It scanned nba_candidates every 5 minutes, 64 MB a call on 2026-10-31."""
+    seen = {}
+
+    class Cur:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None): seen.update(sql=sql, params=params)
+        def fetchall(self): return [("g1", "t1")]
+
+    class Conn:
+        def cursor(self): return Cur()
+
+    assert na.last_snapshot_written(Conn(), ["g1", "g2"]) == {"g1": "t1"}
+    assert "game_slug = ANY(%s)" in seen["sql"] and seen["params"] == (["g1", "g2"],)

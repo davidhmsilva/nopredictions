@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next'
-import { listPublished } from './lib/agents'
 import { within } from './lib/deadline'
+import { publishedAgents } from './lib/marketplaceCache'
 
 /** Every page worth finding: home, Create, the Marketplace and every agent
  *  published on it, pricing and the legal pages. A user's own agents
@@ -31,7 +31,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     page('/refunds', 'yearly', 0.1),
   ]
 
-  const published = await within(listPublished(), 20_000)
+  const published = await within(publishedAgents(), 20_000)
   const agents: MetadataRoute.Sitemap = (published ?? []).map((a) =>
     page(`/marketplace/${a.id}`, 'daily', 0.7, new Date(a.last_bet_at ?? a.published_at ?? a.created_at))
   )

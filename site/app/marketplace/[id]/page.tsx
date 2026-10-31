@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
 import { AppShell } from '../../components/AppShell'
-import { getPublished } from '../../lib/agents'
 import { within } from '../../lib/deadline'
+import { publishedAgent } from '../../lib/marketplaceCache'
 import { PublicAgent } from './PublicAgent'
 
 /** Re-rendered at most once a minute, on demand: an agent's page is shared as
@@ -20,7 +20,7 @@ function idOf(raw: string): number | null {
 
 // One read for the metadata and the page. Wrapped, because `within` answers
 // null when time runs out, and only a real "no such agent" may become a 404.
-const load = cache((id: number) => within(getPublished(id).then((detail) => ({ detail })), SERVER_WAIT_MS))
+const load = cache((id: number) => within(publishedAgent(id).then((detail) => ({ detail })), SERVER_WAIT_MS))
 
 export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
   const id = idOf(params.id)

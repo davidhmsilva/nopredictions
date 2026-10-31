@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 import { AppShell } from './components/AppShell'
 import { HomeView } from './components/HomeView'
-import { listPublished } from './lib/agents'
 import { within } from './lib/deadline'
+import { publishedAgents } from './lib/marketplaceCache'
 
 export const metadata: Metadata = { alternates: { canonical: '/' } }
 
@@ -18,7 +18,7 @@ const SERVER_WAIT_MS = 3000
 export default async function HomePage() {
   return (
     <AppShell>
-      <HomeView initial={await within(listPublished(), SERVER_WAIT_MS)} />
+      <HomeView initial={await within(publishedAgents(), SERVER_WAIT_MS)} />
     </AppShell>
   )
 }
