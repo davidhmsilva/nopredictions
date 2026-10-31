@@ -120,6 +120,11 @@ Public, reachable without an account. `lib/agents.ts` (`listPublished`, `getPubl
 - **Ranking** defaults to P&L, because that is what someone came to see, and every
   card carries its sample, "Early record" under 200 settled bets, and what history
   said. A lucky fortnight must not be able to pass for a result.
+- **It has to survive the database.** The public reads go through
+  `lib/marketplaceCache.ts` (Next's Data Cache, 2 minutes, stale while revalidating), so
+  once loaded the Marketplace outlives a stall. Publish, unpublish, rename and archive
+  drop that cache at once (`revalidateTag`). Pages wait at most a few seconds for it
+  (`lib/deadline.ts`), then the browser asks.
 
 ⚠️ **`strategies.name` is UNIQUE across every account and must stay so.** The hand-written
 agents find their own row with `WHERE name = %s` (nfl_agent.py, pressure_agent.py,
@@ -183,6 +188,7 @@ site/                                Next.js 14, Vercel (Root Directory = site)
     strategyText.ts                  a spec in words
     plan.ts · planTerms.ts           quota + limits (planTerms is client-safe)
     display.ts                       odds and dates as text, in the reader's own format
+    marketplaceCache.ts              the public reads, kept through a stalled database
     deadline.ts                      a server render never waits long for the database
     supabaseBrowser.ts · supabaseAuth.ts  ⚠️ NEVER merge: the server half imports next/headers
 agent/                               Python: the runners and the operator's own agents
@@ -250,9 +256,10 @@ never go on the Marketplace. Their record and the findings behind them are in
 `docs/research_log.md`. They are also where the agents everyone else can build come
 from: a finding only reaches users when it becomes something Create can express.
 
-The agents the operator built with Create itself (`source = 'lab'`, nine of them on
-2026-10-30) came from `close_history_scan.py` and are the natural first listings on the
-Marketplace. None is published yet: that is the operator's call.
+The nine agents with `source = 'lab'` on the operator's account came from
+`close_history_scan.py`, not from Create, so they have no stored backtest: their history
+is in their words. They are the Marketplace's first listings, published on 2026-10-30
+at the operator's request, under the name NOPREDICTIONS.
 
 ---
 

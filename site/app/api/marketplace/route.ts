@@ -6,14 +6,14 @@
  */
 
 import { NextResponse } from 'next/server'
-import { listPublished } from '../../lib/agents'
+import { publishedAgents } from '../../lib/marketplaceCache'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
     return NextResponse.json(
-      { ok: true, agents: await listPublished() },
+      { ok: true, agents: await publishedAgents() },
       // A minute is plenty: a record moves when a game settles, not by the second.
       { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } },
     )

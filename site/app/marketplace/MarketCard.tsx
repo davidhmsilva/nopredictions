@@ -59,7 +59,7 @@ export function MarketCard({ a, relation }: { a: AgentSummary; relation: Relatio
               <span className="np-num">{bt.n.toLocaleString('en-US')}</span> past bets
             </span>
           ) : (
-            <span>{live ? 'Live rule — no replay, the record is the test' : 'No backtest'}</span>
+            <span>{live ? 'Live rule — no replay, the record is the test' : 'What history said is on its page'}</span>
           )}
           <span>
             {settled > 0 && settled < VERDICT_N ? 'Early record · ' : ''}
