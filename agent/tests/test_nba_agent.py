@@ -375,3 +375,20 @@ def test_espn_finals_keeps_only_finished_games_keyed_on_the_pair(monkeypatch):
     finals = na._espn_finals([datetime(2026, 10, 22, 2, 0, tzinfo=timezone.utc)])
     assert finals == {frozenset(("Los Angeles Clippers", "Utah Jazz")):
                       {"Los Angeles Clippers": 112, "Utah Jazz": 108}}
+
+
+def test_the_snapshot_read_asks_by_game_not_the_whole_table():
+    """It scanned nba_candidates every 5 minutes, 64 MB a call on 2026-10-31."""
+    seen = {}
+
+    class Cur:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None): seen.update(sql=sql, params=params)
+        def fetchall(self): return [("g1", "t1")]
+
+    class Conn:
+        def cursor(self): return Cur()
+
+    assert na.last_snapshot_written(Conn(), ["g1", "g2"]) == {"g1": "t1"}
+    assert "game_slug = ANY(%s)" in seen["sql"] and seen["params"] == (["g1", "g2"],)

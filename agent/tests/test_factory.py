@@ -181,3 +181,58 @@ def test_next_goal_label_reads_the_line_and_the_match(monkeypatch):
     monkeypatch.setattr(uv.pd, "read_sql_query", _sql_returning([[row[c] for c in _LIVE_COLS]]))
     df = uv.load_next_goal(None, mode="live")
     assert df["label"].tolist() == ["Over 1.5 (next goal) — A vs. B"]
+
+
+# ── settling: read only what can settle ──────────────────────────────────────
+
+class _SettleConn:
+    pass
+
+
+def _settle_setup(monkeypatch, frame, ready, recorded):
+    from factory import registry, runner
+
+    trades = [dict(id=i, universe="t_inplay", fixture=f"af:{fx}", source_row_id=row, stake=1.0,
+                   spec={"exit": {"type": "hold"}}) for i, fx, row in frame]
+    monkeypatch.setattr(uv.UNIVERSES["t_inplay"], "source_table", "pressure_observations")
+    monkeypatch.setattr(registry, "pending", lambda conn: trades)
+    monkeypatch.setattr(registry, "ready_rows", lambda conn, table, ids: set(ready))
+    monkeypatch.setattr(registry, "settle_trade", lambda conn, tid, res, ret, st: recorded.append((tid, res)))
+    monkeypatch.setattr(registry, "refresh_forward", lambda conn: None)
+    monkeypatch.setattr(registry, "apply_promotion", lambda conn: [])
+    return runner
+
+
+def test_a_trade_with_no_outcome_does_not_load_its_fixture(monkeypatch):
+    """Trades that never got an outcome pulled their whole fixtures off the tape
+    every 10 minutes: 214 MB a call on 2026-10-31. If nothing is ready, nothing loads."""
+    loads, recorded = [], []
+    runner = _settle_setup(monkeypatch, [(1, 7, 100), (2, 8, 200)], ready=[], recorded=recorded)
+    monkeypatch.setattr(uv.UNIVERSES["t_inplay"], "load", lambda *a, **k: loads.append(k), raising=False)
+    assert runner.settle(_SettleConn()) == 0
+    assert loads == [] and recorded == []
+
+
+def test_only_the_ready_fixtures_are_loaded(monkeypatch):
+    loads, recorded = [], []
+    runner = _settle_setup(monkeypatch, [(1, 7, 100), (2, 8, 200)], ready=[100], recorded=recorded)
+
+    def load(conn, mode, fixture_ids, keep_rows):
+        loads.append((mode, fixture_ids, keep_rows))
+        return pd.DataFrame({"source_row_id": [100], "fixture": ["af:7"], "ts": pd.to_datetime(["2026-10-30"], utc=True),
+                             "minute": [80.0], "ask": [0.5], "bid": [0.48], "won": [1.0], "token_id": ["t"]})
+
+    monkeypatch.setattr(uv.UNIVERSES["t_inplay"], "load", load, raising=False)
+    assert runner.settle(_SettleConn()) == 1
+    assert loads == [("settle", [7], {100})]
+    assert recorded == [(1, "won")]
+
+
+def test_the_row_a_trade_was_bought_on_survives_the_minute_dedupe():
+    """The ESPN feed repeats minutes. A bot can enter on the second poll of a minute,
+    and the settle read then dropped that row: the trade could never close."""
+    df = pd.DataFrame({"source_row_id": [1, 2, 3], "fixture": ["af:7"] * 3, "minute": [80, 80, 80],
+                       "ts": ["2026-10-30T20:00:00Z", "2026-10-30T20:00:40Z", "2026-10-30T20:00:50Z"]})
+    assert uv._finish(df.copy(), dedupe=["fixture", "minute"])["source_row_id"].tolist() == [1]
+    kept = uv._finish(df.copy(), dedupe=["fixture", "minute"], keep_rows={2})
+    assert kept["source_row_id"].tolist() == [1, 2]
