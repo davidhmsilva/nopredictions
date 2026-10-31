@@ -52,6 +52,11 @@ case "$job" in
   stage-a)
     cd "$INGEST" && exec python stage_a_football_data.py --current-season --refresh --continue-on-error \
       >> stage_a_cron.log 2>&1 ;;
+  stage-j)
+    # Polymarket only, and only what the replay reads (db/085). 5 days of catalog; a
+    # fixture waiting for its result in `matches` is retried for 21 days.
+    cd "$INGEST" && exec python stage_j_venue_history.py --pm-catalog --recent-days 5 --link \
+      --prices --venue polymarket --linked-only >> stage_j_cron.log 2>&1 ;;
   nfl-agent)
     exec python nfl_agent.py --once >> nfl_agent.log 2>&1 ;;
   unl-agent)
