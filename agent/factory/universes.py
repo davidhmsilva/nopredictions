@@ -75,6 +75,16 @@ def _won_bool(s: pd.Series) -> pd.Series:
     return s.map({True: 1.0, False: 0.0}).astype(float)
 
 
+# When a row's outcome is known, per tape. The loaders filter on it, and the runner
+# asks it first, so a trade with no outcome yet does not load its whole fixture.
+SETTLED_SQL = {
+    "pressure_observations": "settled_at IS NOT NULL AND goal_before_ft IS NOT NULL",
+    "ht_pressure_observations": "goal_before_ht IS NOT NULL",
+    "fav_ht_observations": "fav_led_at_ht IS NOT NULL",
+    "settled_market_observations": "pm_winner IS NOT NULL",
+}
+
+
 def _filter(mode: str, live_minutes: int, fixture_ids, settled_sql: str) -> tuple[str, list]:
     if mode == "backtest":
         return f" AND {settled_sql}", []
@@ -85,14 +95,21 @@ def _filter(mode: str, live_minutes: int, fixture_ids, settled_sql: str) -> tupl
     raise ValueError(mode)
 
 
-def _finish(df: pd.DataFrame, dedupe: Optional[list] = None) -> pd.DataFrame:
+def _finish(df: pd.DataFrame, dedupe: Optional[list] = None, keep_rows=None) -> pd.DataFrame:
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     for c in ("ask", "bid", "depth", "minute"):
         if c in df:
             df[c] = _flt(df[c])
     df = df.sort_values(["fixture", "ts"], kind="mergesort")
     if dedupe:
-        df = df.drop_duplicates(dedupe, keep="first")
+        # keep_rows: the row a trade was bought on must survive. A live read only
+        # sees the last few minutes, so a bot can enter on the second poll of a
+        # minute (the ESPN feed repeats minutes), and dropping that row here left
+        # the trade unable to settle, ever: 74 of them by 2026-10-31.
+        dup = df.duplicated(dedupe, keep="first")
+        if keep_rows:
+            dup &= ~df["source_row_id"].isin(keep_rows)
+        df = df[~dup]
     return df.reset_index(drop=True)
 
 
@@ -107,10 +124,9 @@ _STATS_SQL = """
 
 # ── in-play: real Polymarket prices ──────────────────────────────────────────
 
-def load_next_goal(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> pd.DataFrame:
+def load_next_goal(conn, mode="backtest", live_minutes=4, fixture_ids=None, keep_rows=None) -> pd.DataFrame:
     """The 'one more goal' over line (goals + 0.5, full match) at every minute."""
-    extra, params = _filter(mode, live_minutes, fixture_ids,
-                            "settled_at IS NOT NULL AND goal_before_ft IS NOT NULL")
+    extra, params = _filter(mode, live_minutes, fixture_ids, SETTLED_SQL["pressure_observations"])
     df = pd.read_sql_query(f"""
         SELECT id AS source_row_id, fixture_id, observed_at AS ts, minute, home_goals, away_goals,
                goals_total, league, event_title, pre_over25, pressure_index,
@@ -132,12 +148,12 @@ def load_next_goal(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> p
     # with no live match in the window (7,729 times, 09-28 → 10-05).
     df["label"] = ("Over " + (_flt(df["goals_total"]) + 0.5).map("{:g}".format).astype(str)
                    + " (next goal) — " + df["event_title"].fillna("?"))
-    return _finish(df, dedupe=["fixture", "minute"])
+    return _finish(df, dedupe=["fixture", "minute"], keep_rows=keep_rows)
 
 
-def load_ht_over05(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> pd.DataFrame:
+def load_ht_over05(conn, mode="backtest", live_minutes=4, fixture_ids=None, keep_rows=None) -> pd.DataFrame:
     """1st Half O/U 0.5 — over, while the match is still 0-0."""
-    extra, params = _filter(mode, live_minutes, fixture_ids, "goal_before_ht IS NOT NULL")
+    extra, params = _filter(mode, live_minutes, fixture_ids, SETTLED_SQL["ht_pressure_observations"])
     df = pd.read_sql_query(f"""
         SELECT id AS source_row_id, fixture_id, observed_at AS ts, minute, league, event_title,
                pre_over25, pressure_now, opening_pressure, pressure_index, {_STATS_SQL},
@@ -151,12 +167,12 @@ def load_ht_over05(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> p
     df["fair_gap"] = _flt(df["fair_base"]) - _flt(df["ask"])
     df["won"] = _won_bool(df["won_raw"])
     df["label"] = "1H Over 0.5 at 0-0 — " + df["event_title"].fillna("?")
-    return _finish(df, dedupe=["fixture", "minute"])
+    return _finish(df, dedupe=["fixture", "minute"], keep_rows=keep_rows)
 
 
-def load_fav_ht(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> pd.DataFrame:
+def load_fav_ht(conn, mode="backtest", live_minutes=4, fixture_ids=None, keep_rows=None) -> pd.DataFrame:
     """'<Pre-match favourite> leading at half time?' — YES."""
-    extra, params = _filter(mode, live_minutes, fixture_ids, "fav_led_at_ht IS NOT NULL")
+    extra, params = _filter(mode, live_minutes, fixture_ids, SETTLED_SQL["fav_ht_observations"])
     df = pd.read_sql_query(f"""
         SELECT id AS source_row_id, fixture_id, observed_at AS ts, minute, league, event_title,
                home_goals, away_goals, goals_total, fav_side, fav_team, fav_prob,
@@ -175,12 +191,12 @@ def load_fav_ht(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> pd.D
     df["fair_gap"] = _flt(df["fair_base"]) - _flt(df["ask"])
     df["won"] = _won_bool(df["won_raw"])
     df["label"] = df["fav_team"].fillna("favourite") + " leading at HT — " + df["event_title"].fillna("?")
-    return _finish(df, dedupe=["fixture", "minute"])
+    return _finish(df, dedupe=["fixture", "minute"], keep_rows=keep_rows)
 
 
-def load_settled(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> pd.DataFrame:
+def load_settled(conn, mode="backtest", live_minutes=4, fixture_ids=None, keep_rows=None) -> pd.DataFrame:
     """Markets the score has already decided, still quoted below 1."""
-    extra, params = _filter(mode, live_minutes, fixture_ids, "pm_winner IS NOT NULL")
+    extra, params = _filter(mode, live_minutes, fixture_ids, SETTLED_SQL["settled_market_observations"])
     df = pd.read_sql_query(f"""
         SELECT id AS source_row_id, fixture_id, observed_at AS ts, minute, league,
                pm_title AS event_title, question, phase, rule, mins_since_first_seen,
@@ -194,7 +210,7 @@ def load_settled(conn, mode="backtest", live_minutes=4, fixture_ids=None) -> pd.
     df["fixture"] = "af:" + df["fixture_id"].astype(str) + ":" + df["condition_id"].astype(str)
     df["won"] = _won_bool(df["won_raw"])
     df["label"] = df["question"].fillna("?") + " — " + df["event_title"].fillna("?")
-    return _finish(df, dedupe=["fixture", "minute"])
+    return _finish(df, dedupe=["fixture", "minute"], keep_rows=keep_rows)
 
 
 # ── pre-match: sharp-price proxies ───────────────────────────────────────────

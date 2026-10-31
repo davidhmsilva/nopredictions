@@ -28,7 +28,7 @@ import db_txn                                   # noqa: E402
 
 from .engine import bh_qvalues                 # noqa: E402
 from .spec import spec_hash                     # noqa: E402
-from .universes import UNIVERSES                # noqa: E402
+from .universes import SETTLED_SQL, UNIVERSES   # noqa: E402
 
 MAX_PAPER = 200            # live strategies at once; the rest wait as candidates
 EXPLORE_PER_UNIVERSE = 10
@@ -169,6 +169,14 @@ def pending(conn) -> list:
                          FROM factory_trades t JOIN factory_strategies s ON s.id = t.strategy_id
                         WHERE t.settled_at IS NULL AND t.entry_at < now() - interval '15 minutes'""")
         return [dict(r) for r in cur.fetchall()]
+
+
+def ready_rows(conn, table: str, ids: list) -> set:
+    """Which of these tape rows have an outcome. Primary-key reads, so a trade
+    waiting on one costs almost nothing however long it waits."""
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT id FROM {table} WHERE id = ANY(%s) AND {SETTLED_SQL[table]}", (ids,))
+        return {int(r[0]) for r in cur.fetchall()}
 
 
 def settle_trade(conn, tid: int, result: str, ret: float, stake: float) -> None:

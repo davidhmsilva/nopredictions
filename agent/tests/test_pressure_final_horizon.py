@@ -153,3 +153,23 @@ def test_a_tape_final_never_overwrites_anything():
     tape_update = body[body.index("final_goals_source = 'poll'\n"):]
     tape_update = tape_update[:tape_update.index('"""')]
     assert "AND o.final_goals IS NULL" in tape_update
+
+
+# ── rows that can never settle ───────────────────────────────────────────────
+
+def test_a_hopeless_row_is_closed_without_inventing_an_outcome():
+    body = _body("_close_hopeless_rows")
+    assert "final_goals_source = 'no_api', settled_at = now()" in body
+    for outcome in ("goal_before_ft", "final_goals =", "goal_next_10"):
+        assert outcome not in body.split("SET", 1)[1].split("WHERE", 1)[0]
+
+
+def test_a_trade_is_never_given_up_on():
+    body = _body("_close_hopeless_rows")
+    assert "entered IS NOT TRUE" in body and "paper_trade_id IS NULL" in body
+
+
+def test_settle_closes_first_and_asks_for_each_fixture_once():
+    body = _body("settle")
+    assert body.index("_close_hopeless_rows(conn)") < body.index("FROM pressure_observations")
+    assert 'sorted({r["fixture_id"] for r in pending})' in body.split("series:", 1)[0]
