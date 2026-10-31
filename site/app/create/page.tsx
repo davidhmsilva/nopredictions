@@ -36,9 +36,10 @@ import { LabResult, type LabApiResult, type Kept } from './LabResult'
 /** Ideas worth showing as a start: each needs words the picker does not have,
  *  and the last is a live rule. */
 const IDEA_EXAMPLES = [
-  'Back home favourites in La Liga when they are in poor form',
-  'Away underdogs on short rest in the Championship',
-  'Back Barcelona at home after a bad run of form',
+  'Back the favourite after it lost its last game',
+  'Bet against Manchester United when they have gone 3 games without a win',
+  'Under 2.5 goals when both teams have conceded under a goal a game in their last 5',
+  'Home teams in the Bundesliga with strong home form, unbeaten in 5',
   'Back a 1.30-1.50 favourite that is pressing while level, sell after the next goal',
 ]
 
@@ -182,7 +183,7 @@ export default function CreatePage() {
 
   async function runBacktest(theory: string) {
     setStatus('Writing your strategy…')
-    timers.current.push(setTimeout(() => setStatus('Testing it over 111,475 real games…'), 3500))
+    timers.current.push(setTimeout(() => setStatus('Testing it over 101,469 real games…'), 3500))
     try {
       const res = await fetch('/api/backtest', {
         method: 'POST',
@@ -353,7 +354,7 @@ export default function CreatePage() {
           <textarea
             id="cr-idea-box"
             className="cr-idea-box"
-            placeholder="e.g. Back home favourites in La Liga when they are in poor form"
+            placeholder="e.g. Back the favourite in La Liga after it lost its last game"
             value={input}
             maxLength={500}
             rows={3}

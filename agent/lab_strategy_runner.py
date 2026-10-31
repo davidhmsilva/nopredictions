@@ -30,10 +30,11 @@ rule the user tested:
     depth, is what separates a price from a parked order.
   * Settle by "first outcome won". The resolver does that, which is a LOSS
     recorded as a win on an Under. Settled here by the token actually bought.
-  * Guess a team's form. Rest days, points in the last 5 and goals in the last
-    5 are read live from ESPN, by the backtest's own definitions (`form_of`). A
-    team whose history cannot be read, or that has played fewer than 5 games,
-    fails the rule — exactly as a NULL fails it in the backtest.
+  * Guess a team's form. Everything a spec can ask about a team's recent games
+    (rest, the last 5, its last game, its runs) is read live from ESPN, by the
+    backtest's own definitions (`form_of`). A team whose history cannot be read,
+    or is too short to answer, fails the rule — exactly as a NULL fails it in
+    the backtest.
   * Evaluate anything else it cannot compute. Such a spec is paused with the
     reason written to `run_blocker`, where the site shows it.
 
@@ -72,20 +73,22 @@ CLOB = "https://clob.polymarket.com"
 # The season being traded, as a Lab season START year (2026-27 → 2026).
 CURRENT_SEASON = 2026
 ENTRY_WINDOW_MIN = 45          # enter only this close to kickoff
+ESPN_BY_DATE = False           # --window sets it
 MAX_SPREAD = 0.05              # ask − bid; wider and the quote is not a price
 MIN_ASK_DEPTH_USD = 50.0       # notional on the top five ask levels
 MIN_ASK, MAX_ASK = 0.02, 0.98
 STAKE_UNITS = 1.0
 GAMMA_PAGES = 20               # 100 events a page (Gamma caps `limit` at 100)
 
-# The filters a spec can put on a team's recent games. Read live since
-# 2026-10-30 (they used to pause the agent: the most natural ideas — "in poor
-# form", "on short rest" — could be tested and never deployed).
-FORM_FILTERS = (
-    "home_rest_days", "away_rest_days",
-    "home_form_pts5", "away_form_pts5",
-    "home_avg_tg5", "away_avg_tg5",
+# What a spec can ask about a team's recent games, each under home_ and away_.
+# Read live since 2026-10-30 (they used to pause the agent: the most natural
+# ideas — "in poor form", "on short rest" — could be tested and never deployed).
+TEAM_FIGURES = (
+    "rest_days", "form_pts5", "avg_tg5", "avg_gf5", "avg_ga5", "venue_pts5",
+    "last_gd", "win_run", "unbeaten_run", "loss_run", "winless_run",
 )
+FORM_FILTERS = tuple(f"{side}_{name}" for side in ("home", "away") for name in TEAM_FIGURES)
+RUN_CAP = 10                   # a run is counted this far back, on both sides (db/083)
 
 # Lab league code → the Polymarket competition tags that mean it, by slug and by
 # label (lowercased). Built from the tags actually stored in pm_markets and a
@@ -120,12 +123,19 @@ LAB_CODES = frozenset(PM_COMPETITIONS)
 
 # Where ESPN can confirm home/away. A league missing here can still run a rule
 # that does not care about sides (draw, over, under), and nothing else.
+#
+# ⚠️ Scottish League One and Two are out on purpose. ESPN answers sco.3 and sco.4
+#    happily, with the 2025-26 season frozen on 2025-09-27 (checked 2026-10-31): a
+#    fixture it still lists could confirm the wrong way round, and a team's form
+#    would be a year old. A code answering is not a code being current.
 ESPN_CODE = {
     "ENG-PR": "eng.1", "ENG-CH": "eng.2", "ENG-L1": "eng.3", "ENG-L2": "eng.4",
+    "ENG-CON": "eng.5",
     "ESP-LL": "esp.1", "ESP-L2": "esp.2", "ITA-SA": "ita.1", "ITA-SB": "ita.2",
     "GER-BL1": "ger.1", "GER-BL2": "ger.2", "FRA-L1": "fra.1", "FRA-L2": "fra.2",
     "NED-ED": "ned.1", "POR-PL": "por.1", "BEL-JPL": "bel.1", "TUR-SL": "tur.1",
-    "SCO-PR": "sco.1",
+    "GRE-SL": "gre.1",
+    "SCO-PR": "sco.1", "SCO-CH": "sco.2",
 }
 
 _TITLE_RE = re.compile(r"^(.+?)\s+vs\.?\s+(.+?)$", re.I)
@@ -147,10 +157,57 @@ def run_blocker(spec: dict) -> str | None:
     if end is not None and end < CURRENT_SEASON - 1:
         return (f"Tested only up to the {end}-{str(end + 1)[2:]} season; running it "
                 "today would trade outside what was tested.")
+    if spec.get("side") in RELATIVE_SIDES and not spec.get("team") and not (
+            spec.get("side") == "team" and spec.get("fav_status")):
+        return ("This rule does not say which team it backs: it has to name one, "
+                "or say the favourite or the underdog.")
+    unread = unreadable_bounds(spec)
+    if unread:
+        return (f"This rule has a condition this agent cannot read yet ({', '.join(unread)}), "
+                "and running it without that condition would trade a different rule.")
     return None
 
 
 TEAM_LISTS = ("home_team_in", "home_team_not_in", "away_team_in", "away_team_not_in")
+RELATIVE_SIDES = ("team", "opponent")
+
+
+def flat_legs(spec: dict) -> list[dict]:
+    """A rule about "the team" (a named club home or away, the favourite at
+    whichever end it is) as the two plain rules it stands for: that team at home,
+    and that team away. team_* and opp_* bounds become home_* and away_* on each.
+
+    Everything below this line, like the backtest, reads only plain rules, so
+    nothing downstream can disagree about who "the team" is. Mirrors flatLegs in
+    site/app/lib/backtest.ts."""
+    side = spec.get("side")
+    if side not in RELATIVE_SIDES and not spec.get("team"):
+        return [spec]
+    legs = []
+    for own, other in (("home", "away"), ("away", "home")):
+        leg = {k: v for k, v in spec.items() if k != "team" and not k.startswith(("team_", "opp_"))}
+        if side == "team":
+            leg["side"] = own
+        elif side == "opponent":
+            leg["side"] = other
+        if spec.get("team"):
+            leg[f"{own}_team"] = spec["team"]
+        for k, v in spec.items():
+            if k.startswith("team_"):
+                leg[f"{own}_{k[5:]}"] = v
+            elif k.startswith("opp_"):
+                leg[f"{other}_{k[4:]}"] = v
+        legs.append(leg)
+    return legs
+
+
+def unreadable_bounds(spec: dict) -> list[str]:
+    """Bounds this runner does not know, which it would otherwise walk straight
+    past and trade a broader rule than the one tested. Happens when the site
+    learns a condition before this file does."""
+    known = {"odds", *FORM_FILTERS}
+    return sorted({k for leg in flat_legs(spec) for k, v in leg.items()
+                   if v is not None and k.endswith(("_min", "_max")) and k[:-4] not in known})
 
 
 def needs_form(spec: dict) -> bool:
@@ -189,33 +246,80 @@ def team_lists_fail(spec: dict, home: str | None, away: str | None) -> str | Non
 
 @dataclass(frozen=True)
 class TeamForm:
-    """What the backtest knows about a team at kick-off (db/024, `tf`): days
-    since its previous league game, league points and average total goals in
-    its previous 5. The last two are None under 5 games, as `prev_n = 5` is."""
+    """What the backtest knows about a team at kick-off (`tf`, db/024 and db/083).
+
+    rest_days       days since its previous league game
+    form_pts5       league points in its previous 5
+    avg_tg5         total goals a game in its previous 5
+    avg_gf5/ga5     goals it scored / conceded a game in its previous 5
+    venue_pts5      points in its previous 5 at this end: home if it is at home
+                    today, away if it is away
+    last_gd         its goal difference in its previous game
+    *_run           games in a row before this one, up to RUN_CAP: won, without
+                    defeat, lost, without a win
+
+    Each is None where a NULL is in the backtest: 5 games or nothing, and a run
+    the history ends inside of is not a run we can count."""
     rest_days: int | None = None
     form_pts5: int | None = None
     avg_tg5: float | None = None
+    avg_gf5: float | None = None
+    avg_ga5: float | None = None
+    venue_pts5: int | None = None
+    last_gd: int | None = None
+    win_run: int | None = None
+    unbeaten_run: int | None = None
+    loss_run: int | None = None
+    winless_run: int | None = None
 
 
-def form_of(games: list, kickoff: datetime) -> TeamForm:
+def _pts(g) -> int:
+    return 3 if g.goals_for > g.goals_against else 1 if g.goals_for == g.goals_against else 0
+
+
+def _run(newest_first: list, counts) -> int | None:
+    """Games in a row, newest first, that `counts` accepts, up to RUN_CAP. None
+    when the history ends first: the run may be longer than we can see."""
+    for i, g in enumerate(newest_first[:RUN_CAP]):
+        if not counts(g):
+            return i
+    return RUN_CAP if len(newest_first) >= RUN_CAP else None
+
+
+def form_of(games: list, kickoff: datetime, at_home: bool | None = None) -> TeamForm:
     """The backtest's definitions, over a team's finished games. Pure.
 
     Only games BEFORE this kick-off count, however the feed sorts them or
     whatever it has added since: a game being read after it started must not
-    appear in its own history."""
+    appear in its own history. `at_home` is where the team plays today, for the
+    one figure that depends on it."""
     prev = sorted((g for g in games if g.kickoff < kickoff), key=lambda g: g.kickoff)
     if not prev:
         return TeamForm()
     # Calendar days, as `kickoff_utc::date - LAG(kickoff_utc::date)`.
     rest = (kickoff.astimezone(timezone.utc).date()
             - prev[-1].kickoff.astimezone(timezone.utc).date()).days
+    newest = prev[::-1]
+    known = dict(
+        rest_days=rest,
+        last_gd=prev[-1].goals_for - prev[-1].goals_against,
+        win_run=_run(newest, lambda g: _pts(g) == 3),
+        unbeaten_run=_run(newest, lambda g: _pts(g) > 0),
+        loss_run=_run(newest, lambda g: _pts(g) == 0),
+        winless_run=_run(newest, lambda g: _pts(g) < 3),
+    )
     last5 = prev[-5:]
     if len(last5) < 5:
-        return TeamForm(rest_days=rest)
-    pts = sum(3 if g.goals_for > g.goals_against else 1 if g.goals_for == g.goals_against else 0
-              for g in last5)
-    tg = sum(g.goals_for + g.goals_against for g in last5) / 5
-    return TeamForm(rest_days=rest, form_pts5=pts, avg_tg5=round(tg, 3))
+        return TeamForm(**known)
+    venue = [g for g in prev if g.home is at_home][-5:] if at_home is not None else []
+    return TeamForm(
+        **known,
+        form_pts5=sum(_pts(g) for g in last5),
+        avg_tg5=round(sum(g.goals_for + g.goals_against for g in last5) / 5, 3),
+        avg_gf5=round(sum(g.goals_for for g in last5) / 5, 3),
+        avg_ga5=round(sum(g.goals_against for g in last5) / 5, 3),
+        venue_pts5=sum(_pts(g) for g in venue) if len(venue) == 5 else None,
+    )
 
 
 def form_verdict(spec: dict, home: TeamForm | None, away: TeamForm | None) -> str | None:
@@ -223,7 +327,7 @@ def form_verdict(spec: dict, home: TeamForm | None, away: TeamForm | None) -> st
     unknown value fails its bound, the way a NULL fails a WHERE clause in the
     backtest: "we could not read it" is never "it qualifies"."""
     for side, form in (("home", home), ("away", away)):
-        for name in ("rest_days", "form_pts5", "avg_tg5"):
+        for name in TEAM_FIGURES:
             lo, hi = spec.get(f"{side}_{name}_min"), spec.get(f"{side}_{name}_max")
             if lo is None and hi is None:
                 continue
@@ -238,13 +342,15 @@ def form_verdict(spec: dict, home: TeamForm | None, away: TeamForm | None) -> st
 
 
 def team_history(code: str, team_id: str, kickoff: datetime, get=espn_stats.team_games) -> list | None:
-    """A team's league games, reaching into last season only when this one has
-    not yet played 5. None when ESPN did not answer: a partial history would
-    read as a real, and wrong, number."""
+    """A team's league games, reaching into last season only until the first
+    RUN_CAP rounds or so have been played: form_of wants that many, and 5 at each
+    end. None when ESPN did not answer: a partial history would read as a real,
+    and wrong, number."""
     games = get(code, team_id)
     if games is None:
         return None
-    if sum(1 for g in games if g.kickoff < kickoff) >= 5:
+    prev = [g for g in games if g.kickoff < kickoff]
+    if len(prev) >= RUN_CAP and all(sum(1 for g in prev if g.home is end) >= 5 for end in (True, False)):
         return games
     # Every league the Lab covers starts in the second half of the year.
     this_season = kickoff.year if kickoff.month >= 7 else kickoff.year - 1
@@ -595,26 +701,32 @@ def write_trade(conn, strat: dict, ev: EventView, leg: dict, label: str, book: d
 def forms_for(ev: EventView, cache: dict) -> tuple[TeamForm | None, TeamForm | None]:
     """(home, away) form for this fixture, each read once per cycle. None for a
     team ESPN gave no id or history for, which fails the rule (form_verdict)."""
-    def one(team_id: str) -> TeamForm | None:
+    def one(team_id: str, at_home: bool) -> TeamForm | None:
         key = (ev.code, team_id, ev.kickoff)
         if key not in cache:
             games = team_history(ESPN_CODE[ev.code], team_id, ev.kickoff) if team_id else None
-            cache[key] = None if games is None else form_of(games, ev.kickoff)
+            cache[key] = None if games is None else form_of(games, ev.kickoff, at_home)
         return cache[key]
     fx = ev.espn
     if fx is None:
         return None, None
-    return one(getattr(fx, "home_id", "")), one(getattr(fx, "away_id", ""))
+    return one(getattr(fx, "home_id", ""), True), one(getattr(fx, "away_id", ""), False)
 
 
 def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
-    conn = _conn()
+    conn = None
     if adhoc_spec is not None:
         # --spec: hold a spec against today's boards without a saved agent.
-        # Always a dry run — an ad-hoc spec has no strategy row to trade under.
+        # Always a dry run — an ad-hoc spec has no strategy row to trade under,
+        # and so no need of the database.
+        why = run_blocker(adhoc_spec)
+        if why:
+            log.info(f"[lab_runner] ad-hoc spec would be paused: {why}")
+            return 0
         strategies = [{"id": 0, "name": "ad-hoc", "theory": None, "spec": adhoc_spec}]
         dry_run = True
     else:
+        conn = _conn()
         strategies = running_strategies(conn)
     if not strategies:
         log.info("[lab_runner] no running Lab agents")
@@ -622,7 +734,7 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
 
     now = datetime.now(timezone.utc)
     events = fetch_upcoming(now)
-    espn_cache: dict[str, list] = {}
+    espn_cache: dict[tuple, list] = {}
     form_cache: dict[tuple, TeamForm | None] = {}
     entered = considered = 0
     for raw in events:
@@ -634,10 +746,12 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
             continue
         ev = EventView(code=code, title=raw.get("title") or "", kickoff=kickoff_of(raw),
                        markets=parse_markets(raw))
-        if any(needs_sides(s["spec"]) for s in strategies) and code in ESPN_CODE:
-            if code not in espn_cache:
-                espn_cache[code] = espn_stats.fetch_league(ESPN_CODE[code])
-            orient, fixture = orientation(teams[0], teams[1], espn_cache[code])
+        if any(needs_sides(leg) for s in strategies for leg in flat_legs(s["spec"])) and code in ESPN_CODE:
+            # ESPN's plain scoreboard is one match day. A --window past it has to ask by date.
+            day = f"{ev.kickoff:%Y%m%d}" if ESPN_BY_DATE else None
+            if (code, day) not in espn_cache:
+                espn_cache[(code, day)] = espn_stats.fetch_league(ESPN_CODE[code], dates=day)
+            orient, fixture = orientation(teams[0], teams[1], espn_cache[(code, day)])
             if orient == "same":
                 ev.home, ev.away = teams
             elif orient == "swapped":
@@ -645,8 +759,8 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
             if orient:
                 ev.espn = fixture
 
-        for strat in strategies:
-            leg, label, why = pick(strat["spec"], ev)
+        for strat, spec in ((s, one) for s in strategies for one in flat_legs(s["spec"])):
+            leg, label, why = pick(spec, ev)
             if leg is None:
                 continue
             considered += 1
@@ -654,17 +768,17 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
                 list((ev.markets.get("win") or {}).values())
                 + [ev.markets.get("draw")]
                 + list((ev.markets.get("ou25") or {}).values())) if x and x.get("condition_id")]
-            if already_in(conn, strat["id"], cids):
+            if conn is not None and already_in(conn, strat["id"], cids):
                 continue
             # Last of the free checks, so a rule on a team's form costs ESPN
             # requests only on fixtures that fit everything else.
-            if needs_form(strat["spec"]):
-                bad = form_verdict(strat["spec"], *forms_for(ev, form_cache))
+            if needs_form(spec):
+                bad = form_verdict(spec, *forms_for(ev, form_cache))
                 if bad:
                     log.info(f"[lab_runner] #{strat['id']} {label}: skip — {bad}")
                     continue
             book = _fetch_book({"token_id": leg["token_id"]})
-            bad = book_verdict(book, strat["spec"])
+            bad = book_verdict(book, spec)
             if bad:
                 log.info(f"[lab_runner] #{strat['id']} {label}: skip — {bad}")
                 continue
@@ -724,7 +838,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
                         datefmt="%H:%M:%S", force=True)
     if args.window:
-        globals()["ENTRY_WINDOW_MIN"] = args.window
+        globals().update(ENTRY_WINDOW_MIN=args.window, ESPN_BY_DATE=True)
     if args.settle:
         settle()
     else:

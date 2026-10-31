@@ -11,7 +11,9 @@ import { getSql } from './db'
 import {
   NBA_CAVEATS,
   computeStats,
+  flatLegs,
   isNbaMarket,
+  mergeBacktests,
   verdict,
   type BacktestStats,
   type RawBacktest,
@@ -29,21 +31,34 @@ export interface SpecResult {
   datasetCaveats: string[]
 }
 
+/** A rule's backtest, one leg at a time: Postgres only reads plain rules. */
+export async function rawBacktest(spec: Spec): Promise<RawBacktest> {
+  const sql = getSql()
+  const raws: RawBacktest[] = []
+  for (const leg of flatLegs(spec)) {
+    const rows = isNbaMarket(leg.market)
+      ? await sql`SELECT run_backtest_nba(${sql.json(leg as never)}) AS r`
+      : await sql`SELECT run_backtest(${sql.json(leg as never)}) AS r`
+    raws.push(rows[0].r as RawBacktest)
+  }
+  return mergeBacktests(raws)
+}
+
 export async function runSpec(spec: Spec): Promise<SpecResult> {
   const sql = getSql()
   const nba = isNbaMarket(spec.market)
-  const rows = nba
-    ? await sql`SELECT run_backtest_nba(${sql.json(spec as never)}) AS r`
-    : await sql`SELECT run_backtest(${sql.json(spec as never)}) AS r`
-  const raw = rows[0].r as RawBacktest
+  const raw = await rawBacktest(spec)
 
   // The list of games is a picture of the totals, not part of them: a database
   // without db/074 still returns a result, just without the list.
   let recent: RecentBet[] = []
   if (!nba && raw.n > 0) {
     try {
-      const r = await sql`SELECT run_backtest_recent(${sql.json(spec as never)}, 8) AS r`
-      recent = (r[0].r as RecentBet[]) ?? []
+      for (const leg of flatLegs(spec)) {
+        const r = await sql`SELECT run_backtest_recent(${sql.json(leg as never)}, 8) AS r`
+        recent.push(...((r[0].r as RecentBet[]) ?? []))
+      }
+      recent = recent.sort((a, b) => b.kickoff.localeCompare(a.kickoff)).slice(0, 8)
     } catch (err) {
       console.error('recent bets', err)
     }

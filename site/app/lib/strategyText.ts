@@ -10,7 +10,7 @@
  *  their own format.
  */
 
-import { LEAGUES, isNbaMarket, type Spec } from './backtest'
+import { LEAGUES, RUN_CAP, isNbaMarket, isRelative, type Spec } from './backtest'
 import { inplayBuyText, isInplaySpec, type InplaySpec } from './inplaySpec'
 
 export interface StrategyText {
@@ -26,7 +26,20 @@ export interface StrategyText {
 
 const LEAGUE_NAME = new Map<string, string>(LEAGUES.map((l) => [l.code, `${l.name} (${l.country})`]))
 
+/** Who "the team" is, in a rule about one. */
+function subject(s: Spec): string {
+  return s.team ?? (s.fav_status === 'underdog' ? 'the underdog' : s.fav_status === 'favorite' ? 'the favourite' : 'the team')
+}
+
 function bet(s: Spec): string {
+  if (s.side === 'team') {
+    const who = subject(s)
+    const line = `${who.charAt(0).toUpperCase()}${who.slice(1)} to`
+    return s.market === 'nba_spread' ? `${line} cover the spread, home or away` : `${line} win, home or away`
+  }
+  if (s.side === 'opponent') {
+    return s.market === 'nba_spread' ? `Whoever plays ${subject(s)} to cover the spread` : `Whoever plays ${subject(s)} to win`
+  }
   switch (s.market) {
     case '1x2':
       return s.side === 'home' ? 'The home team to win' : s.side === 'away' ? 'The away team to win' : 'The draw'
@@ -62,11 +75,90 @@ function backed(s: Spec): string {
   return s.side === 'home' ? 'the home team' : s.side === 'away' ? 'the away team' : 'the team'
 }
 
+type TeamPrefix = 'home' | 'away' | 'team' | 'opp'
+
+/** One bound pair of one team's figure. Named keys are checked by Spec; these
+ *  are built, so the loop below can read every prefix the same way. */
+function bounds(s: Spec, prefix: TeamPrefix, figure: string): [number | null | undefined, number | null | undefined] {
+  const o = s as unknown as Record<string, number | null | undefined>
+  return [o[`${prefix}_${figure}_min`], o[`${prefix}_${figure}_max`]]
+}
+
+/** Its last game, in the words a bettor uses for it. */
+function lastGame(who: string, lo: number | null | undefined, hi: number | null | undefined): string | null {
+  if (lo == null && hi == null) return null
+  if (lo === 0 && hi === 0) return `${who} drew its last game`
+  if (lo === 0 && hi == null) return `${who} did not lose its last game`
+  if (lo == null && hi === 0) return `${who} did not win its last game`
+  if (lo === 1 && hi == null) return `${who} won its last game`
+  if (lo != null && lo > 1 && hi == null) return `${who} won its last game by ${lo} or more goals`
+  if (lo == null && hi === -1) return `${who} lost its last game`
+  if (lo == null && hi != null && hi < -1) return `${who} lost its last game by ${-hi} or more goals`
+  return `${who}'s goal difference in its last game was ${range(lo, hi, (v) => (v > 0 ? `+${v}` : String(v)), { more: 'or better', less: 'or worse' })}`
+}
+
+/** A run, in the same words. `words` is how to say it: 3 → "won 3 or more in a row". */
+function run(
+  who: string,
+  lo: number | null | undefined,
+  hi: number | null | undefined,
+  words: { many: (n: string) => string; last: string; notLast: string },
+): string | null {
+  if (lo == null && hi == null) return null
+  if (lo === 1 && hi == null) return `${who} ${words.last}`
+  if (lo == null && hi === 0) return `${who} ${words.notLast}`
+  const r = range(lo, hi, (v) => (v >= RUN_CAP ? `${RUN_CAP}` : String(v)))
+  return `${who} ${words.many(r as string)}`
+}
+
+const RUNS = {
+  win_run: { many: (n: string) => `has won ${n} in a row`, last: 'won its last game', notLast: 'did not win its last game' },
+  unbeaten_run: { many: (n: string) => `is unbeaten in ${n}`, last: 'did not lose its last game', notLast: 'lost its last game' },
+  loss_run: { many: (n: string) => `has lost ${n} in a row`, last: 'lost its last game', notLast: 'did not lose its last game' },
+  winless_run: { many: (n: string) => `has gone ${n} without a win`, last: 'did not win its last game', notLast: 'won its last game' },
+} as const
+
+/** Which end of the ground "its last 5" means, for each way of naming a team. */
+const VENUE_WORDS: Record<TeamPrefix, string> = {
+  home: 'home games',
+  away: 'away games',
+  team: 'games at this end (home or away, as it is today)',
+  opp: 'games at this end (home or away, as it is today)',
+}
+
+/** Everything a football rule asks about one team's recent games. */
+function teamLines(s: Spec, prefix: TeamPrefix, who: string): string[] {
+  const out: (string | null)[] = []
+  const said = (figure: string, line: (r: string) => string, show?: (v: number) => string) => {
+    const [lo, hi] = bounds(s, prefix, figure)
+    const r = range(lo, hi, show)
+    if (r) out.push(line(r))
+  }
+  said('rest_days', (r) => `${who} had ${r} days of rest`)
+  out.push(lastGame(who, ...bounds(s, prefix, 'last_gd')))
+  for (const [figure, words] of Object.entries(RUNS)) out.push(run(who, ...bounds(s, prefix, figure), words))
+  said('form_pts5', (r) => `${who} took ${r} points from its last 5 league games`)
+  said('venue_pts5', (r) => `${who} took ${r} points from its last 5 ${VENUE_WORDS[prefix]}`)
+  said('avg_tg5', (r) => `${who}'s last 5 games averaged ${r} goals`, oneDp)
+  said('avg_gf5', (r) => `${who} scored ${r} goals a game over its last 5`, oneDp)
+  said('avg_ga5', (r) => `${who} conceded ${r} goals a game over its last 5`, oneDp)
+  // The same condition twice is one line: a win_run of 1 and a last_gd of +1 say the same.
+  return Array.from(new Set(out.filter((l): l is string => l != null)))
+}
+
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
 export function describeSpec(s: Spec, odds: (decimal: number) => string): StrategyText {
   const nba = isNbaMarket(s.market)
   const when: string[] = []
+  const relative = isRelative(s)
+  const team = cap(subject(s))
 
-  if (s.fav_status && (s.side === 'home' || s.side === 'away')) {
+  if (relative) {
+    // "The draw" and "over 2.5" do not name a team; the rule still does.
+    if (s.team && s.side !== 'team' && s.side !== 'opponent') when.push(`${s.team} is playing, home or away`)
+    if (s.team && s.fav_status) when.push(`${s.team} is the ${s.fav_status === 'favorite' ? 'favourite' : 'underdog'}`)
+  } else if (s.fav_status && (s.side === 'home' || s.side === 'away')) {
     when.push(`${backed(s).replace(/^t/, 'T')} is the ${s.fav_status === 'favorite' ? 'favourite' : 'underdog'}`)
   }
   if (s.home_team) when.push(`Home team: ${s.home_team}`)
@@ -85,27 +177,18 @@ export function describeSpec(s: Spec, odds: (decimal: number) => string): Strate
   const o = range(s.odds_min, s.odds_max, odds, { more: 'or longer', less: 'or shorter' })
   if (o) when.push(`The odds are ${o}`)
 
-  const rest = (who: string, lo?: number | null, hi?: number | null) => {
-    const r = range(lo, hi)
-    if (r) when.push(`${who} had ${r} days of rest`)
-  }
-  rest('The home team', s.home_rest_days_min, s.home_rest_days_max)
-  rest('The away team', s.away_rest_days_min, s.away_rest_days_max)
-
   if (!nba) {
-    const form = (who: string, lo?: number | null, hi?: number | null) => {
-      const r = range(lo, hi)
-      if (r) when.push(`${who} took ${r} points from its last 5 league games`)
-    }
-    form('The home team', s.home_form_pts5_min, s.home_form_pts5_max)
-    form('The away team', s.away_form_pts5_min, s.away_form_pts5_max)
-    const goals = (who: string, lo?: number | null, hi?: number | null) => {
-      const r = range(lo, hi, oneDp)
-      if (r) when.push(`${who}'s last 5 games averaged ${r} goals`)
-    }
-    goals('The home team', s.home_avg_tg5_min, s.home_avg_tg5_max)
-    goals('The away team', s.away_avg_tg5_min, s.away_avg_tg5_max)
+    when.push(...teamLines(s, 'home', 'The home team'))
+    when.push(...teamLines(s, 'away', 'The away team'))
+    when.push(...teamLines(s, 'team', team))
+    when.push(...teamLines(s, 'opp', 'Its opponent'))
   } else {
+    const rest = (who: string, lo?: number | null, hi?: number | null) => {
+      const r = range(lo, hi)
+      if (r) when.push(`${who} had ${r} days of rest`)
+    }
+    const people: [TeamPrefix, string][] = [['home', 'The home team'], ['away', 'The away team'], ['team', team], ['opp', 'Its opponent']]
+    for (const [prefix, who] of people) rest(who, ...bounds(s, prefix, 'rest_days'))
     if (s.game_type === 'regular') when.push('Regular season games only')
     if (s.game_type === 'playoff') when.push('Play-off games only')
     // The home team's spread is negative when it is favoured.
@@ -119,18 +202,14 @@ export function describeSpec(s: Spec, odds: (decimal: number) => string): Strate
     }
     const total = range(s.total_min, s.total_max, String, { more: 'or more', less: 'or less' })
     if (total) when.push(`The points total is ${total}`)
-    const wins = (who: string, lo?: number | null, hi?: number | null) => {
-      const r = range(lo, hi)
-      if (r) when.push(`${who} won ${r} of its last 5 games`)
+    for (const [prefix, who] of people) {
+      const [wl, wh] = bounds(s, prefix, 'form_w5')
+      const w = range(wl, wh)
+      if (w) when.push(`${who} won ${w} of its last 5 games`)
+      const [pl, ph] = bounds(s, prefix, 'avg_tp5')
+      const p = range(pl, ph, oneDp, { more: 'or more', less: 'or less' })
+      if (p) when.push(`${who}'s last 5 games averaged ${p} total points`)
     }
-    wins('The home team', s.home_form_w5_min, s.home_form_w5_max)
-    wins('The away team', s.away_form_w5_min, s.away_form_w5_max)
-    const pts = (who: string, lo?: number | null, hi?: number | null) => {
-      const r = range(lo, hi, oneDp, { more: 'or more', less: 'or less' })
-      if (r) when.push(`${who}'s last 5 games averaged ${r} total points`)
-    }
-    pts('The home team', s.home_avg_tp5_min, s.home_avg_tp5_max)
-    pts('The away team', s.away_avg_tp5_min, s.away_avg_tp5_max)
   }
 
   if (s.season_start != null || s.season_end != null) {

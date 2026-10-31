@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { currentUser } from '../../../lib/supabaseAuth'
 import { claimUse, refundUse, refusalMessage } from '../../../lib/plan'
 import { ClaudeDeclined, askJson, readFailureMessage } from '../../../lib/claudeJson'
+import { noteIdea } from '../../../lib/ideaLog'
 import { LEAGUE_CODES } from '../../../lib/backtest'
 import { InplayParseSchema, cleanInplay, describeInplay } from '../../../lib/inplaySpec'
 import { INPLAY_SHAPE, INPLAY_SYSTEM } from '../../../lib/inplayPrompt'
@@ -40,10 +41,12 @@ export async function POST(request: Request) {
   }
 
   if (!parsed.supported || !parsed.spec) {
+    const reason = parsed.reason || 'This rule needs data the live agent does not have.'
+    await noteIdea({ idea: theory, kind: 'inplay', supported: false, reason, suggestion: parsed.suggestion })
     return NextResponse.json({
       ok: true,
       supported: false,
-      reason: parsed.reason || 'This rule needs data the live agent does not have.',
+      reason,
       suggestion: parsed.suggestion || null,
       entitlement: use,
     })
@@ -51,8 +54,10 @@ export async function POST(request: Request) {
 
   const { spec, error } = cleanInplay(parsed.spec, LEAGUE_CODES)
   if (!spec) {
+    await noteIdea({ idea: theory, kind: 'inplay', supported: false, reason: error })
     return NextResponse.json({ ok: true, supported: false, reason: error, suggestion: null, entitlement: use })
   }
+  await noteIdea({ idea: theory, kind: 'inplay', supported: true, spec })
   const d = describeInplay(spec)
   return NextResponse.json({
     ok: true,

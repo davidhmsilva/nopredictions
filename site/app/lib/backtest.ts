@@ -49,10 +49,38 @@ export function isNbaMarket(market: string): boolean {
   return (NBA_MARKETS as readonly string[]).includes(market)
 }
 
-// Flat spec consumed by run_backtest(spec jsonb) / run_backtest_nba(spec jsonb).
-export interface Spec {
+/** What a rule can ask about a team's recent football games. Each is a filter
+ *  under home_ and away_ (columns of bt_features, db/024 and db/083) and under
+ *  team_ and opp_ (see flatLegs). ⚠️ Mirrored in TEAM_FIGURES in
+ *  agent/lab_strategy_runner.py, which reads every one of them live. */
+export const TEAM_FIGURES = [
+  'rest_days',
+  'form_pts5',
+  'avg_tg5',
+  'avg_gf5',
+  'avg_ga5',
+  'venue_pts5',
+  'last_gd',
+  'win_run',
+  'unbeaten_run',
+  'loss_run',
+  'winless_run',
+] as const
+
+/** How far back a run is counted, on both sides (db/083): a longer one reads as this. */
+export const RUN_CAP = 10
+
+const NBA_FIGURES = ['form_w5', 'avg_tp5'] as const
+const TEAM_PREFIXES = ['home', 'away', 'team', 'opp'] as const
+
+type TeamBound = `${(typeof TEAM_PREFIXES)[number]}_${(typeof TEAM_FIGURES)[number] | (typeof NBA_FIGURES)[number]}_${'min' | 'max'}`
+
+// The spec consumed by run_backtest(spec jsonb) / run_backtest_nba(spec jsonb),
+// once flatLegs has made it flat.
+export interface Spec extends Partial<Record<TeamBound, number | null>> {
   market: '1x2' | 'ou25' | 'nba_ml' | 'nba_spread' | 'nba_total'
-  side: 'home' | 'draw' | 'away' | 'over' | 'under'
+  /** 'team' and 'opponent' back the team the rule is about, or whoever plays it. */
+  side: 'home' | 'draw' | 'away' | 'over' | 'under' | 'team' | 'opponent'
   leagues: string[] | null
   // NBA-only
   game_type?: 'regular' | 'playoff' | null
@@ -60,14 +88,6 @@ export interface Spec {
   spread_max?: number | null
   total_min?: number | null
   total_max?: number | null
-  home_form_w5_min?: number | null
-  home_form_w5_max?: number | null
-  away_form_w5_min?: number | null
-  away_form_w5_max?: number | null
-  home_avg_tp5_min?: number | null
-  home_avg_tp5_max?: number | null
-  away_avg_tp5_min?: number | null
-  away_avg_tp5_max?: number | null
   season_start?: number | null
   season_end?: number | null
   odds_min?: number | null
@@ -75,53 +95,75 @@ export interface Spec {
   fav_status: 'favorite' | 'underdog' | null
   home_team: string | null
   away_team: string | null
-  home_rest_days_min?: number | null
-  home_rest_days_max?: number | null
-  away_rest_days_min?: number | null
-  away_rest_days_max?: number | null
-  home_form_pts5_min?: number | null
-  home_form_pts5_max?: number | null
-  away_form_pts5_min?: number | null
-  away_form_pts5_max?: number | null
-  home_avg_tg5_min?: number | null
-  home_avg_tg5_max?: number | null
-  away_avg_tg5_min?: number | null
-  away_avg_tg5_max?: number | null
+  /** A named team at either end: the team this rule is about. */
+  team?: string | null
+}
+
+/** Does this rule speak of "the team" rather than of the home or away side? */
+export function isRelative(s: Pick<Spec, 'side' | 'team'>): boolean {
+  return s.side === 'team' || s.side === 'opponent' || Boolean(s.team)
+}
+
+/** Can a relative rule tell which team it means, in every game? One that cannot
+ *  would bet both ends of every fixture. */
+export function namesItsTeam(s: Pick<Spec, 'side' | 'team' | 'fav_status'>): boolean {
+  if (s.side === 'team') return Boolean(s.team || s.fav_status)
+  if (s.side === 'opponent') return Boolean(s.team)
+  return true
+}
+
+/** A rule about "the team" (a named club at either end, the favourite wherever
+ *  it plays) as the two plain rules it stands for: that team at home, and that
+ *  team away. team_* and opp_* bounds become home_* and away_* on each.
+ *
+ *  Everything that runs a rule reads only plain rules, so the backtest and the
+ *  live agent cannot disagree about who "the team" is, and a new condition needs
+ *  no second definition. ⚠️ Mirrored in flat_legs in agent/lab_strategy_runner.py. */
+export function flatLegs(s: Spec): Spec[] {
+  if (!isRelative(s)) return [s]
+  const ends = [
+    ['home', 'away'],
+    ['away', 'home'],
+  ] as const
+  return ends.map(([own, other]) => {
+    const leg: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(s)) {
+      if (k === 'team') continue
+      if (k.startsWith('team_')) leg[`${own}_${k.slice(5)}`] = v
+      else if (k.startsWith('opp_')) leg[`${other}_${k.slice(4)}`] = v
+      else leg[k] = v
+    }
+    if (s.side === 'team') leg.side = own
+    if (s.side === 'opponent') leg.side = other
+    if (s.team) leg[`${own}_team`] = s.team
+    return leg as unknown as Spec
+  })
 }
 
 // Numeric range filters come back from the model as a flat list of conditions
 // (structured outputs cap the number of nullable fields per schema, so the
 // parse-side spec avoids per-field nullables).
-export const FILTER_FIELDS = [
+export const FILTER_FIELDS: string[] = [
   'odds',
   'season',
-  'home_rest_days',
-  'away_rest_days',
-  // football
-  'home_form_pts5',
-  'away_form_pts5',
-  'home_avg_tg5',
-  'away_avg_tg5',
   // NBA
   'spread',
   'total',
-  'home_form_w5',
-  'away_form_w5',
-  'home_avg_tp5',
-  'away_avg_tp5',
-] as const
+  ...TEAM_PREFIXES.flatMap((p) => [...TEAM_FIGURES, ...NBA_FIGURES].map((f) => `${p}_${f}`)),
+]
 
 export const ParsedSpecSchema = z.object({
   market: z.enum(['1x2', 'ou25', 'nba_ml', 'nba_spread', 'nba_total']),
-  side: z.enum(['home', 'draw', 'away', 'over', 'under']),
+  side: z.enum(['home', 'draw', 'away', 'over', 'under', 'team', 'opponent']),
   leagues: z.array(z.string()),          // [] = all leagues; ignored for NBA
   game_type: z.enum(['regular', 'playoff', 'any']),  // NBA only
   fav_status: z.enum(['favorite', 'underdog', 'any']),
   home_team: z.string(),                 // '' = no filter
   away_team: z.string(),                 // '' = no filter
+  team: z.string(),                      // '' = no team named; either end of the fixture
   filters: z.array(
     z.object({
-      field: z.enum(FILTER_FIELDS),
+      field: z.enum(FILTER_FIELDS as [string, ...string[]]),
       op: z.enum(['gte', 'lte']),
       value: z.number(),
     }),
@@ -150,6 +192,7 @@ export function toSqlSpec(p: ParsedSpec): Spec {
     home_team: p.home_team.trim() || null,
     away_team: p.away_team.trim() || null,
   }
+  if (p.team.trim()) spec.team = p.team.trim()
   if (nba && p.game_type !== 'any') spec.game_type = p.game_type
   for (const f of p.filters) {
     if (f.field === 'season') {
@@ -178,6 +221,45 @@ export interface RawBacktest {
   last_match: string | null
   seasons: { season: number; n: number; wins: number; pnl: number }[]
   monthly: { month: string; n: number; pnl: number }[]
+}
+
+/** The result of a rule's legs as one result. They are different bets on different
+ *  fixtures, so everything adds up; the averages are weighted by what they
+ *  averaged over. A plain rule has one leg and comes back as it went in. */
+export function mergeBacktests(raws: RawBacktest[]): RawBacktest {
+  if (raws.length === 1) return raws[0]
+  const sum = (f: (r: RawBacktest) => number | null | undefined) => raws.reduce((t, r) => t + Number(f(r) ?? 0), 0)
+  const n = sum((r) => r.n)
+  const nOpen = sum((r) => r.n_open)
+  const edge = (xs: (string | null)[], pick: (a: string, b: string) => string) =>
+    xs.filter((x): x is string => x != null).reduce<string | null>((a, b) => (a == null ? b : pick(a, b)), null)
+
+  const seasons = new Map<number, RawBacktest['seasons'][number]>()
+  for (const row of raws.flatMap((r) => r.seasons)) {
+    const had = seasons.get(row.season)
+    seasons.set(row.season, had ? { ...had, n: had.n + row.n, wins: had.wins + row.wins, pnl: had.pnl + row.pnl } : row)
+  }
+  const monthly = new Map<string, RawBacktest['monthly'][number]>()
+  for (const row of raws.flatMap((r) => r.monthly)) {
+    const had = monthly.get(row.month)
+    monthly.set(row.month, had ? { ...had, n: had.n + row.n, pnl: had.pnl + row.pnl } : row)
+  }
+
+  return {
+    n,
+    wins: sum((r) => r.wins),
+    pushes: sum((r) => r.pushes),
+    pnl: sum((r) => r.pnl),
+    pnl_sq: sum((r) => r.pnl_sq),
+    avg_odds: n ? sum((r) => (r.avg_odds ?? 0) * r.n) / n : null,
+    n_open: nOpen,
+    pnl_open: nOpen ? sum((r) => r.pnl_open) : null,
+    clv_avg: nOpen ? sum((r) => (r.clv_avg ?? 0) * r.n_open) / nOpen : null,
+    first_match: edge(raws.map((r) => r.first_match), (a, b) => (new Date(b) < new Date(a) ? b : a)),
+    last_match: edge(raws.map((r) => r.last_match), (a, b) => (new Date(b) > new Date(a) ? b : a)),
+    seasons: Array.from(seasons.values()).sort((a, b) => a.season - b.season),
+    monthly: Array.from(monthly.values()).sort((a, b) => a.month.localeCompare(b.month)),
+  }
 }
 
 function normCdf(x: number): number {

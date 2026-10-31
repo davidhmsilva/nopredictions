@@ -197,11 +197,13 @@ def _minute_of(status: dict) -> int | None:
     return int(secs // 60) if isinstance(secs, (int, float)) and secs else None
 
 
-def fetch_league(code: str, session: requests.Session | None = None) -> list[EspnFixture]:
-    """Every fixture on one league's scoreboard, with live stats. One request."""
+def fetch_league(code: str, session: requests.Session | None = None, dates: str | None = None) -> list[EspnFixture]:
+    """Every fixture on one league's scoreboard, with live stats. One request.
+    Left out, `dates` means the current match day; else one "20261031" (ESPN
+    answers a range with a 400)."""
     get = (session or requests).get
     try:
-        res = get(f"{BASE}/{code}/scoreboard", timeout=_TIMEOUT)
+        res = get(f"{BASE}/{code}/scoreboard", params={"dates": dates} if dates else None, timeout=_TIMEOUT)
         res.raise_for_status()
         data = res.json()
     except Exception as exc:                       # noqa: BLE001 — a dead league is not fatal
@@ -238,12 +240,23 @@ def fetch_league(code: str, session: requests.Session | None = None) -> list[Esp
     return out
 
 
+# Season types that are not league games. `matches` does not hold them, so counting
+# them would read a different last 5 from the backtest's for any club in them
+# (measured 2026-10-31 over 3,662 team-games). NOT "Playoff Round": the Belgian and
+# Greek second phases go by that name, and `matches` does hold those.
+_POST_SEASON = ("Promotion", "Relegation", "Conference League", "European Competition")
+
+
 @dataclass(frozen=True)
 class TeamGame:
     """One finished league game, from one team's side."""
     kickoff: datetime
     goals_for: int
     goals_against: int
+    # Whether the team was at home. None when the feed did not say, which keeps
+    # the game out of any count of home or away games rather than filing it
+    # under either.
+    home: bool | None = None
 
 
 def team_games(code: str, team_id: str, season: int | None = None,
@@ -276,6 +289,8 @@ def team_games(code: str, team_id: str, season: int | None = None,
         comps = (ev.get("competitions") or [{}])[0]
         if not ((comps.get("status") or {}).get("type") or {}).get("completed"):
             continue
+        if str((ev.get("seasonType") or {}).get("name") or "").startswith(_POST_SEASON):
+            continue
         sides = comps.get("competitors") or []
         own = next((c for c in sides if str(c.get("id")) == str(team_id)), None)
         opp = next((c for c in sides if str(c.get("id")) != str(team_id)), None)
@@ -290,7 +305,9 @@ def team_games(code: str, team_id: str, season: int | None = None,
         # not a game the backtest's history would hold either.
         if gf is None or ga is None:
             continue
-        out.append(TeamGame(kickoff=when, goals_for=gf, goals_against=ga))
+        where = own.get("homeAway")
+        out.append(TeamGame(kickoff=when, goals_for=gf, goals_against=ga,
+                            home=True if where == "home" else False if where == "away" else None))
     return sorted(out, key=lambda g: g.kickoff)
 
 
