@@ -75,8 +75,8 @@ This pipeline IS the product. Each step, and where it lives:
 | **Live rule** (`lib/inplaySpec.ts`) | a team to win, the draw, one more goal | team, kick-off odds, minute window, score, pressure, price; exit: hold, sell after a goal, sell at a minute | any fixture on the pressure poll, or named leagues |
 | **Backtest only** | NBA moneyline, spread, total | 2014-15 → 2021-22, consensus close | cannot deploy: no NBA boards here |
 
-Not possible yet, and the model says so: other sports live, corners, cards, other goal
-lines, handicaps, half-time markets pre-match, other goal lines, league-table position, cups and
+Not possible yet, and the model says so: other sports live, corners, cards,
+handicaps, half-time markets pre-match, other goal lines, league-table position, cups and
 European competitions, player-level anything.
 
 🔑 **Widening this language is the most valuable engineering work in the project**,
