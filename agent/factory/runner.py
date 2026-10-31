@@ -92,8 +92,14 @@ def settle(conn) -> int:
     n = 0
     for uname, lst in by_u.items():
         U = UNIVERSES[uname]
+        # Only fixtures with something to settle are loaded. Trades whose row never
+        # got an outcome used to pull 100-200 MB of tape every 10 minutes, for weeks.
+        ready = registry.ready_rows(conn, U.source_table, [int(t["source_row_id"]) for t in lst])
+        lst = [t for t in lst if int(t["source_row_id"]) in ready]
+        if not lst:
+            continue
         fids = sorted({f for f in (_fid(t["fixture"]) for t in lst) if f is not None})
-        df = U.load(conn, mode="settle", fixture_ids=fids)
+        df = U.load(conn, mode="settle", fixture_ids=fids, keep_rows=ready)
         if df is None or df.empty:
             continue
         fr = make_frame(U, df, split=False)

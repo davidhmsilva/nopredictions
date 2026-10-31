@@ -762,10 +762,12 @@ def bet_games(conn, sid: int) -> dict[str, dict]:
         return {r["slug"]: dict(r) for r in cur.fetchall()}
 
 
-def last_snapshot_written(conn) -> dict[str, datetime]:
+def last_snapshot_written(conn, slugs: list[str]) -> dict[str, datetime]:
+    # By slug, on (game_slug, observed_at): without it this scanned the table every 5 minutes.
     with conn.cursor() as cur:
         cur.execute("""SELECT game_slug, max(odds_snapshot_at) FROM nba_candidates
-                        WHERE observed_at > now() - interval '3 days' GROUP BY 1""")
+                        WHERE game_slug = ANY(%s) AND observed_at > now() - interval '3 days'
+                        GROUP BY 1""", (slugs,))
         return {s: t for s, t in cur.fetchall()}
 
 
@@ -911,7 +913,7 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
     log.info(f"{len(games)} NBA games in scope{skip_txt} · "
              f"{sum(g.slug in bets for g in games)} already bet · sharp snapshot {snap_txt}")
 
-    written = last_snapshot_written(conn) if not dry_run else {}
+    written = last_snapshot_written(conn, [g.slug for g in games]) if not dry_run else {}
     todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake, new_snap)
     closes: list[tuple] = []        # (trade_id, fair, mid, book, entry)
     for g in games:
