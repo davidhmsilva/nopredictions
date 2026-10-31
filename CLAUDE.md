@@ -49,7 +49,7 @@ This pipeline IS the product. Each step, and where it lives:
 4. **Show it.** `components/StrategyCard.tsx`, through `lib/strategyText.ts`
    (`describeSpec`) and `lib/inplaySpec.ts` (`describeInplay`). 🔑 **Built from the
    SPEC, never from the model's paraphrase**: what the page says is what will run.
-5. **Test it.** `run_backtest` in Postgres over 101,469 league matches at Pinnacle's
+5. **Test it.** `run_backtest` in Postgres over 145,036 league matches at Pinnacle's
    close, shown by `app/create/LabResult.tsx`. A live rule has no replay; its own
    record is the test, and the page says so.
 6. **Deploy.** `POST /api/agents {deploy: true}` saves and switches on in one step
@@ -68,9 +68,15 @@ This pipeline IS the product. Each step, and where it lives:
 
 | kind | markets | conditions | leagues |
 |---|---|---|---|
-| **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team, rest days, its last game (result and margin), runs (won, unbeaten, lost, winless, up to 10), points in the last 5 overall and at this end, goals scored, conceded and total in the last 5, seasons. On the home or away team, or on "the team" at either end and its opponent (`flatLegs`) | the 22 in `LEAGUES` |
+| **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team, rest days, its last game (result and margin), runs (won, unbeaten, lost, winless, up to 10), points in the last 5 overall and at this end, goals scored, conceded and total in the last 5, seasons. On the home or away team, or on "the team" at either end and its opponent (`flatLegs`) | the 33 in `LEAGUES`; Over/Under on 22, because the 11 in `NO_OU_LEAGUES` hold a 1X2 close and nothing else |
 | **Live rule** (`lib/inplaySpec.ts`) | a team to win, the draw, one more goal | team, kick-off odds, minute window, score, pressure, price; exit: hold, sell after a goal, sell at a minute | any fixture on the pressure poll, or named leagues |
 | **Backtest only** | NBA moneyline, spread, total | 2014-15 → 2021-22, consensus close | cannot deploy: no NBA boards here |
+
+A league joins `LEAGUES`, `PM_COMPETITIONS`, `ESPN_CODE` and the list in
+`refresh_bt_features` together, or "all leagues" counts bets the runner cannot place.
+Five leagues hold closes and stay out for that reason: `rou.1`, `sui.1`, `irl.1` and
+`fin.1` answer with a frozen season, `pol.1` with a 504 (2026-10-31). ⚠️ A 200 proves
+nothing: check `leagues[0].season.year`.
 
 Not possible yet, and the model says so: other sports live, corners, cards, BTTS,
 handicaps, half-time markets pre-match, other goal lines, league-table position, cups and
@@ -93,7 +99,9 @@ Each of these is a way a live trade silently stops being the rule the user teste
 (`agent/lab_strategy_runner.py`, `tests/test_lab_strategy_runner.py`):
 
 - Trade a competition the backtest never saw, or enter earlier than 45 minutes
-  before kick-off (the backtest bought at the close).
+  before kick-off (the backtest bought at the close). That includes Over/Under in the
+  11 leagues whose history holds no Over/Under price (`NO_OU_HISTORY`), although
+  Polymarket lists the market there.
 - Trust Polymarket's title order for home and away. Anything that names a side needs
   ESPN to confirm it, or the fixture is skipped: a side error inverts the bet.
 - Buy into a broken book: spread > 5pp or under $50 of ask depth.
