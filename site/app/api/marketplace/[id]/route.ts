@@ -2,7 +2,7 @@
  *  private, archived or missing agent all answer the same 404. */
 
 import { NextResponse } from 'next/server'
-import { getPublished } from '../../../lib/agents'
+import { publishedAgent } from '../../../lib/marketplaceCache'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +12,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     return NextResponse.json({ ok: false, error: 'No such agent.' }, { status: 404 })
   }
   try {
-    const detail = await getPublished(id)
+    const detail = await publishedAgent(id)
     if (!detail) return NextResponse.json({ ok: false, error: 'No such agent.' }, { status: 404 })
     return NextResponse.json(
       { ok: true, ...detail },
