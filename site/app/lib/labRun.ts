@@ -10,9 +10,11 @@ import { unstable_cache } from 'next/cache'
 import { getSql } from './db'
 import {
   NBA_CAVEATS,
+  VENUE_CAVEATS,
   computeStats,
   flatLegs,
   isNbaMarket,
+  isVenueMarket,
   mergeBacktests,
   verdict,
   type BacktestStats,
@@ -38,7 +40,9 @@ export async function rawBacktest(spec: Spec): Promise<RawBacktest> {
   for (const leg of flatLegs(spec)) {
     const rows = isNbaMarket(leg.market)
       ? await sql`SELECT run_backtest_nba(${sql.json(leg as never)}) AS r`
-      : await sql`SELECT run_backtest(${sql.json(leg as never)}) AS r`
+      : isVenueMarket(leg.market)
+        ? await sql`SELECT run_backtest_venue(${sql.json(leg as never)}) AS r`
+        : await sql`SELECT run_backtest(${sql.json(leg as never)}) AS r`
     raws.push(rows[0].r as RawBacktest)
   }
   return mergeBacktests(raws)
@@ -47,6 +51,7 @@ export async function rawBacktest(spec: Spec): Promise<RawBacktest> {
 export async function runSpec(spec: Spec): Promise<SpecResult> {
   const sql = getSql()
   const nba = isNbaMarket(spec.market)
+  const venue = isVenueMarket(spec.market)
   const raw = await rawBacktest(spec)
 
   // The list of games is a picture of the totals, not part of them: a database
@@ -55,7 +60,9 @@ export async function runSpec(spec: Spec): Promise<SpecResult> {
   if (!nba && raw.n > 0) {
     try {
       for (const leg of flatLegs(spec)) {
-        const r = await sql`SELECT run_backtest_recent(${sql.json(leg as never)}, 8) AS r`
+        const r = venue
+          ? await sql`SELECT run_backtest_venue_recent(${sql.json(leg as never)}, 8) AS r`
+          : await sql`SELECT run_backtest_recent(${sql.json(leg as never)}, 8) AS r`
         recent.push(...((r[0].r as RecentBet[]) ?? []))
       }
       recent = recent.sort((a, b) => b.kickoff.localeCompare(a.kickoff)).slice(0, 8)
@@ -67,14 +74,16 @@ export async function runSpec(spec: Spec): Promise<SpecResult> {
   const stats = computeStats(raw)
   return {
     stats,
-    verdict: verdict(stats),
+    verdict: verdict(stats, spec.market),
     seasons: raw.seasons,
     monthly: raw.monthly,
     recent,
     datasetCaveats: [
       ...(nba
         ? NBA_CAVEATS
-        : ['Entry price = Pinnacle closing odds, flat 1u stakes. Beating the close is the hardest version of this test.']),
+        : venue
+          ? VENUE_CAVEATS
+          : ['Entry price = Pinnacle closing odds, flat 1u stakes. Beating the close is the hardest version of this test.']),
       'Rest days and form only count league games in our dataset — cups are not included.',
     ],
   }

@@ -50,8 +50,10 @@ This pipeline IS the product. Each step, and where it lives:
    (`describeSpec`) and `lib/inplaySpec.ts` (`describeInplay`). 🔑 **Built from the
    SPEC, never from the model's paraphrase**: what the page says is what will run.
 5. **Test it.** `run_backtest` in Postgres over 145,036 league matches at Pinnacle's
-   close, shown by `app/create/LabResult.tsx`. A live rule has no replay; its own
-   record is the test, and the page says so.
+   close, shown by `app/create/LabResult.tsx`. Both teams to score and the other goal
+   lines have no such close, so `run_backtest_venue` replays them over about a year at
+   Polymarket's own prices, and the page says plainly which test this is. A live rule
+   has no replay; its own record is the test, and the page says so.
 6. **Deploy.** `POST /api/agents {deploy: true}` saves and switches on in one step
    (`saveLabAgent`). The backtest stored with it is recomputed on the server from the
    spec, never taken from the browser. When history says it lost money, Deploy is
@@ -69,6 +71,7 @@ This pipeline IS the product. Each step, and where it lives:
 | kind | markets | conditions | leagues |
 |---|---|---|---|
 | **Pre-match** (`lib/backtest.ts`) | 1X2, Over/Under 2.5 | odds band, favourite/underdog, a named team, rest days, its last game (result and margin), runs (won, unbeaten, lost, winless, up to 10), points in the last 5 overall and at this end, goals scored, conceded and total in the last 5, seasons. On the home or away team, or on "the team" at either end and its opponent (`flatLegs`) | the 33 in `LEAGUES`; Over/Under on 22, because the 11 in `NO_OU_LEAGUES` hold a 1X2 close and nothing else |
+| **Pre-match at Polymarket's prices** (`VENUE_MARKETS`, db/085) | both teams to score, Over/Under 1.5, 3.5, 4.5 | the same, but no favourite or underdog: these back no team | 21 of the 33: the 12 in `VENUE_NO_HISTORY` have no usable replay yet (three Scottish, MLS and the Brasileirão under 50 bets, seven more never linked) |
 | **Live rule** (`lib/inplaySpec.ts`) | a team to win, the draw, one more goal | team, kick-off odds, minute window, score, pressure, price; exit: hold, sell after a goal, sell at a minute | any fixture on the pressure poll, or named leagues |
 | **Backtest only** | NBA moneyline, spread, total | 2014-15 → 2021-22, consensus close | cannot deploy: no NBA boards here |
 
@@ -78,7 +81,7 @@ Five leagues hold closes and stay out for that reason: `rou.1`, `sui.1`, `irl.1`
 `fin.1` answer with a frozen season, `pol.1` with a 504 (2026-10-31). ⚠️ A 200 proves
 nothing: check `leagues[0].season.year`.
 
-Not possible yet, and the model says so: other sports live, corners, cards, BTTS,
+Not possible yet, and the model says so: other sports live, corners, cards,
 handicaps, half-time markets pre-match, other goal lines, league-table position, cups and
 European competitions, player-level anything.
 
@@ -87,7 +90,9 @@ because it decides how many people's ideas become agents at all. A new pre-match
 condition has to land in all of: `lib/backtest.ts` (`Spec`, `FILTER_FIELDS`), the prompt
 in `/api/backtest`, `cleanSpec`, `bt_recent_games_fit` in SQL (db/083, read by both
 `run_backtest` and `run_backtest_recent`), `refresh_bt_features` for its column,
-`describeSpec`, and `form_of` / `TEAM_FIGURES` in `agent/lab_strategy_runner.py`. Then
+`describeSpec`, `form_of` / `TEAM_FIGURES` in `agent/lab_strategy_runner.py`, and a column
+of `bt_venue_lines` with its figure in `refresh_bt_venue_lines` (db/085: a column it lacks
+reads NULL, so that replay comes back empty rather than broader). Then
 check parity: the SQL against `form_of` on the same results, and `form_of` over ESPN
 against `matches`. A condition the runner
 cannot read must be in `run_blocker` on BOTH sides, so it tests and honestly refuses
@@ -101,7 +106,12 @@ Each of these is a way a live trade silently stops being the rule the user teste
 - Trade a competition the backtest never saw, or enter earlier than 45 minutes
   before kick-off (the backtest bought at the close). That includes Over/Under in the
   11 leagues whose history holds no Over/Under price (`NO_OU_HISTORY`), although
-  Polymarket lists the market there.
+  Polymarket lists the market, and both teams to score and the other goal lines in the
+  12 with no replay at Polymarket's prices (`NO_VENUE_HISTORY`).
+- Read a fixture's sibling events apart. The moneyline is on the main event and every
+  goal line and BTTS on "- More Markets", so `fixtures_of` merges them first, and one
+  bet per fixture holds across both. Family from `sportsMarketType`, line from `line`,
+  side from the outcome label: never the question text.
 - Trust Polymarket's title order for home and away. Anything that names a side needs
   ESPN to confirm it, or the fixture is skipped: a side error inverts the bet.
 - Buy into a broken book: spread > 5pp or under $50 of ask depth.
@@ -213,7 +223,7 @@ agent/                               Python: the runners and the operator's own 
   espn_stats.py                      scoreboard + team_games, no key ⚠️ DO NOT SET A USER-AGENT
   fixture_match.py                   the only way to match team names ⚠️ never by substring
   db_txn.py                          every daemon's connection: autocommit, no I/O in atomic()
-ingest/                              the data behind the backtest (Stage A daily, see below)
+ingest/                              the data behind the backtest (Stages A and J daily, see below)
 db/                                  numbered migrations, applied by hand
 docs/research_log.md                 everything learned, read it before touching what it covers
 ```
@@ -252,6 +262,9 @@ python -m pytest tests/test_lab_strategy_runner.py tests/test_lab_inplay_runner.
 # the results behind the backtest (on the server: np-stage-a.timer, daily)
 cd ingest && source .venv/bin/activate
 python stage_a_football_data.py --current-season --refresh --continue-on-error
+
+# Polymarket's prices behind the BTTS and goal-line replay (on the server: np-stage-j.timer, daily)
+python stage_j_venue_history.py --pm-catalog --recent-days 5 --link --prices --venue polymarket --linked-only
 ```
 
 ⚠️ **Never `rm -rf .next` while a preview server is running**: `next dev` and `next build`

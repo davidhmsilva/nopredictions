@@ -19,8 +19,9 @@ WHAT IT WILL NOT DO, each a way the live trade would silently stop being the
 rule the user tested:
 
   * Trade a competition the backtest never saw. "All leagues" in the Lab means
-    the leagues in bt_features, not every board Polymarket lists, and for
-    Over/Under only those with Over/Under prices in it.
+    the leagues in bt_features, not every board Polymarket lists, for Over/Under
+    only those with Over/Under prices in it, and for both teams to score and the
+    other goal lines only those Polymarket's own history covers (db/085).
   * Enter early. The backtest bought at Pinnacle's CLOSE, so entries wait for
     the last ENTRY_WINDOW_MIN minutes before kickoff.
   * Trust Polymarket's title order for home and away. NBA titles are
@@ -169,7 +170,23 @@ CALENDAR_YEAR_ESPN = frozenset({"usa.1", "arg.1", "bra.1", "swe.1", "nor.1", "ch
 _TITLE_RE = re.compile(r"^(.+?)\s+vs\.?\s+(.+?)$", re.I)
 _WIN_RE = re.compile(r"^will\s+(?P<team>.+?)\s+win(?:\s+on\s+[\d-]+)?\??$", re.I)
 _DRAW_RE = re.compile(r"\bdraw\b", re.I)
-_OU25_RE = re.compile(r"\bO/U\s*2\.5\b", re.I)
+
+# Over/under goals, by the `line` Gamma gives the market. Each value is a Lab market.
+# ⚠️ Replayed in Postgres: ou25 at Pinnacle's close, the rest and btts at Polymarket's
+#    own prices (db/085). VENUE_MARKETS in site/app/lib/backtest.ts is that list.
+GOAL_LINES = {1.5: "ou15", 2.5: "ou25", 3.5: "ou35", 4.5: "ou45"}
+LINE_OF = {market: line for line, market in GOAL_LINES.items()}
+BTTS = "btts"
+GOAL_MARKETS = frozenset(GOAL_LINES.values()) | {BTTS}
+# No usable history behind db/085, so these markets have no replay there: never on the
+# board (Scotland), never linked to our results (J1 and the others), or under 50 bets
+# (MLS, Brasileirão).
+# O/U 2.5 has Pinnacle's close instead (NO_OU_HISTORY). Same list as VENUE_NO_HISTORY in
+# site/app/lib/backtest.ts and the one in refresh_bt_venue_lines.
+NO_VENUE_HISTORY = frozenset({
+    "SCO-CH", "SCO-L1", "SCO-L2", "USA-MLS", "BRA-SA", "JPN-J1", "SWE-AL", "NOR-EL",
+    "RUS-PL", "CHN-CSL", "DEN-SL", "AUT-BL",
+})
 
 
 # ── the spec ─────────────────────────────────────────────────────────────────
@@ -178,7 +195,7 @@ def run_blocker(spec: dict) -> str | None:
     """Why this spec cannot run live, or None. Same wording as the site
     (runBlocker in site/app/lib/agents.ts); this file is the authority: it
     re-checks every running spec and writes run_blocker itself."""
-    if spec.get("market") not in ("1x2", "ou25"):
+    if spec.get("market") != "1x2" and spec.get("market") not in GOAL_MARKETS:
         return ("NBA ideas are backtest-only: the NBA data ends in 2021-22 and "
                 "there are no NBA boards this agent trades.")
     end = spec.get("season_end")
@@ -193,6 +210,10 @@ def run_blocker(spec: dict) -> str | None:
     if spec.get("market") == "ou25" and leagues and NO_OU_HISTORY.issuperset(leagues):
         return ("We hold no Over/Under prices for this league, so this rule has never "
                 "been tested and running it would trade blind.")
+    if (spec.get("market") in GOAL_MARKETS and spec.get("market") != "ou25"
+            and leagues and NO_VENUE_HISTORY.issuperset(leagues)):
+        return ("We hold no Polymarket prices for this market in this league, so this rule "
+                "has never been tested and running it would trade blind.")
     unread = unreadable_bounds(spec)
     if unread:
         return (f"This rule has a condition this agent cannot read yet ({', '.join(unread)}), "
@@ -438,6 +459,25 @@ def is_full_match_event(title: str) -> bool:
     return m is None or m.group(1).strip().lower() == "more markets"
 
 
+def fixtures_of(events: list[dict]) -> list[dict]:
+    """One event per fixture, with the markets of all its siblings on it.
+
+    Polymarket splits a fixture: the moneyline on the main event, every goal line and
+    both teams to score on "- More Markets". Read apart, "one bet per fixture" would
+    depend on which sibling a bet was bought on. They share a pairing and a start. A
+    league it cannot read keeps its own group and is skipped later, as it always was."""
+    merged: dict[tuple, dict] = {}
+    for raw in events:
+        title = raw.get("title") or ""
+        teams, ko = teams_from_title(title), kickoff_of(raw)
+        if not is_full_match_event(title) or not teams or not ko:
+            continue
+        key = (teams, ko.date(), competition_code(raw))
+        one = merged.setdefault(key, {**raw, "title": re.sub(r"\s+-\s+.*$", "", title).strip(), "markets": []})
+        one["markets"] = one["markets"] + list(raw.get("markets") or [])
+    return list(merged.values())
+
+
 def teams_from_title(title: str) -> tuple[str, str] | None:
     clean = re.sub(r"\s+-\s+.*$", "", title or "").strip()
     m = _TITLE_RE.match(clean)
@@ -467,12 +507,14 @@ def _leg(m: dict, outcome: str) -> dict | None:
 
 
 def parse_markets(event: dict) -> dict:
-    """The markets a Lab spec can buy: the three 1X2 legs and O/U 2.5.
+    """The markets a Lab spec can buy: the three 1X2 legs, the goal lines in
+    GOAL_LINES, and both teams to score.
 
-    Families come from `sportsMarketType`, never the question text — "… O/U 2.5
-    Corners" matches a goals pattern perfectly. Over/Under come from the outcome
-    LABELS, never their order."""
-    out: dict = {"win": {}, "draw": None, "ou25": None}
+    Families come from `sportsMarketType` and lines from `line`, never the question
+    text: "… O/U 2.5 Corners" matches a goals pattern perfectly, and the first half,
+    the second half and each team have totals families of their own. Over/Under and
+    Yes/No come from the outcome LABELS, never their order."""
+    out: dict = {"win": {}, "draw": None, BTTS: None, **{m: None for m in GOAL_LINES.values()}}
     for m in event.get("markets") or []:
         if m.get("closed") or m.get("active") is False:
             continue
@@ -489,10 +531,15 @@ def parse_markets(event: dict) -> dict:
                 w = _WIN_RE.match(rem)
                 if w:
                     out["win"][w.group("team").strip()] = leg
-        elif kind == "totals" and _OU25_RE.search(q):
+        elif kind == "totals":
+            market = GOAL_LINES.get(_f(m.get("line")))
             over, under = _leg(m, "over"), _leg(m, "under")
-            if over and under:
-                out["ou25"] = {"over": over, "under": under}
+            if market and over and under:
+                out[market] = {"over": over, "under": under}
+        elif kind == "both_teams_to_score":
+            yes, no = _leg(m, "yes"), _leg(m, "no")
+            if yes and no:
+                out[BTTS] = {"yes": yes, "no": no}
     return out
 
 
@@ -534,6 +581,21 @@ def _leg_for(team: str, legs: dict) -> dict | None:
     return scored[0][1]
 
 
+def goal_label(market: str, side: str, title: str) -> str:
+    if market == BTTS:
+        return f"Both teams to score: {side.capitalize()} — {title}"
+    return f"{side.capitalize()} {LINE_OF[market]} — {title}"
+
+
+def fixture_condition_ids(markets: dict) -> list[str]:
+    """Every market on this fixture a Lab spec can buy. "Has this agent already bet on
+    this game?" is asked of all of them."""
+    legs = list((markets.get("win") or {}).values()) + [markets.get("draw")]
+    for market in GOAL_MARKETS:
+        legs += list((markets.get(market) or {}).values())
+    return sorted({x["condition_id"] for x in legs if x and x.get("condition_id")})
+
+
 def pick(spec: dict, ev: EventView) -> tuple[dict | None, str, str]:
     """(leg to buy, outcome label, reason). The leg is None when the fixture does
     not fit; the reason says which condition failed, for --dry-run."""
@@ -556,13 +618,21 @@ def pick(spec: dict, ev: EventView) -> tuple[dict | None, str, str]:
         return None, "", bad
 
     side = spec.get("side")
-    if spec.get("market") == "ou25":
-        ou = ev.markets.get("ou25")
-        if not ou or side not in ("over", "under"):
-            return None, "", "no O/U 2.5"
-        return ou[side], f"{'Over' if side == 'over' else 'Under'} 2.5 — {ev.title}", "ok"
+    market = spec.get("market")
+    if market in GOAL_MARKETS:
+        # The replay at Polymarket's prices saw none of these leagues, and a goals market
+        # backs no team, so a favourite takes no games there (bt_venue_fit) and none
+        # here. O/U 2.5 keeps what its running agents were deployed on.
+        if market != "ou25" and ev.code in NO_VENUE_HISTORY:
+            return None, "", "league"
+        if market != "ou25" and spec.get("fav_status"):
+            return None, "", "favourite filter"
+        legs = ev.markets.get(market)
+        if not legs or side not in legs:
+            return None, "", f"no {market}"
+        return legs[side], goal_label(market, side, ev.title), "ok"
 
-    if spec.get("market") != "1x2":
+    if market != "1x2":
         return None, "", "market"
     if side == "draw":
         leg = ev.markets.get("draw")
@@ -700,7 +770,10 @@ def already_in(conn, strategy_id: int, condition_ids: list[str]) -> bool:
         return cur.fetchone() is not None
 
 
-def write_trade(conn, strat: dict, ev: EventView, leg: dict, label: str, book: dict) -> int:
+MARKET_TYPE = {BTTS: "btts", **{m: "over_under" for m in GOAL_LINES.values()}}
+
+
+def write_trade(conn, strat: dict, ev: EventView, leg: dict, label: str, book: dict, market: str | None) -> int:
     ask = float(book["best_ask"])
     meta = {"event_title": ev.title, "competition": ev.code, "token_id": leg["token_id"],
             "outcome": leg["outcome"], "home": ev.home, "away": ev.away}
@@ -720,7 +793,7 @@ def write_trade(conn, strat: dict, ev: EventView, leg: dict, label: str, book: d
                    SET title = EXCLUDED.title, resolution_time = EXCLUDED.resolution_time
                 RETURNING id""",
                 (leg["condition_id"], leg["question"] or label,
-                 "over_under" if "2.5" in label else "1x2", ev.kickoff, json.dumps(meta)))
+                 MARKET_TYPE.get(market, "1x2"), ev.kickoff, json.dumps(meta)))
             market_id = cur.fetchone()[0]
             cur.execute("""
                 INSERT INTO paper_trades (strategy_id, market_id, outcome, entry_price, entry_odds,
@@ -781,13 +854,11 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
         return 0
 
     now = datetime.now(timezone.utc)
-    events = fetch_upcoming(now)
+    events = fixtures_of(fetch_upcoming(now))
     espn_cache: dict[tuple, list] = {}
     form_cache: dict[tuple, TeamForm | None] = {}
     entered = considered = 0
     for raw in events:
-        if not is_full_match_event(raw.get("title") or ""):
-            continue
         code = competition_code(raw)
         teams = teams_from_title(raw.get("title") or "")
         if not code or not teams:
@@ -808,11 +879,7 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
             if leg is None:
                 continue
             considered += 1
-            cids = [x["condition_id"] for x in (
-                list((ev.markets.get("win") or {}).values())
-                + [ev.markets.get("draw")]
-                + list((ev.markets.get("ou25") or {}).values())) if x and x.get("condition_id")]
-            if conn is not None and already_in(conn, strat["id"], cids):
+            if conn is not None and already_in(conn, strat["id"], fixture_condition_ids(ev.markets)):
                 continue
             # Last of the free checks, so a rule on a team's form costs ESPN
             # requests only on fixtures that fit everything else.
@@ -829,7 +896,7 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
             if dry_run:
                 log.info(f"[lab_runner] DRY #{strat['id']} would buy {label} at {book['best_ask']:.3f}")
                 continue
-            tid = write_trade(conn, strat, ev, leg, label, book)
+            tid = write_trade(conn, strat, ev, leg, label, book, spec.get("market"))
             entered += 1
             log.info(f"[lab_runner] #{strat['id']} ENTERED pt#{tid} {label} at {book['best_ask']:.3f}")
 

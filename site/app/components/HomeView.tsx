@@ -18,6 +18,7 @@ import { MarketCard } from '../marketplace/MarketCard'
 
 const EXAMPLES = [
   'Back the favourite after it lost its last game',
+  'Both teams to score when both have been scoring',
   'Draws in Serie B when both teams have gone 3 games without a win',
   'Back a 1.30-1.50 favourite that is pressing while level, sell after the next goal',
 ]
@@ -29,7 +30,7 @@ const HOME_AGENTS = 6
 const STEPS = [
   { title: 'Describe your idea', body: 'In your own words, the way you would tell a friend.' },
   { title: 'The AI writes the strategy', body: 'It asks what your idea leaves open, then sets exact rules: what to back, when, where, at what price.' },
-  { title: 'See what it would have made', body: 'Replayed over 14 years of real odds, with how sure the result is.' },
+  { title: 'See what it would have made', body: 'Replayed on up to 14 years of real odds, with how sure the result is.' },
   { title: 'Deploy your agent', body: 'It bets every game that fits, at Polymarket’s real price, and you watch its record build.' },
 ]
 
@@ -64,7 +65,7 @@ export function HomeView({ initial }: { initial: AgentSummary[] | null }) {
         <h1 className="hm-h1">Turn your betting idea into an AI agent</h1>
         <p className="hm-sub">
           Describe it in your own words. The AI turns it into a strategy with exact rules, shows what
-          it would have made over 14 years of real odds, and deploys it as an agent that trades every
+          it would have made on up to 14 years of real odds, and deploys it as an agent that trades every
           game that fits.
         </p>
 
