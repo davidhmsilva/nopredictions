@@ -1,0 +1,13 @@
+# team_watch.py --report --save — weekly, Monday morning, once the weekend's
+# games are in Football-Data and Polymarket's closes are recorded
+[Unit]
+Description=NOPREDICTIONS timer team-watch
+
+[Timer]
+OnCalendar=Mon *-*-* 08:00:00 UTC
+Persistent=true
+AccuracySec=1s
+Unit=np-job@team-watch.service
+
+[Install]
+WantedBy=timers.target

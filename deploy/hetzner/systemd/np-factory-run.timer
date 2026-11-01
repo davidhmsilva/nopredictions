@@ -1,0 +1,12 @@
+# factory_cli.py run — every minute (offset 20s from the recorders)
+[Unit]
+Description=NOPREDICTIONS timer factory-run
+
+[Timer]
+OnCalendar=*:*:20
+Persistent=true
+AccuracySec=1s
+Unit=np-job@factory-run.service
+
+[Install]
+WantedBy=timers.target

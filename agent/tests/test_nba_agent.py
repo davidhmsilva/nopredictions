@@ -377,6 +377,92 @@ def test_espn_finals_keeps_only_finished_games_keyed_on_the_pair(monkeypatch):
                       {"Los Angeles Clippers": 112, "Utah Jazz": 108}}
 
 
+# ── DraftKings through ESPN, when the Odds API has nothing (obs_version 2) ──
+
+def _espn_dk_payload(start=None, home="Brooklyn Nets", away="Detroit Pistons"):
+    """ESPN's real scoreboard shape (2026-10-26): DraftKings, American odds,
+    `close` = the current line, total lines spelled 'o221.5' / 'u221.5'."""
+    side = lambda line, odds: {"close": {"line": line, "odds": odds}}   # noqa: E731
+    return {"events": [{"date": (start or KO).isoformat(), "season": {"type": 2},
+                        "competitions": [{
+        "status": {"type": {"name": "STATUS_SCHEDULED"}},
+        "competitors": [{"homeAway": "home", "team": {"displayName": home}, "score": "0"},
+                        {"homeAway": "away", "team": {"displayName": away}, "score": "0"}],
+        "odds": [{"provider": {"name": "DraftKings"},
+                  "moneyline": {"home": {"close": {"odds": "+230"}}, "away": {"close": {"odds": "-285"}}},
+                  "pointSpread": {"home": side("+7.5", "-110"), "away": side("-7.5", "-110")},
+                  "total": {"over": side("o221.5", "-112"), "under": side("u221.5", "-108")}}]}]}]}
+
+
+def _dk_cache(monkeypatch, payload):
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return payload
+    monkeypatch.setattr(na.requests, "get", lambda *a, **k: R())
+    return na.espn_dk_cache({"20261021": na._espn_day("20261021")}, datetime.now(timezone.utc))
+
+
+def test_american_odds_convert_to_decimal():
+    assert na.american_to_decimal("+150") == pytest.approx(2.50)
+    assert na.american_to_decimal("-200") == pytest.approx(1.50)
+    assert na.american_to_decimal("100") == pytest.approx(2.00)
+    assert na.american_to_decimal("EVEN") is None and na.american_to_decimal(None) is None
+
+
+def test_espn_draftkings_line_becomes_a_dk_sharp_with_all_three_markets(monkeypatch):
+    g = na.game_from_event(_event([]))
+    sh = na.sharp_for(g, _dk_cache(monkeypatch, _espn_dk_payload()))
+    assert sh is not None and sh.book == "dk_espn" and sh.model_ok
+    assert sh.spread[NETS][0] == 7.5 and sh.spread[PISTONS][0] == -7.5
+    assert sh.total[0] == 221.5 and sh.ml[NETS][0] < 0.32
+    assert sh.anchor.mu == pytest.approx(-7.5, abs=0.8)        # Nets, at home, are dogs
+
+
+def test_espn_line_without_draftkings_or_with_half_a_market_is_dropped(monkeypatch):
+    p = _espn_dk_payload()
+    p["events"][0]["competitions"][0]["odds"][0]["provider"]["name"] = "ESPN BET"
+    assert _dk_cache(monkeypatch, p) is None
+    p = _espn_dk_payload()
+    del p["events"][0]["competitions"][0]["odds"][0]["pointSpread"]["away"]
+    assert na.sharp_for(na.game_from_event(_event([])), _dk_cache(monkeypatch, p)) is None
+
+
+def test_espn_line_for_another_game_of_the_same_clubs_is_refused(monkeypatch):
+    g = na.game_from_event(_event([]))
+    cache = _dk_cache(monkeypatch, _espn_dk_payload(start=KO + timedelta(days=2)))
+    assert na.sharp_for(g, cache) is None
+
+
+def test_draftkings_prices_are_labelled_dk_never_sharp(monkeypatch):
+    g = na.game_from_event(_event([
+        _mkt("totals", "Pistons vs. Nets: O/U 221.5", ["Over", "Under"], 0.47, 0.48, line=221.5),
+        _mkt("totals", "Pistons vs. Nets: O/U 225.5", ["Over", "Under"], 0.40, 0.41, line=225.5)]))
+    sh = na.sharp_for(g, _dk_cache(monkeypatch, _espn_dk_payload()))
+    srcs = {(c.line, c.side): c.source for c in na.candidates(g, sh)}
+    assert srcs[(221.5, "Over")] == "dk_exact" and srcs[(225.5, "Over")] == "dk_model"
+
+
+def test_draftkings_edges_need_twice_the_pinnacle_threshold():
+    assert na.decide(_cand(2.9, "dk_exact"), fresh=True, mins=300) is None
+    assert na.decide(_cand(3.1, "dk_exact"), fresh=True, mins=300) == "edge"
+    assert na.decide(_cand(4.9, "dk_model"), fresh=True, mins=300) is None
+    assert na.decide(_cand(5.1, "dk_model"), fresh=True, mins=300) == "edge"
+    assert na.decide(_cand(-1.0, "dk_exact"), fresh=True, mins=35) == "forced"
+
+
+def test_a_fresh_odds_api_line_beats_draftkings_and_a_stale_one_does_not():
+    pin, dk = _sharp(), _sharp()
+    dk.book = "dk_espn"
+    assert na.pick_sharp(pin, 10, dk, 45) == (pin, True)
+    assert na.pick_sharp(pin, 300, dk, 45) == (dk, True)
+    assert na.pick_sharp(pin, 300, None, 45) == (pin, False)     # forced only, never edge
+    assert na.pick_sharp(None, None, dk, None) == (dk, True)
+    assert na.pick_sharp(None, None, None, 45) == (None, False)
+
+
 def test_the_snapshot_read_asks_by_game_not_the_whole_table():
     """It scanned nba_candidates every 5 minutes, 64 MB a call on 2026-10-31."""
     seen = {}
