@@ -3301,3 +3301,84 @@ team-matches, 11 figures, 0 differences. `form_of` over ESPN against `matches`, 
 - `sco.3` and `sco.4` answer with a season frozen on 2025-09-27. A code answering is not a code
   being current: check `leagues[0].season.year`.
 
+
+## 11 more leagues, and which 6 stayed out (2026-10-31)
+
+Stage K holds results and Pinnacle closes on 17 leagues the backtest did not read (59,387
+matches). Measured per league before adding any. Board and books are one snapshot, 483
+fixtures over 9 days.
+
+| league | fixtures | sides ESPN confirmed | legs passing the runner's book check, under 48h | ESPN season |
+|---|---|---|---|---|
+| USA-MLS | 29 | 29 | 42/42 | 2026, current |
+| ARG-PD | 11 | 11 | 21/21 | 2026, current |
+| BRA-SA | 11 | 10 | 3/3 | 2026, current |
+| MEX-LMX | 15 | 15 | 18/18 | 2026-27, current |
+| JPN-J1 | 14 | 14 | 12/12 | 2026-27, current |
+| SWE-AL | 9 | 9 | 15/15 | 2026, current |
+| NOR-EL | 13 | 13 | 15/15 | 2026, current |
+| RUS-PL | 13 | 13 | 15/15 | 2026-27, current |
+| DEN-SL | 11 | 11 | 12/12 | 2026-27, current |
+| AUT-BL | 4 | 4 | 12/12 | 2026-27, current |
+| CHN-CSL | 8 | 5 | none under 48h; 15/24 at any range | 2026, current |
+| ROU-L1 | 13 | 0 | 12/12 | frozen 2025-09-29 |
+| SUI-SL | 4 | 0 | 12/12 | frozen 2025-09-28 |
+| IRL-PD | 1 | 0 | 3/3 | frozen 2025-11-01 |
+| FIN-VL | 3 | 0 | 8/9 | year 2000, no games |
+| POL-EK | 4 | 0 | 9/9 | 504, every try |
+
+**Polymarket and its books were never the limit: ESPN is.** Near kick-off every league passes
+the book check about as well as the 22 did. The five with no current feed cannot confirm a
+side, and form cannot be read, so only draw rules could run on them; "all leagues" would count
+bets no agent can place. They stay out until there is another source for sides. ARG-CLP stays
+out because the competition ended in 2024. The 4 unconfirmed fixtures were 4+ days out, which
+ESPN may not list yet.
+
+**These leagues hold a 1X2 close and nothing else.** Football-Data's extra files have no
+Over/Under and no opening price: 0 of 43,567 rows have either. So Over/Under over "all leagues"
+keeps its 22 leagues and its old answer, and the runner refuses it on these (`NO_OU_HISTORY`),
+although Polymarket lists the market. CLV over "all leagues" is read from the old leagues only,
+and the page says on how many bets. `venue_market_history` holds real Polymarket Over/Under
+prices, which is the way to test it here: see the goal-lines work.
+
+**What `matches` holds decides what the live reading counts.** ESPN's season types against
+`matches`, 2024 on: MLS, Argentine and Mexican play-offs are in (keep them). Austrian and Danish
+second phases are in (keep). Their European play-offs are not, and neither is J1's stand-alone
+competition of February-June 2026, which ESPN files under 2026-27 (dropped, `is_post_season`).
+
+**Seasons.** `season=2025` on usa.1, arg.1, bra.1, swe.1, nor.1 and chn.1 is the calendar year.
+In April 2027 the July boundary would have asked for 2025 and skipped all of 2026: a wrong
+number, not a missing one (`CALENDAR_YEAR_ESPN`). mex.1's 2025 is 2025-26, and jpn.1's 2026 is
+2026-27, so the boundary is right for both. `CURRENT_SEASON` needs nothing: a calendar label's
+start year means the same thing (2025 is the last finished season, 2026 the current one), and
+the one case it blocks, a rule asking for a season that has not started, has no history anyway.
+
+**ESPN files a game under the US day.** An evening kick-off in the Americas after midnight UTC
+sits under the day before, so asking by UTC date lost it (MLS 17/29 confirmed before, 25/29
+after asking both days, 29/29 with aliases). The runner now always asks for both.
+
+**Parity of `form_of` over ESPN against `matches`,** through the real `team_history`, every game
+since 2026-01-01, as the feed stood that day. 4,573 team-games, 205 of 206 clubs. Wrong numbers:
+form_pts5 61 (1.3%), last_gd 13 (0.3%), rest_days 26 (0.6%). Unknown, which fails the rule:
+form_pts5 32 (0.7%), venue_pts5 58 (1.3%). AUT, DEN, RUS, J1 and BRA have none at all on form.
+What remains, all traced game by game:
+- ESPN shows 0-0 for games on 2026-05-29 in CHN, NOR and SWE that `matches` has as 3-2, 2-2,
+  1-3 and 2-2. Wrong for 5 games after each, already aged out.
+- 8 Argentine knock-out readings: ESPN counts extra time, `matches` has the 90 minutes.
+- MLS rest days differ by one on 20 of 808, around midnight UTC.
+
+**Other things found.**
+- Clubs are split across team ids in `matches` where a source or a name changed: Club Leon / Leon
+  / León, Atl. San Luis / Atletico San Luis, Bragantino / RB Bragantino, Ham-Kam / HamKam, and
+  Chinese renames (Shandong Luneng → Taishan). Form is per team id, so the first 5 games after a
+  switch read as unknown and fail the rule; coverage stays 96-99% of rows. No game is stored
+  twice. It also means a rule naming such a club tests part of its history, and parity did not
+  compare the games under the second id.
+- `matches` stops on 2026-08-02 for Russia, and Stage K is not scheduled. No effect on trading,
+  which reads ESPN, but parity covers Russia only to there.
+- `team_score` scored "AIK" against "AIK" as 0: every token is a noise word. Fixed.
+- A club named without a league now finds namesakes: "Arsenal" over all leagues goes from 258 to
+  530 bets with Arsenal Tula and Arsenal Sarandi, and its yield from +4.0% to +8.0%. The prompt
+  now sets the club's league, and the page warns if none is named.
+- A pooled backend on 6543 answered with `default_transaction_read_only = on` while others said
+  off, source unknown. A script that writes (a temp table) has to check, and try again.

@@ -246,3 +246,15 @@ def test_a_dead_match_still_scores_low_rather_than_nothing():
     # And a busy one on the same shape has to clear it by a distance.
     busy = danger_index(4, 0, 0, 3, 65.0, has_xg=False, has_inside=False)
     assert busy > dead + 40
+
+
+def test_only_what_matches_does_not_hold_is_left_out_of_a_team_s_games():
+    for name in ("Promotion Playoff", "Relegation Round", "Conference League Playoff Finals",
+                 "Europa Conference Playoff Finals", "Europa Conference League Playoff",
+                 "2026 J1 100 Year Vision League", "Placement Playoffs", "Championship"):
+        assert espn.is_post_season(name), name
+    # `matches` holds all of these (measured 2026-10-31).
+    for name in ("Regular Season", "Playoff Round", "Second Phase", "Final Passage", "Torneo Apertura",
+                 "Apertura - Quarterfinals", "Clausura 2025 - Finals", "Eastern Conference Playoffs - Round One",
+                 "MLS Cup", "Championship Round", "2026 Brasileiro Serie A ", None):
+        assert not espn.is_post_season(name), name

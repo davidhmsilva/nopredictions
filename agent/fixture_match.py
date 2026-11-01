@@ -236,7 +236,8 @@ def team_score(a: str, b: str, *, womens: bool = False) -> float:
     if ma != mb:
         return 0.0
     if not ta or not tb:
-        return 0.0
+        # A club whose whole name is a noise word: "AIK" has no token to score.
+        return 1.0 if _norm_key(a) == _norm_key(b) and a.strip().lower() == b.strip().lower() else 0.0
 
     short, long = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
     if all(any(_token_hit(x, y) for y in long) for x in short):
