@@ -42,6 +42,8 @@ import {
   namesItsTeam,
   verdict,
   type Spec,
+  noOuHistory,
+  noVenueHistory,
 } from './backtest'
 import { rawBacktest } from './labRun'
 import { accountOf } from './plan'
@@ -244,6 +246,12 @@ export function runBlocker(spec: Spec | InplaySpec): string | null {
   }
   if (spec.season_end != null && spec.season_end < CURRENT_SEASON - 1) {
     return `Tested only up to the ${spec.season_end}-${String(spec.season_end + 1).slice(2)} season; running it today would trade outside what was tested.`
+  }
+  if (noOuHistory(spec)) {
+    return 'We hold no Over/Under prices for this league, so this rule has never been tested and running it would trade blind.'
+  }
+  if (noVenueHistory(spec)) {
+    return 'We hold no Polymarket prices for this market in this league, so this rule has never been tested and running it would trade blind.'
   }
   return null
 }

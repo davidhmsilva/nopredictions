@@ -29,9 +29,16 @@
 --
 -- Also dropped, each a gate the runner applies: a price outside 0.02-0.98. Not
 -- replayable: the runner's $50 of ask depth, because a past book is not on record.
--- A voided market (payout 0.5) is not a bet: 0 in these leagues. The Scottish
--- Championship, League One and League Two were never on the board in this table, so
--- 19 of the Lab's 22 leagues have rows, and the runner holds these markets to those.
+-- A voided market (payout 0.5) is not a bet: 0 in these leagues.
+--
+-- 21 of the Lab's 33 leagues. The other 12 are held out by name, here, on the site
+-- (VENUE_NO_HISTORY) and in the runner (NO_VENUE_HISTORY), so "all leagues" never counts
+-- a bet the runner would refuse. The Scottish Championship, League One and League Two
+-- were never on the board. J1, Allsvenskan, Eliteserien, Russia, China, Denmark and
+-- Austria are on it, but Stage J linked none of their markets, and priced only linked
+-- ones. MLS (9 bets) and the Brasileirão (34) are under 50 bets over all eight sides,
+-- which is not a test of a league. Argentina (53) and Greece (57) just clear it, and a
+-- page's first and last dates say how little that is. Liga MX has 723, up to May 2026.
 --
 -- Side and line come from venue_market_history's outcome labels and `line`, never
 -- from the position of an outcome or the text of a question.
@@ -250,9 +257,13 @@ BEGIN
     JOIN matches m   ON m.id = p.match_id AND m.status = 'finished' AND m.home_score IS NOT NULL
     JOIN seasons s   ON s.id = m.season_id
     -- Whichever leagues the Lab covers, so a league added there arrives here on its
-    -- next refresh, with no second list to forget.
+    -- next refresh, but for those with no usable history (see the top). A league leaves
+    -- this list together with the other two.
     JOIN leagues l   ON l.id = s.league_id
                     AND l.code IN (SELECT DISTINCT league_code FROM bt_features)
+                    AND l.code <> ALL (ARRAY['SCO-CH', 'SCO-L1', 'SCO-L2', 'USA-MLS', 'BRA-SA',
+                                             'JPN-J1', 'SWE-AL', 'NOR-EL', 'RUS-PL', 'CHN-CSL',
+                                             'DEN-SL', 'AUT-BL'])
     JOIN teams th    ON th.id = m.home_team_id
     JOIN teams ta    ON ta.id = m.away_team_id
     LEFT JOIN tf hf  ON hf.match_id = m.id AND hf.team_id = m.home_team_id

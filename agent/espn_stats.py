@@ -243,8 +243,18 @@ def fetch_league(code: str, session: requests.Session | None = None, dates: str 
 # Season types that are not league games. `matches` does not hold them, so counting
 # them would read a different last 5 from the backtest's for any club in them
 # (measured 2026-10-31 over 3,662 team-games). NOT "Playoff Round": the Belgian and
-# Greek second phases go by that name, and `matches` does hold those.
-_POST_SEASON = ("Promotion", "Relegation", "Conference League", "European Competition")
+# Greek second phases go by that name, and `matches` does hold those. Nor the MLS,
+# Argentine and Mexican play-offs, or the Austrian and Danish second phases: `matches`
+# holds all of them. J1's stand-alone competition of February-June 2026 is the odd one
+# out, filed by ESPN under the 2026-27 season and absent from `matches`.
+_POST_SEASON = ("Promotion", "Relegation", "Conference League", "European Competition",
+                "Europa Conference", "2026 J1 100 Year Vision")
+_POST_SEASON_EXACT = ("Championship", "Placement Playoffs")    # J1 2026, same competition
+
+
+def is_post_season(name: object) -> bool:
+    text = str(name or "")
+    return text.startswith(_POST_SEASON) or text in _POST_SEASON_EXACT
 
 
 @dataclass(frozen=True)
@@ -289,7 +299,7 @@ def team_games(code: str, team_id: str, season: int | None = None,
         comps = (ev.get("competitions") or [{}])[0]
         if not ((comps.get("status") or {}).get("type") or {}).get("completed"):
             continue
-        if str((ev.get("seasonType") or {}).get("name") or "").startswith(_POST_SEASON):
+        if is_post_season((ev.get("seasonType") or {}).get("name")):
             continue
         sides = comps.get("competitors") or []
         own = next((c for c in sides if str(c.get("id")) == str(team_id)), None)

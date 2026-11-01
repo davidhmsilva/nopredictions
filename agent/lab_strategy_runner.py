@@ -19,9 +19,9 @@ WHAT IT WILL NOT DO, each a way the live trade would silently stop being the
 rule the user tested:
 
   * Trade a competition the backtest never saw. "All leagues" in the Lab means
-    the 22 leagues in bt_features, not every board Polymarket lists, and for both
-    teams to score and the other goal lines, the leagues Polymarket's own history
-    covers (db/085).
+    the leagues in bt_features, not every board Polymarket lists, for Over/Under
+    only those with Over/Under prices in it, and for both teams to score and the
+    other goal lines only those Polymarket's own history covers (db/085).
   * Enter early. The backtest bought at Pinnacle's CLOSE, so entries wait for
     the last ENTRY_WINDOW_MIN minutes before kickoff.
   * Trust Polymarket's title order for home and away. NBA titles are
@@ -75,7 +75,6 @@ CLOB = "https://clob.polymarket.com"
 # The season being traded, as a Lab season START year (2026-27 → 2026).
 CURRENT_SEASON = 2026
 ENTRY_WINDOW_MIN = 45          # enter only this close to kickoff
-ESPN_BY_DATE = False           # --window sets it
 MAX_SPREAD = 0.05              # ask − bid; wider and the quote is not a price
 MIN_ASK_DEPTH_USD = 50.0       # notional on the top five ask levels
 MIN_ASK, MAX_ASK = 0.02, 0.98
@@ -120,8 +119,28 @@ PM_COMPETITIONS: dict[str, tuple[set[str], set[str]]] = {
     "SCO-CH":  ({"scottish-championship"}, {"scottish championship"}),
     "SCO-L1":  ({"scottish-league-one"}, {"scottish league one"}),
     "SCO-L2":  ({"scottish-league-two"}, {"scottish league two"}),
+    "USA-MLS": ({"mls"}, {"mls"}),
+    "ARG-PD":  ({"arg"}, {"argentina primera división"}),
+    "BRA-SA":  ({"brazil-serie-a"}, {"brazil serie a"}),
+    "MEX-LMX": ({"mex"}, {"liga mx"}),
+    "JPN-J1":  ({"japan-j-league"}, {"japan j league"}),
+    "SWE-AL":  ({"sweden-allsvenskan"}, {"sweden allsvenskan"}),
+    "NOR-EL":  ({"norway-eliteserien"}, {"norway eliteserien"}),
+    "RUS-PL":  ({"rus"}, {"russian premier league"}),
+    "CHN-CSL": ({"chinese-super-league"}, {"chinese super league"}),
+    "DEN-SL":  ({"denmark-superliga"}, {"denmark superliga"}),
+    "AUT-BL":  ({"austria-bundesliga"}, {"austria bundesliga"}),
 }
 LAB_CODES = frozenset(PM_COMPETITIONS)
+
+# Football-Data's extra-league files carry a 1X2 close and nothing else: no
+# Over/Under, no opening price. So an Over/Under rule has never been tested on
+# these, and "all leagues" must not start trading them because Polymarket lists the
+# market. Same list as NO_OU_LEAGUES in site/app/lib/backtest.ts.
+NO_OU_HISTORY = frozenset({
+    "USA-MLS", "ARG-PD", "BRA-SA", "MEX-LMX", "JPN-J1", "SWE-AL", "NOR-EL", "RUS-PL",
+    "CHN-CSL", "DEN-SL", "AUT-BL",
+})
 
 # Where ESPN can confirm home/away. A league missing here can still run a rule
 # that does not care about sides (draw, over, under), and nothing else.
@@ -138,7 +157,15 @@ ESPN_CODE = {
     "NED-ED": "ned.1", "POR-PL": "por.1", "BEL-JPL": "bel.1", "TUR-SL": "tur.1",
     "GRE-SL": "gre.1",
     "SCO-PR": "sco.1", "SCO-CH": "sco.2",
+    "USA-MLS": "usa.1", "ARG-PD": "arg.1", "BRA-SA": "bra.1", "MEX-LMX": "mex.1",
+    "JPN-J1": "jpn.1", "SWE-AL": "swe.1", "NOR-EL": "nor.1", "RUS-PL": "rus.1",
+    "CHN-CSL": "chn.1", "DEN-SL": "den.1", "AUT-BL": "aut.1",
 }
+
+# ESPN codes whose `season=2025` means the calendar year 2025. Every other league
+# here starts in the second half of the year, or names its season by that year
+# (mex.1's 2025 is 2025-26, and jpn.1's 2026 is 2026-27, from February 2026).
+CALENDAR_YEAR_ESPN = frozenset({"usa.1", "arg.1", "bra.1", "swe.1", "nor.1", "chn.1"})
 
 _TITLE_RE = re.compile(r"^(.+?)\s+vs\.?\s+(.+?)$", re.I)
 _WIN_RE = re.compile(r"^will\s+(?P<team>.+?)\s+win(?:\s+on\s+[\d-]+)?\??$", re.I)
@@ -151,9 +178,15 @@ GOAL_LINES = {1.5: "ou15", 2.5: "ou25", 3.5: "ou35", 4.5: "ou45"}
 LINE_OF = {market: line for line, market in GOAL_LINES.items()}
 BTTS = "btts"
 GOAL_MARKETS = frozenset(GOAL_LINES.values()) | {BTTS}
-# Never on Polymarket's board in the history behind db/085, so these markets have no
-# replay there. O/U 2.5 has Pinnacle's close instead, and keeps every league.
-NO_VENUE_HISTORY = frozenset({"SCO-CH", "SCO-L1", "SCO-L2"})
+# No usable history behind db/085, so these markets have no replay there: never on the
+# board (Scotland), never linked to our results (J1 and the others), or under 50 bets
+# (MLS, Brasileirão).
+# O/U 2.5 has Pinnacle's close instead (NO_OU_HISTORY). Same list as VENUE_NO_HISTORY in
+# site/app/lib/backtest.ts and the one in refresh_bt_venue_lines.
+NO_VENUE_HISTORY = frozenset({
+    "SCO-CH", "SCO-L1", "SCO-L2", "USA-MLS", "BRA-SA", "JPN-J1", "SWE-AL", "NOR-EL",
+    "RUS-PL", "CHN-CSL", "DEN-SL", "AUT-BL",
+})
 
 
 # ── the spec ─────────────────────────────────────────────────────────────────
@@ -173,6 +206,14 @@ def run_blocker(spec: dict) -> str | None:
             spec.get("side") == "team" and spec.get("fav_status")):
         return ("This rule does not say which team it backs: it has to name one, "
                 "or say the favourite or the underdog.")
+    leagues = spec.get("leagues")
+    if spec.get("market") == "ou25" and leagues and NO_OU_HISTORY.issuperset(leagues):
+        return ("We hold no Over/Under prices for this league, so this rule has never "
+                "been tested and running it would trade blind.")
+    if (spec.get("market") in GOAL_MARKETS and spec.get("market") != "ou25"
+            and leagues and NO_VENUE_HISTORY.issuperset(leagues)):
+        return ("We hold no Polymarket prices for this market in this league, so this rule "
+                "has never been tested and running it would trade blind.")
     unread = unreadable_bounds(spec)
     if unread:
         return (f"This rule has a condition this agent cannot read yet ({', '.join(unread)}), "
@@ -364,14 +405,15 @@ def team_history(code: str, team_id: str, kickoff: datetime, get=espn_stats.team
     prev = [g for g in games if g.kickoff < kickoff]
     if len(prev) >= RUN_CAP and all(sum(1 for g in prev if g.home is end) >= 5 for end in (True, False)):
         return games
-    # Every league the Lab covers starts in the second half of the year.
-    this_season = kickoff.year if kickoff.month >= 7 else kickoff.year - 1
+    this_season = kickoff.year if kickoff.month >= 7 or code in CALENDAR_YEAR_ESPN else kickoff.year - 1
     earlier = get(code, team_id, this_season - 1)
     if earlier is None:
         return None
     # [] is a club promoted this summer: its last season is in another league,
     # so it has no 5 here and a form rule simply does not fire on it yet.
-    return earlier + games
+    # By kick-off, because a feed that has not rolled over yet answers "current"
+    # with the same season, and a game counted twice is a wrong number.
+    return sorted({g.kickoff: g for g in earlier + games}.values(), key=lambda g: g.kickoff)
 
 
 # ── reading a Polymarket event ───────────────────────────────────────────────
@@ -560,6 +602,8 @@ def pick(spec: dict, ev: EventView) -> tuple[dict | None, str, str]:
     leagues = spec.get("leagues") or LAB_CODES
     if ev.code not in leagues:
         return None, "", "league"
+    if spec.get("market") == "ou25" and ev.code in NO_OU_HISTORY:
+        return None, "", "no Over/Under history in this league"
     start = spec.get("season_start")
     if start is not None and start > CURRENT_SEASON:
         return None, "", "season"
@@ -762,6 +806,19 @@ def write_trade(conn, strat: dict, ev: EventView, leg: dict, label: str, book: d
 
 # ── the cycle ────────────────────────────────────────────────────────────────
 
+def espn_around(code: str, kickoff: datetime, cache: dict) -> list:
+    """ESPN's fixtures around a kick-off. Asked by date because the plain scoreboard
+    is one match day, and for two dates because ESPN files a game under the US day:
+    an evening kick-off in the Americas, or J1 at 05:00 UTC, is under the day before."""
+    out: list = []
+    for when in (kickoff, kickoff - timedelta(days=1)):
+        day = f"{when:%Y%m%d}"
+        if (code, day) not in cache:
+            cache[(code, day)] = espn_stats.fetch_league(ESPN_CODE[code], dates=day)
+        out += cache[(code, day)] or []
+    return out
+
+
 def forms_for(ev: EventView, cache: dict) -> tuple[TeamForm | None, TeamForm | None]:
     """(home, away) form for this fixture, each read once per cycle. None for a
     team ESPN gave no id or history for, which fails the rule (form_verdict)."""
@@ -809,11 +866,7 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
         ev = EventView(code=code, title=raw.get("title") or "", kickoff=kickoff_of(raw),
                        markets=parse_markets(raw))
         if any(needs_sides(leg) for s in strategies for leg in flat_legs(s["spec"])) and code in ESPN_CODE:
-            # ESPN's plain scoreboard is one match day. A --window past it has to ask by date.
-            day = f"{ev.kickoff:%Y%m%d}" if ESPN_BY_DATE else None
-            if (code, day) not in espn_cache:
-                espn_cache[(code, day)] = espn_stats.fetch_league(ESPN_CODE[code], dates=day)
-            orient, fixture = orientation(teams[0], teams[1], espn_cache[(code, day)])
+            orient, fixture = orientation(teams[0], teams[1], espn_around(code, ev.kickoff, espn_cache))
             if orient == "same":
                 ev.home, ev.away = teams
             elif orient == "swapped":
@@ -896,7 +949,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
                         datefmt="%H:%M:%S", force=True)
     if args.window:
-        globals().update(ENTRY_WINDOW_MIN=args.window, ESPN_BY_DATE=True)
+        globals().update(ENTRY_WINDOW_MIN=args.window)
     if args.settle:
         settle()
     else:

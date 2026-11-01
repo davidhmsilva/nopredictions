@@ -10,7 +10,7 @@
  *  their own format.
  */
 
-import { LEAGUES, RUN_CAP, VENUE_NO_HISTORY, isNbaMarket, isRelative, isVenueMarket, type Spec } from './backtest'
+import { LEAGUES, NO_OU_LEAGUES, RUN_CAP, VENUE_NO_HISTORY, isNbaMarket, isRelative, isVenueMarket, seasonName, type Spec } from './backtest'
 import { inplayBuyText, isInplaySpec, type InplaySpec } from './inplaySpec'
 
 export interface StrategyText {
@@ -75,7 +75,6 @@ function range(
   return null
 }
 
-const season = (y: number) => `${y}-${String((y + 1) % 100).padStart(2, '0')}`
 const oneDp = (v: number) => v.toFixed(1)
 
 /** Who "the team" is in a condition about the backed side. */
@@ -221,6 +220,7 @@ export function describeSpec(s: Spec, odds: (decimal: number) => string): Strate
   }
 
   if (s.season_start != null || s.season_end != null) {
+    const season = (y: number) => seasonName(y, s.leagues)
     const r =
       s.season_start != null && s.season_end != null
         ? `${season(s.season_start)} to ${season(s.season_end)}`
@@ -235,8 +235,10 @@ export function describeSpec(s: Spec, odds: (decimal: number) => string): Strate
     : s.leagues?.length
       ? s.leagues.map((c) => LEAGUE_NAME.get(c) ?? c).join(', ')
       : isVenueMarket(s.market)
-        ? `Every league with Polymarket history — ${LEAGUES.length - VENUE_NO_HISTORY.length} European competitions`
-        : `Every league we cover — ${LEAGUES.length} European competitions`
+        ? `Every league with Polymarket history — ${LEAGUES.length - VENUE_NO_HISTORY.length} competitions`
+        : s.market === 'ou25'
+          ? `Every league with Over/Under prices — ${LEAGUES.length - NO_OU_LEAGUES.size} competitions`
+          : `Every league we cover — ${LEAGUES.length} competitions`
 
   const how = nba
     ? 'Backtest only for now: there are no NBA games for an agent to trade on this rule yet.'

@@ -54,14 +54,27 @@ def test_competition_is_read_from_tags_and_ambiguity_fails_closed():
     assert lr.competition_code({"tags": [_tag("sea", "sea")]}) == "ITA-SA"
     # Real labels that share words with a mapped league, and are not it.
     assert lr.competition_code({"tags": [_tag("Premier League (Kazakhstan)", "kaz1")]}) is None
-    assert lr.competition_code({"tags": [_tag("Brazil Serie A", "brazil-serie-a")]}) is None
+    assert lr.competition_code({"tags": [_tag("Brazil Sèrie B", "brazil-serie-b")]}) is None
+    assert lr.competition_code({"tags": [_tag("Japan J2 League", "jpn2")]}) is None
+    assert lr.competition_code({"tags": [_tag("Liga de Expansión MX", "mex2")]}) is None
+    assert lr.competition_code({"tags": [_tag("Primera Nacional", "argpn")]}) is None
+    assert lr.competition_code({"tags": [_tag("Superettan", "swe2")]}) is None
+    assert lr.competition_code({"tags": [_tag("OBOS-ligaen", "nor2")]}) is None
+    assert lr.competition_code({"tags": [_tag("China FA Cup", "china-fa-cup")]}) is None
+    # The same word in two countries, and tags as Polymarket writes them today.
+    assert lr.competition_code({"tags": [_tag("Austria Bundesliga", "austria-bundesliga")]}) == "AUT-BL"
+    assert lr.competition_code({"tags": [_tag("Bundesliga", "bundesliga")]}) == "GER-BL1"
+    assert lr.competition_code({"tags": [_tag("Russian Premier League", "rus")]}) == "RUS-PL"
+    assert lr.competition_code({"tags": [_tag("Argentina Primera División", "arg")]}) == "ARG-PD"
+    assert lr.competition_code({"tags": [_tag("Brazil Serie A", "brazil-serie-a")]}) == "BRA-SA"
+    assert lr.competition_code({"tags": [_tag("Chinese Super League", "chinese-super-league")]}) == "CHN-CSL"
     # Two leagues on one event is ambiguity, not a choice.
     assert lr.competition_code({"tags": [_tag("EPL", "epl"), _tag("La Liga", "laliga")]}) is None
 
 
 def test_a_spec_never_trades_outside_the_backtest_universe():
     assert lr.pick({"market": "ou25", "side": "over", "leagues": ["ESP-LL"]}, _view())[0] is None
-    # "All leagues" means the 22 in the dataset, not every board Polymarket lists.
+    # "All leagues" means the ones in the dataset, not every board Polymarket lists.
     assert lr.pick({"market": "ou25", "side": "over", "leagues": None}, _view(code="URU-1"))[0] is None
 
 
@@ -331,6 +344,40 @@ def test_history_reaches_into_last_season_only_when_it_has_to():
     assert calls == [None, 2025]
 
 
+def test_a_calendar_year_league_asks_for_last_year_not_the_year_before():
+    # In April 2027 the July boundary says "2026", so "last season" would be 2025 and
+    # the whole of 2026 would be skipped: a wrong number, not a missing one.
+    calls = []
+    april = datetime(2027, 4, 10, 18, tzinfo=timezone.utc)
+    short = _games((1, 0), (0, 1))
+    lr.team_history("usa.1", "182", april, get=lambda c, t, s=None: calls.append(s) or short)
+    assert calls == [None, 2026]
+    calls.clear()
+    lr.team_history("eng.1", "363", april, get=lambda c, t, s=None: calls.append(s) or short)
+    assert calls == [None, 2025]
+    # mex.1's and jpn.1's seasons run across the new year: 2026 is 2026-27 on both.
+    calls.clear()
+    lr.team_history("mex.1", "227", april, get=lambda c, t, s=None: calls.append(s) or short)
+    assert calls == [None, 2025]
+    assert "mex.1" not in lr.CALENDAR_YEAR_ESPN and "jpn.1" not in lr.CALENDAR_YEAR_ESPN
+
+
+def test_a_feed_that_has_not_rolled_over_does_not_count_a_season_twice():
+    games = _games((1, 0), (0, 1), (1, 1))
+    assert len(lr.team_history("usa.1", "182", KO, get=lambda c, t, s=None: games)) == 3
+
+
+def test_espn_is_asked_for_the_us_day_as_well_as_the_utc_day(monkeypatch):
+    # 01:30 UTC on the 1st is the evening of the 31st in the US, and filed under it.
+    asked = []
+    monkeypatch.setattr(lr.espn_stats, "fetch_league", lambda code, dates=None: asked.append((code, dates)) or [dates])
+    cache = {}
+    ko = datetime(2026, 11, 1, 1, 30, tzinfo=timezone.utc)
+    assert lr.espn_around("USA-MLS", ko, cache) == ["20261101", "20261031"]
+    assert lr.espn_around("USA-MLS", ko, cache) == ["20261101", "20261031"]
+    assert asked == [("usa.1", "20261101"), ("usa.1", "20261031")]
+
+
 def test_a_failed_request_is_not_a_short_history():
     # Reading the failure as "no games yet" would still answer rest days from
     # whatever arrived, and a wrong number looks exactly like a right one.
@@ -493,10 +540,30 @@ def test_the_backtest_holds_exactly_the_leagues_the_runner_trades():
     # bt_features is what "all leagues" means in a test. A league in it that the
     # runner does not trade is a bet the backtest counted and no agent can place.
     site = open(os.path.join(REPO, "site", "app", "lib", "backtest.ts")).read()
-    sql = open(os.path.join(REPO, "db", "083_language_recent_games.sql")).read()
+    sql = open(os.path.join(REPO, "db", "086_more_leagues.sql")).read()
     listed = re.search(r"AND l\.code IN \((.*?)\)", sql, re.S).group(1)
     assert set(re.findall(r"'([A-Z0-9-]+)'", listed)) == set(lr.LAB_CODES)
     assert set(re.findall(r"code: '([A-Z0-9-]+)'", site)) == set(lr.LAB_CODES)
+
+
+def test_over_under_is_never_traded_where_it_was_never_tested():
+    # Football-Data's extra leagues hold a 1X2 close and nothing else. Polymarket lists
+    # O/U 2.5 on them, so without this "all leagues" would trade what it never tested.
+    spec = {"market": "ou25", "side": "over", "leagues": None}
+    assert lr.pick(spec, _view())[0] is not None
+    leg, _, why = lr.pick(spec, _view(code="USA-MLS"))
+    assert leg is None and "Over/Under" in why
+    assert lr.pick({**spec, "leagues": ["ENG-PR", "USA-MLS"]}, _view(code="USA-MLS"))[0] is None
+    # A rule that can only ever be that does not run, and says so.
+    assert "no Over/Under prices" in lr.run_blocker({**spec, "leagues": ["USA-MLS", "JPN-J1"]})
+    assert lr.run_blocker({**spec, "leagues": ["ENG-PR", "USA-MLS"]}) is None
+    assert lr.run_blocker(spec) is None
+    # The result markets there are what the backtest holds.
+    assert lr.run_blocker({"market": "1x2", "side": "draw", "leagues": ["USA-MLS"]}) is None
+    site = open(os.path.join(REPO, "site", "app", "lib", "backtest.ts")).read()
+    listed = re.search(r"NO_OU_LEAGUES = new Set<string>\(\[(.*?)\]\)", site, re.S).group(1)
+    assert set(re.findall(r"'([A-Z0-9-]+)'", listed)) == set(lr.NO_OU_HISTORY)
+    assert lr.NO_OU_HISTORY < lr.LAB_CODES and lr.NO_OU_HISTORY <= set(lr.ESPN_CODE)
 
 
 def test_only_the_full_match_events_of_a_fixture_are_read():
@@ -716,8 +783,22 @@ def test_the_site_and_the_runner_list_the_same_markets_and_leagues():
     src = open(os.path.join(REPO, "site/app/lib/backtest.ts"), encoding="utf-8").read()
     listed = re.search(r"VENUE_MARKETS = \[(.*?)\]", src).group(1)
     assert set(re.findall(r"'(\w+)'", listed)) == lr.GOAL_MARKETS - {"ou25"}
-    held = re.search(r"VENUE_NO_HISTORY = \[(.*?)\]", src).group(1)
+    held = re.search(r"VENUE_NO_HISTORY = \[(.*?)\]", src, re.S).group(1)
     assert set(re.findall(r"'([\w-]+)'", held)) == lr.NO_VENUE_HISTORY
+    sql = open(os.path.join(REPO, "db/085_venue_markets.sql"), encoding="utf-8").read()
+    replayed_out = re.search(r"l\.code <> ALL \(ARRAY\[(.*?)\]", sql, re.S).group(1)
+    assert set(re.findall(r"'([\w-]+)'", replayed_out)) == lr.NO_VENUE_HISTORY
+
+
+def test_a_goal_market_on_a_league_with_no_replay_is_refused_and_not_traded():
+    assert "never been tested" in lr.run_blocker({"market": "btts", "side": "yes", "leagues": ["JPN-J1"]})
+    assert "never been tested" in lr.run_blocker({"market": "ou35", "side": "over", "leagues": ["USA-MLS", "SCO-L1"]})
+    assert "never been tested" in lr.run_blocker({"market": "btts", "side": "no", "leagues": ["BRA-SA"]})
+    # One league it has seen: the rule runs there, and only there.
+    assert lr.run_blocker({"market": "btts", "side": "yes", "leagues": ["JPN-J1", "MEX-LMX"]}) is None
+    assert lr.run_blocker({"market": "btts", "side": "yes", "leagues": None}) is None
+    # O/U 2.5 has its own list, and J1 is on both.
+    assert "Over/Under" in lr.run_blocker({"market": "ou25", "side": "over", "leagues": ["JPN-J1"]})
 
 
 def test_the_replay_reads_each_market_at_its_own_line():

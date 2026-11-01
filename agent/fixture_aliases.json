@@ -62,7 +62,19 @@
   "Ulsan HD FC": "ulsan hyundai fc",
   "Wolverhampton Wanderers FC": "wolves",
   "Wuhan San Zhen": "Wuhan Three Towns",
-  "Zhejiang Zhiye": "Hangzhou Greentown"
+  "Zhejiang Zhiye": "Hangzhou Greentown",
+  "Los Angeles FC": "LAFC",
+  "Los Angeles Galaxy": "LA Galaxy",
+  "Djurgardens IF": "Djurgården",
+  "Vasteraas SK": "Västerås SK",
+  "FK Dinamo Makhachkala": "Dynamo Makhachkala",
+  "Dinamo Moscow": "dynamo",
+  "FK Lokomotiv Moskva": "Lokomotiv Moscow",
+  "FK Rodina Moskva": "Rodina Moscow",
+  "RFK Akhmat Groznyi": "Akhmat Grozny",
+  "Aarhus GF": "AGF",
+  "SCR Altach": "SC Rheindorf Altach",
+  "Atlético San Luis": "Atlético de San Luis"
  },
  "provenance": {
   "1899 hoffenheim": {
@@ -458,6 +470,17 @@
    ],
    "league": "Championship",
    "learned_at": "2026-08-14"
-  }
+  },
+  "LAFC": {"learned_at": "2026-10-31", "source": "manual", "why": "PM writes it out, ESPN abbreviates"},
+  "LA Galaxy": {"learned_at": "2026-10-31", "source": "manual", "why": "PM writes Los Angeles out, ESPN abbreviates"},
+  "Djurgården": {"learned_at": "2026-10-31", "source": "manual", "why": "PM writes the genitive without the ring"},
+  "Västerås SK": {"learned_at": "2026-10-31", "source": "manual", "why": "PM spells å as aa"},
+  "Dynamo Makhachkala": {"learned_at": "2026-10-31", "source": "manual", "why": "transliteration; ESPN's name for it"},
+  "Lokomotiv Moscow": {"learned_at": "2026-10-31", "source": "manual", "why": "PM writes the Russian city name"},
+  "Rodina Moscow": {"learned_at": "2026-10-31", "source": "manual", "why": "PM writes the Russian city name"},
+  "Akhmat Grozny": {"learned_at": "2026-10-31", "source": "manual", "why": "transliteration"},
+  "AGF": {"learned_at": "2026-10-31", "source": "manual", "why": "AGF is Aarhus Gymnastikforening"},
+  "SC Rheindorf Altach": {"learned_at": "2026-10-31", "source": "manual", "why": "SCR is SC Rheindorf"},
+  "Atlético de San Luis": {"learned_at": "2026-10-31", "source": "manual", "why": "ESPN keeps the de"}
  }
 }

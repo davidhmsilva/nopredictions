@@ -7,7 +7,7 @@ import { QuotaStrip } from '../components/QuotaStrip'
 import { ToolChips, ToolHead } from '../components/ToolPage'
 import { useSession } from '../lib/useSession'
 import { oddsText, useOddsFormat } from '../lib/display'
-import { LEAGUES } from '../lib/backtest'
+import { LEAGUES, NO_OU_LEAGUES } from '../lib/backtest'
 import { QUOTA_RESET_TEXT } from '../lib/planTerms'
 import { clarify, type LabQuestion } from '../lib/labQuestions'
 import {
@@ -50,6 +50,9 @@ type Mode = 'prematch' | 'inplay' | 'unsupported'
 const STEPS = ['Describe', 'Clarify', 'Strategy', 'Deploy'] as const
 
 /** The country, so "Premier League" and "Super League" say whose. */
+// The picker offers Over/Under only where we hold its prices (db/086).
+const isGoals = (side: string) => side === 'over' || side === 'under'
+
 const LEAGUE_GROUPS = Array.from(new Set(LEAGUES.map((l) => l.country))).map((country) => ({
   country,
   leagues: LEAGUES.filter((l) => l.country === country),
@@ -472,7 +475,11 @@ export default function CreatePage() {
               className="lx-select"
               aria-label="What to back"
               value={pick.side}
-              onChange={(e) => setPick({ ...pick, side: e.target.value as Picked['side'] })}
+              onChange={(e) => {
+                const side = e.target.value as Picked['side']
+                const priced = !isGoals(side) || !NO_OU_LEAGUES.has(pick.league)
+                setPick({ ...pick, side, league: priced ? pick.league : ALL_LEAGUES })
+              }}
             >
               {QUICK_SIDES.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -488,7 +495,7 @@ export default function CreatePage() {
               onChange={(e) => setPick({ ...pick, league: e.target.value })}
             >
               <option value={ALL_LEAGUES}>Every league</option>
-              {LEAGUE_GROUPS.map((g) => (
+              {LEAGUE_GROUPS.filter((g) => !isGoals(pick.side) || !g.leagues.every((l) => NO_OU_LEAGUES.has(l.code))).map((g) => (
                 <optgroup key={g.country} label={g.country}>
                   {g.leagues.map((l) => (
                     <option key={l.code} value={l.code}>
@@ -543,12 +550,13 @@ export default function CreatePage() {
               do, and writes the strategy as exact rules. You see the rules before anything runs.
             </li>
             <li>
-              A pre-match strategy is replayed over 101,469 league matches in 22 leagues, 2012 to
-              January 2026, each bet at Pinnacle&apos;s closing price — the sharpest price there is,
-              and the hardest to beat. Both teams to score and over/under 1.5, 3.5 and 4.5 have no such
-              close, so they are replayed over about a year at Polymarket&apos;s own prices, the last a
-              taker paid before kick-off plus the fee. A live rule cannot be replayed, so its record
-              starts when you deploy it.
+              A pre-match strategy is replayed over 145,036 league matches in 33 leagues (Over/Under
+              in 22 of them, where we hold its prices), 2012 to January 2026, each bet at
+              Pinnacle&apos;s closing price — the sharpest price there is, and the hardest to beat.
+              Both teams to score and over/under 1.5, 3.5 and 4.5 have no such close, so they are
+              replayed over about a year at Polymarket&apos;s own prices, the last a taker paid before
+              kick-off plus the fee, in the 21 leagues that history covers. A live rule cannot be
+              replayed, so its record starts when you deploy it.
             </li>
             <li>
               A deployed agent places one paper bet of 1 unit per game that fits, at Polymarket&apos;s

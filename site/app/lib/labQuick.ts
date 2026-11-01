@@ -11,7 +11,7 @@
  *     the examples) and every one of them caches.
  */
 
-import { LEAGUES, type Spec } from './backtest'
+import { LEAGUES, NO_OU_LEAGUES, type Spec } from './backtest'
 
 export type QuickSide = 'home' | 'draw' | 'away' | 'over' | 'under'
 
@@ -145,6 +145,7 @@ export function pickedSpec(p: Picked): { spec: Spec; title: string } | null {
   const band = ODDS_BANDS.find((b) => b.id === p.odds)
   const leagueOk = p.league === ALL_LEAGUES || LEAGUES.some((l) => l.code === p.league)
   if (!side || !band || !leagueOk) return null
+  if ((side.id === 'over' || side.id === 'under') && NO_OU_LEAGUES.has(p.league)) return null
   const spec: Spec = base(
     side.id === 'over' || side.id === 'under' ? 'ou25' : '1x2',
     side.id,

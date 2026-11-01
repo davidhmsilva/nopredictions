@@ -12,7 +12,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { isNbaMarket, isVenueMarket, type BacktestStats, type Spec } from '../lib/backtest'
+import { isNbaMarket, isVenueMarket, seasonName, type BacktestStats, type Spec } from '../lib/backtest'
 import type { RecentBet } from '../lib/labQuick'
 import { dateText, oddsText, useOddsFormat } from '../lib/display'
 import { StrategyCard } from '../components/StrategyCard'
@@ -213,10 +213,6 @@ function units(x: number, dp = 1): string {
 const monthYear = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 
-function seasonLabel(y: number): string {
-  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`
-}
-
 function Curve({ monthly }: { monthly: { month: string; pnl: number }[] }) {
   if (monthly.length < 2) return null
   const W = 640
@@ -264,6 +260,7 @@ export function LabResult({
   const v = plainVerdict(s, r.verdict!.code, r.spec?.market)
   const venue = r.spec != null && isVenueMarket(r.spec.market)
   const seasons = r.seasons ?? []
+  const seasonLabel = (y: number) => seasonName(y, r.spec?.leagues)
   const best = seasons.length ? seasons.reduce((a, b) => (b.pnl > a.pnl ? b : a)) : null
   const from = s.firstMatch ? new Date(s.firstMatch).getUTCFullYear() : null
   const to = s.lastMatch ? new Date(s.lastMatch).getUTCFullYear() : null
@@ -417,7 +414,7 @@ export function LabResult({
               <dd className="np-num">{s.clvPct != null ? `${units(s.clvPct, 2)}%` : 'Not measured'}</dd>
               <p>
                 {s.clvPct != null
-                  ? 'Average move from the opening price to the close. Bettors who really have an edge usually see the price shorten after they bet.'
+                  ? `Average move from the opening price to the close. Bettors who really have an edge usually see the price shorten after they bet.${s.nOpen < s.n ? ` Measured on the ${s.nOpen.toLocaleString('en-US')} of these bets that have an opening price.` : ''}`
                   : venue
                     ? 'It buys at the last price before kick-off, so there is no later price to compare with.'
                     : 'This dataset has no opening price, so the move cannot be measured.'}
