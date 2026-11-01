@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from fixture_match import (  # noqa: E402
+    MIN_SIDE_SCORE,
     best_match, pair_score, split_title, squads_agree, team_score,
 )
 
@@ -247,3 +248,19 @@ def test_manual_alias_may_cross_a_squad_marker():
     assert fm.team_score("Celta Fortuna", "Celta de Vigo II") == 1.0
     # but an unaliased first team still never meets its reserve side
     assert fm.team_score("Minnesota United", "Minnesota United II") == 0.0
+
+
+def test_a_club_whose_whole_name_is_a_noise_word_still_matches_itself():
+    assert team_score("AIK", "AIK") == 1.0
+    assert team_score("AIK", "GAIS") == 0.0
+    assert team_score("AIK", "FC") == 0.0
+
+
+def test_espn_names_reach_polymarket_names_through_the_table():
+    for pm, espn in (("Los Angeles FC", "LAFC"), ("Los Angeles Galaxy", "LA Galaxy"),
+                     ("Djurgardens IF", "Djurgården"), ("Vasteraas SK", "Västerås SK"),
+                     ("FK Dinamo Moskva", "Dinamo Moscow"), ("FK Lokomotiv Moskva", "Lokomotiv Moscow"),
+                     ("RFK Akhmat Groznyi", "Akhmat Grozny"), ("Aarhus GF", "AGF"), ("SCR Altach", "SC Rheindorf Altach")):
+        assert team_score(pm, espn) == 1.0, pm
+    assert team_score("Los Angeles FC", "LA Galaxy") < MIN_SIDE_SCORE
+    assert team_score("FK Dinamo Moskva", "Dynamo Makhachkala") < MIN_SIDE_SCORE

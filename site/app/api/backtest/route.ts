@@ -8,6 +8,8 @@ import { readFailureMessage } from '../../lib/claudeJson'
 import { noteIdea } from '../../lib/ideaLog'
 import {
   LEAGUES,
+  NO_OU_LEAGUES,
+  noOuHistory,
   LEAGUE_CODES,
   NBA_SEASON_MAX,
   NBA_SEASON_MIN,
@@ -25,7 +27,7 @@ export const maxDuration = 60
 const MODEL = 'claude-opus-4-8'
 
 const LEAGUE_LINES = LEAGUES.map(
-  l => `  ${l.code} — ${l.name} (${l.country}, tier ${l.tier})`,
+  l => `  ${l.code} — ${l.name} (${l.country}, tier ${l.tier})${NO_OU_LEAGUES.has(l.code) ? ' — result markets only' : ''}`,
 ).join('\n')
 
 const SYSTEM_PROMPT = `You translate a bettor's plain-English sports theory into a strict backtest spec, or honestly refuse when the theory cannot be tested with the data available.
@@ -33,11 +35,11 @@ const SYSTEM_PROMPT = `You translate a bettor's plain-English sports theory into
 # Datasets — TWO sports are available
 
 ## A. FOOTBALL (soccer)
-- ~101,000 finished club matches, seasons 2012-13 through 2025-26.
-- Every match has the Pinnacle CLOSING price (the entry price) and most have the Pinnacle OPENING price (used for closing-line-value).
+- ~145,000 finished club matches, seasons 2012-13 through 2025-26.
+- Every match has the Pinnacle CLOSING price (the entry price). Most in the leagues not marked below also have the Pinnacle OPENING price (used for closing-line-value); those marked "result markets only" never do.
 - Leagues available (use these exact codes in spec.leagues):
 ${LEAGUE_LINES}
-- Markets: "1x2" (home / draw / away, 90-minute result) and "ou25" (over / under 2.5 goals; ~48k matches have this price).
+- Markets: "1x2" (home / draw / away, 90-minute result) and "ou25" (over / under 2.5 goals; ~48k matches have this price, none in a league marked "result markets only").
 
 ## B. NBA (basketball)
 - 10,006 finished games, seasons ${NBA_SEASON_MIN}-15 through ${NBA_SEASON_MAX}-22 ONLY. There is no NBA data after the ${NBA_SEASON_MAX}-22 season.
@@ -54,7 +56,7 @@ Stakes are flat 1 unit per selection in both datasets.
 - market + side: what is being backed on every qualifying match. Besides home / draw / away / over / under, side can be:
   - "team": the team this rule is about, wherever it plays. Needs a named team (below) or fav_status ("back favourites" → side team, fav_status favorite; "back Liverpool" → side team, team "Liverpool"). Use this whenever the user does not say home or away.
   - "opponent": whoever plays the named team ("bet against Manchester United" → side opponent, team "Manchester United").
-- leagues: array of football codes above; empty array [] = all leagues. ALWAYS [] for NBA markets.
+- leagues: array of football codes above; empty array [] = all leagues. ALWAYS [] for NBA markets. When the theory names a club, set this to that club's league, even if the theory does not say it: a team filter is a substring, and "Arsenal" with no league also counts Arsenal Tula and Arsenal Sarandi.
 - game_type: 'regular' | 'playoff' | 'any' — NBA only; use 'any' for football.
 - fav_status: 'favorite' | 'underdog' | 'any' — whether the BACKED team is the favorite (by 1X2 close in football, by moneyline close in the NBA). Only meaningful when side is home, away or team; use 'any' otherwise.
 - home_team / away_team: case-insensitive substring of the team name (e.g. "Real Madrid", "Lakers"), that team at that end; empty string = no filter.
@@ -97,6 +99,7 @@ Only add filters the user actually implied — do not invent extra conditions.
 
 # What you CANNOT test (set supported=false, explain in "reason", and offer the closest testable variant in "suggestion")
 - Other sports (NFL, MLB, NHL, tennis, college...).
+- Over/under in a league marked "result markets only": we hold no prices there. Suggest the result market in that league, or over/under in another.
 - Football: Asian handicap, BTTS, correct score, corners, cards, half-time markets, cup ties, European competitions (Champions League etc.), derbies/rivalries, xG conditions, league-table position.
 - NBA: player props, quarter/half markets, series prices, and ANYTHING about a season after ${NBA_SEASON_MAX}-22.
 - Both: player-level anything (injuries, lineups, trades, coaches), referees, weather, in-play/live conditions, and Polymarket prices.
@@ -179,6 +182,17 @@ function sanitizeSpec(spec: Spec): { spec: Spec; warnings: string[] } {
       warnings.push('Some requested leagues are not in the dataset and were ignored.')
     }
     s.leagues = known.length > 0 ? known : null
+    if (s.market === 'ou25' && s.leagues) {
+      const priced = s.leagues.filter(c => !NO_OU_LEAGUES.has(c))
+      if (priced.length > 0 && priced.length !== s.leagues.length) {
+        s.leagues = priced
+        warnings.push('We hold no Over/Under prices for some of those leagues, so they were left out.')
+      }
+    }
+  }
+  if (!nba && !s.leagues) {
+    const named = s.home_team || s.away_team || s.team
+    if (named) warnings.push(`No league was named, so this counts every club with "${named}" in its name, in every league.`)
   }
 
   if (s.fav_status && s.side !== 'home' && s.side !== 'away' && s.side !== 'team') {
@@ -273,6 +287,12 @@ export async function POST(request: Request) {
   }
 
   const { spec, warnings } = sanitizeSpec(toSqlSpec(parsed.spec))
+  if (noOuHistory(spec)) {
+    const reason = 'We hold no Over/Under prices for this league, so this cannot be tested.'
+    const suggestion = 'Try the result in that league (home, draw or away), or Over/Under in a league with prices.'
+    await noteIdea({ idea: hypothesis, kind: 'prematch', supported: false, reason, suggestion })
+    return NextResponse.json({ ok: true, supported: false, reason, suggestion, entitlement: use })
+  }
   if (!namesItsTeam(spec)) {
     const reason = 'This rule does not say which team it backs, in every game.'
     const suggestion = 'Name a team, or say the favourite or the underdog.'

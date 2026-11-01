@@ -27,9 +27,43 @@ export const LEAGUES = [
   { code: 'SCO-CH', name: 'Scottish Championship', country: 'Scotland', tier: 2 },
   { code: 'SCO-L1', name: 'Scottish League One', country: 'Scotland', tier: 3 },
   { code: 'SCO-L2', name: 'Scottish League Two', country: 'Scotland', tier: 4 },
+  { code: 'USA-MLS', name: 'MLS', country: 'USA', tier: 1 },
+  { code: 'ARG-PD', name: 'Argentine Primera División', country: 'Argentina', tier: 1 },
+  { code: 'BRA-SA', name: 'Brasileirão', country: 'Brazil', tier: 1 },
+  { code: 'MEX-LMX', name: 'Liga MX', country: 'Mexico', tier: 1 },
+  { code: 'JPN-J1', name: 'J1 League', country: 'Japan', tier: 1 },
+  { code: 'SWE-AL', name: 'Allsvenskan', country: 'Sweden', tier: 1 },
+  { code: 'NOR-EL', name: 'Eliteserien', country: 'Norway', tier: 1 },
+  { code: 'RUS-PL', name: 'Russian Premier League', country: 'Russia', tier: 1 },
+  { code: 'CHN-CSL', name: 'Chinese Super League', country: 'China', tier: 1 },
+  { code: 'DEN-SL', name: 'Danish Superliga', country: 'Denmark', tier: 1 },
+  { code: 'AUT-BL', name: 'Austrian Bundesliga', country: 'Austria', tier: 1 },
 ] as const
 
 export const LEAGUE_CODES = new Set<string>(LEAGUES.map(l => l.code))
+
+// Their history has a 1X2 close and nothing else: no Over/Under, no opening price
+// (db/086). An Over/Under rule has never been tested on them, so one naming only
+// these is refused, and "all leagues" neither tests nor trades them. Same list as
+// NO_OU_HISTORY in agent/lab_strategy_runner.py.
+export const NO_OU_LEAGUES = new Set<string>([
+  'USA-MLS', 'ARG-PD', 'BRA-SA', 'MEX-LMX', 'JPN-J1', 'SWE-AL', 'NOR-EL', 'RUS-PL',
+  'CHN-CSL', 'DEN-SL', 'AUT-BL',
+])
+
+export function noOuHistory(spec: { market: string; leagues?: readonly string[] | null }): boolean {
+  return spec.market === 'ou25' && !!spec.leagues?.length && spec.leagues.every((c) => NO_OU_LEAGUES.has(c))
+}
+
+// A season here is a calendar year: 2019 is 2019, not 2019-20. J1 was too until it
+// moved to autumn-spring with 2026-27.
+const CALENDAR_LEAGUES = new Set<string>(['USA-MLS', 'ARG-PD', 'BRA-SA', 'SWE-AL', 'NOR-EL', 'CHN-CSL', 'JPN-J1'])
+
+/** A season start year in words, for a rule on these leagues. */
+export function seasonName(y: number, leagues?: readonly string[] | null): string {
+  const calendar = !!leagues?.length && leagues.every((c) => CALENDAR_LEAGUES.has(c) && (c !== 'JPN-J1' || y < 2026))
+  return calendar ? String(y) : `${y}-${String((y + 1) % 100).padStart(2, '0')}`
+}
 
 // NBA arm (db/027_nba_odds.sql). Separate table, separate SQL function, and a
 // materially different dataset — see NBA_CAVEATS.
