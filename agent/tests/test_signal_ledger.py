@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import nba_agent  # noqa: E402
 import nfl_agent  # noqa: E402
+import pm_close  # noqa: E402
 import unl_agent  # noqa: E402
 
 NOW = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
@@ -64,9 +65,20 @@ def test_candidates_carry_depth_and_raw_fair(monkeypatch, module):
     assert got["paper_trade_id"] == 7 and got["chosen"] is True
 
 
-@pytest.mark.parametrize("module", [nfl_agent, nba_agent, unl_agent])
+@pytest.mark.parametrize("module", [nfl_agent, nba_agent])
 def test_close_writes_the_venue_bid_and_ask(module):
+    # Since 2026-11-03 the venue's close is written on its own (pm_close), from
+    # the bought token's CLOB book, every cycle of the close window.
     src = open(module.__file__).read()
+    assert re.search(r"pm_closes\.append\(\(.*?fetch_book\(b\[\"pm_token_id\"\]\)\)\)", src, re.S)
+    assert "pm_close.record_live(conn, tid, entry, book)" in src
+    assert "pm_close.fill_from_history(conn, STRATEGY_NAME)" in src
+    close_src = open(pm_close.__file__).read()
+    assert "pm_closing_bid = %s, pm_closing_ask = %s" in close_src
+
+
+def test_unl_close_writes_the_venue_bid_and_ask_with_the_sharp_close():
+    src = open(unl_agent.__file__).read()
     assert "pm_closing_bid = %s, pm_closing_ask = %s" in src
     assert "for tid, fair, mid, book, entry, cbid, cask in closes:" in src
     assert re.search(r"closes\.append\(\(.*?c\.bid, c\.ask\)\)", src, re.S)

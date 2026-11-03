@@ -75,6 +75,7 @@ sys.path.insert(0, HERE)
 
 import db_txn                    # noqa: E402
 import nba_model as nm           # noqa: E402
+import pm_close                  # noqa: E402
 from edge_engine import FEE_RATE, taker_fee_pp   # noqa: E402
 
 log = logging.getLogger("nba_agent")
@@ -1029,7 +1030,8 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
 
     written = last_snapshot_written(conn, [g.slug for g in games]) if not dry_run else {}
     todo: list[tuple] = []          # (game, sharp, cands, chosen, kind, stake, new_snap)
-    closes: list[tuple] = []        # (trade_id, fair, mid, book, entry)
+    closes: list[tuple] = []        # (trade_id, fair, book, entry): the sharp close
+    pm_closes: list[tuple] = []     # (trade_id, entry, CLOB book): Polymarket's, on its own
     for g in games:
         mins = (g.kickoff - now).total_seconds() / 60
         req = required_age_min(mins)
@@ -1038,13 +1040,13 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
 
         if g.slug in bets:          # read the close for a game already bet
             b = bets[g.slug]
+            if 0 < mins <= CLOSE_MIN:   # every cycle: the last read before tip-off wins
+                pm_closes.append((b["id"], float(b["entry_price"]), fetch_book(b["pm_token_id"])))
             sh, close_ok = pick_sharp(odds_sh, age, dk_sh, 8)
             if b["closing_price"] is None and 0 < mins <= CLOSE_MIN and sh and close_ok:
                 hit = [c for c in candidates(g, sh) if c.token_id == b["pm_token_id"]]
                 if hit and hit[0].source != "pm_mid":
-                    c = hit[0]
-                    closes.append((b["id"], c.fair_raw, 0.5 * (c.bid + c.ask), sh.book,
-                                   float(b["entry_price"]), c.bid, c.ask))
+                    closes.append((b["id"], hit[0].fair_raw, sh.book, float(b["entry_price"])))
             continue
         if req is None:
             continue
@@ -1085,7 +1087,7 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
 
     if dry_run:
         log.info(f"DRY RUN — {sum(1 for t in todo if t[4])} bets would be placed, "
-                 f"{len(closes)} closes read; nothing written")
+                 f"{len(pm_closes)} PM and {len(closes)} sharp closes read; nothing written")
         return
 
     placed = 0
@@ -1099,17 +1101,17 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             write_candidates(conn, g, sh, cands, now, chosen, tid)
         elif chosen:
             write_candidates(conn, g, sh, [chosen], now, chosen, tid)
-    for tid, fair, mid, book, entry, cbid, cask in closes:
+    for tid, entry, book in pm_closes:
+        mid = pm_close.record_live(conn, tid, entry, book)
+        log.info(f"  close pt#{tid}: " + ("no two-sided book on the bought token this cycle" if mid is None
+                 else f"PM mid {mid:.3f} vs entry {entry:.3f} → pm_clv {mid / entry - 1:+.2%}"))
+    for tid, fair, book, entry in closes:
         with conn.cursor() as cur:
-            cur.execute("""UPDATE paper_trades SET closing_price = %s, clv = %s, clv_source = %s,
-                                  pm_closing_price = %s, pm_closing_at = now(), pm_clv = %s,
-                                  pm_closing_bid = %s, pm_closing_ask = %s
+            cur.execute("""UPDATE paper_trades SET closing_price = %s, clv = %s, clv_source = %s
                             WHERE id = %s AND closing_price IS NULL""",
-                        (round(fair, 5), round(fair / entry - 1, 5), f"{book}_close_nba",
-                         round(mid, 4), round(mid / entry - 1, 5), cbid, cask, tid))
-        log.info(f"  close pt#{tid}: sharp fair {fair:.3f} vs entry {entry:.3f} · "
-                 f"PM mid {mid:.3f} → pm_clv {mid / entry - 1:+.2%}")
-    log.info(f"placed {placed} · closes {len(closes)}")
+                        (round(fair, 5), round(fair / entry - 1, 5), f"{book}_close_nba", tid))
+        log.info(f"  close pt#{tid}: sharp fair {fair:.3f} vs entry {entry:.3f} → CLV {fair / entry - 1:+.2%}")
+    log.info(f"placed {placed} · closes {len(pm_closes)} PM, {len(closes)} sharp")
 
 
 # ── settlement ───────────────────────────────────────────────────────────────
@@ -1260,6 +1262,10 @@ def settle() -> int:
         n += 1
     log.info(f"settled {n} of {len(pending)} finished NBA trades")
     provisional(conn, pending, verdicts)
+    try:                            # a close the live read missed, from price history
+        pm_close.fill_from_history(conn, STRATEGY_NAME)
+    except Exception:               # noqa: BLE001
+        log.exception("history close fill failed — settlement is unaffected")
     try:
         import nba_maker
         nba_maker.settle(conn)
