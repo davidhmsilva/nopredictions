@@ -21,7 +21,8 @@ Each cycle (every 5 minutes):
      print exactly at it depends on queue position and is only recorded
      (`touched_at`). A fill writes a 1u paper trade at the bid, no fee.
   5. Inside 15 minutes of kick-off every order of the fixture gets the venue's
-     close; resting bids expire at kick-off. Settlement from the CLOB winner
+     close; resting bids expire at kick-off, once the tape up to kick-off has
+     been read (data-api /v2/trades, pm_trades.py). Settlement from the CLOB winner
      flag, for filled and unfilled rows alike.
 
 Why a maker. As a taker the entry (half-spread + fee, ~1.6pp) costs more than
@@ -65,6 +66,7 @@ load_dotenv(os.path.join(HERE, "../ingest/.env"))
 
 import close_model as cm                                           # noqa: E402
 import db_txn                                                      # noqa: E402
+import pm_trades                                                   # noqa: E402
 from espn_stats import EspnFixture                                 # noqa: E402
 from fixture_match import MIN_SIDE_SCORE, team_score               # noqa: E402
 from lab_strategy_runner import (_leg_for, competition_code,      # noqa: E402
@@ -76,7 +78,6 @@ log = logging.getLogger("close_maker")
 DATABASE_URL = os.getenv("DATABASE_URL")
 GAMMA = "https://gamma-api.polymarket.com"
 CLOB = "https://clob.polymarket.com"
-DATA_API = "https://data-api.polymarket.com"
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 
 STRATEGY_NAME = "Close Forecast — maker bids"
@@ -186,7 +187,7 @@ def fill_from(book: dict | None, trades: list[dict], yes_token: str, price: floa
         px = _f(t.get("price"))
         if ts is None or px is None or ts <= since_ts:
             continue
-        yes_px = px if str(t.get("asset")) == yes_token else 1.0 - px
+        yes_px = px if str(t.get("token_id")) == yes_token else 1.0 - px
         if yes_px < price - 1e-9:
             fill_t = ts if fill_t is None else min(fill_t, ts)
         elif abs(yes_px - price) < 1e-9:
@@ -242,16 +243,14 @@ def fetch_books(tokens: list[str]) -> dict[str, dict | None]:
     return out
 
 
-def fetch_trades(condition_id: str) -> list[dict]:
-    try:
-        r = requests.get(f"{DATA_API}/trades", params={"market": condition_id, "limit": 500,
-                                                         "takerOnly": "true"}, timeout=15)
-        r.raise_for_status()
-        d = r.json()
-        return d if isinstance(d, list) else []
-    except Exception as exc:                                         # noqa: BLE001
-        log.warning(f"trades {condition_id[:10]}: {exc}")
-        return []
+def fetch_trades(condition_id: str, since: float, until: float) -> list[dict] | None:
+    """Taker fills on the market in [since, until], from data-api /v2/trades
+    (pm_trades: v1 has answered 410 since 2026-11-02). None when the read
+    failed, which must decide nothing: not a fill, and not an expiry."""
+    got = pm_trades.trades(condition_id, start=int(since), end=int(until), timeout=15)
+    if got is None:
+        log.warning(f"trades {condition_id[:10]}: no answer from data-api v2")
+    return got
 
 
 def espn_fixtures(code: str, days: list[str]) -> list[tuple[EspnFixture, datetime]]:
@@ -593,10 +592,17 @@ def manage_open(conn, sid: int, now: datetime) -> None:
     for o in orders:
         book = books.get(o["token_id"])
         mins = (o["kickoff"] - now).total_seconds() / 60
-        if o["status"] == "resting" and mins > 0:
-            trades = fetch_trades(o["condition_id"])
-            rule, t, touched = fill_from(book, trades, o["token_id"], float(o["bid_price"]),
-                                         o["created_at"].timestamp())
+        unread = False
+        if o["status"] == "resting":
+            # Before kick-off the book can fill it too; after, only the prints up
+            # to kick-off count, and a failed read leaves the order resting for
+            # the next cycle instead of expiring it unchecked.
+            trades = fetch_trades(o["condition_id"], o["created_at"].timestamp(),
+                                  min(now, o["kickoff"]).timestamp())
+            unread = trades is None
+            rule, t, touched = (None, None, None) if unread else fill_from(
+                book if mins > 0 else None, trades, o["token_id"], float(o["bid_price"]),
+                o["created_at"].timestamp())
             if touched and not o.get("touched_at"):
                 with conn.cursor() as cur:
                     cur.execute("UPDATE close_maker_orders SET touched_at = to_timestamp(%s) WHERE id = %s",
@@ -606,6 +612,15 @@ def manage_open(conn, sid: int, now: datetime) -> None:
                 tid = write_trade(conn, sid, o, datetime.fromtimestamp(t, timezone.utc))
                 o["status"], o["paper_trade_id"] = "filled", tid
                 log.info(f"FILLED #{o['id']} {o['team_name']} @ {float(o['bid_price']):.3f} ({rule}) → pt#{tid}")
+                if o.get("close_mid") is not None:
+                    # filled from the tape after the close was taken: the trade gets it too
+                    with conn.cursor() as cur:
+                        cur.execute("""UPDATE paper_trades SET pm_closing_price = %s, pm_closing_bid = %s,
+                                              pm_closing_ask = %s, pm_closing_at = %s, clv = %s
+                                        WHERE id = %s""",
+                                    (round(float(o["close_mid"]), 4), o["close_bid"], o["close_ask"],
+                                     o["close_at"], round(float(o["close_mid"]) / float(o["bid_price"]) - 1, 5),
+                                     tid))
         if 0 < mins <= CLOSE_WINDOW_MIN and book is not None:
             with conn.cursor() as cur:
                 cur.execute("""UPDATE close_maker_orders SET close_bid = %s, close_ask = %s, close_mid = %s,
@@ -617,7 +632,7 @@ def manage_open(conn, sid: int, now: datetime) -> None:
                                     WHERE id = %s""",
                                 (round(book["mid"], 4), book["bid"], book["ask"],
                                  round(book["mid"] / float(o["bid_price"]) - 1, 5), o["paper_trade_id"]))
-        if mins <= 0 and o["status"] == "resting":
+        if mins <= 0 and o["status"] == "resting" and not unread:
             with conn.cursor() as cur:
                 cur.execute("""UPDATE close_maker_orders SET status = 'expired', status_at = now()
                                 WHERE id = %s AND status = 'resting'""", (o["id"],))
