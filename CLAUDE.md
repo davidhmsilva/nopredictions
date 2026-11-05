@@ -59,6 +59,11 @@ This pipeline IS the product. Each step, and where it lives:
 7. **It runs.** `agent/lab_strategy_runner.py` every 5 minutes for pre-match specs,
    `agent/lab_inplay_runner.py` on the pressure poll for live rules. One paper bet of
    1 unit per fixture, settled on the CLOB `winner` flag of the token bought.
+   Every pre-match fixture an agent looks at in its own universe, entered or skipped,
+   is one row of `lab_decisions` (db/087): why, at what price, and after kick-off
+   where Polymarket closed and whether that leg won. The settle job also gives the
+   agents' own trades `pm_clv`. This is step 1 of agents that review their own record
+   (look → propose a variation → test it in shadow → promote on evidence).
 8. **Manage.** `/agent`, `/agent/<id>`. A rule is never edited in place, because the
    record was earned on it: "Build a variation" opens Create with the words prefilled
    (`?draft=`) and makes a new agent.

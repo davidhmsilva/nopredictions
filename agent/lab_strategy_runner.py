@@ -49,7 +49,7 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 import psycopg2
@@ -63,6 +63,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../ingest/
 import db_txn                                                      # noqa: E402
 import espn_stats                                                  # noqa: E402
 from fixture_match import MIN_SIDE_SCORE, team_score               # noqa: E402
+import pm_close                                                    # noqa: E402
 from late_goals_observer import _fetch_book                        # noqa: E402
 
 log = logging.getLogger("lab_runner")
@@ -585,6 +586,130 @@ def pick(spec: dict, ev: EventView) -> tuple[dict | None, str, str]:
     return leg, f"{team} to win — {ev.title}", "ok"
 
 
+# ── the decision log (db/087) ────────────────────────────────────────────────
+#
+# What the agent looked at and decided, entered or skipped, so that what it
+# passed over can be priced afterwards: where the market closed, and whether it
+# won. Step 1 of agents that review their own record.
+
+# pick() reasons that mean "not this agent's fixture": another league, another
+# market, a named club that is not playing. Not decisions, so not logged.
+OUT_OF_UNIVERSE = frozenset({
+    "league", "no Over/Under history in this league", "season", "market", "side",
+    "home team", "away team",
+})
+STAGE_RANK = {"rule": 0, "form": 1, "book": 2, "entered": 3}
+
+
+def is_decision(spec: dict, ev: EventView, why: str) -> bool:
+    """Is a miss with this reason a decision the agent made about a fixture in
+    its own universe? Pure."""
+    if why in OUT_OF_UNIVERSE or why.endswith(("not in list", "excluded")):
+        return False
+    if why == "home/away not confirmed by ESPN":
+        # A rule on named clubs: a decision only when one of them is playing,
+        # or every unconfirmed fixture in the league would be logged against it.
+        names = [n for n in (spec.get("home_team"), spec.get("away_team"),
+                             *(spec.get("home_team_in") or ()), *(spec.get("away_team_in") or ()))
+                 if n]
+        if names:
+            return any(_named(t, names) for t in teams_from_title(ev.title) or ())
+    return True
+
+
+def would_buy(spec: dict, ev: EventView) -> tuple[dict | None, str]:
+    """(leg, label) the rule backs on this fixture, ignoring the conditions that
+    can still fail (favourite, odds, form, the book), or (None, '') when no leg
+    can be named. For logging a skip, never for buying: pick() decides that."""
+    side = spec.get("side")
+    if spec.get("market") == "ou25":
+        leg = (ev.markets.get("ou25") or {}).get(side) if side in ("over", "under") else None
+        return (leg, f"{side.capitalize()} 2.5 — {ev.title}") if leg else (None, "")
+    if side == "draw":
+        leg = ev.markets.get("draw")
+        return (leg, f"Draw — {ev.title}") if leg else (None, "")
+    if side in ("home", "away"):
+        team = ev.home if side == "home" else ev.away
+        leg = _leg_for(team, ev.markets.get("win") or {}) if team else None
+        return (leg, f"{team} to win — {ev.title}") if leg else (None, "")
+    return None, ""
+
+
+def fixture_title(title: str) -> str:
+    """The fixture a title belongs to: "A vs. B - More Markets" is A vs. B."""
+    return re.sub(r"\s+-\s+more markets\s*$", "", title or "", flags=re.I).strip()
+
+
+def decision_row(strategy_id: int, spec: dict, ev: EventView, stage: str, reason: str,
+                 now: datetime, leg: dict | None = None, label: str = "",
+                 book: dict | None = None, forms: tuple | None = None,
+                 trade_id: int | None = None) -> dict:
+    form = None
+    if forms is not None:
+        form = {side: (asdict(f) if f else None) for side, f in zip(("home", "away"), forms)}
+    return {
+        "strategy_id": strategy_id, "event_title": fixture_title(ev.title), "kickoff": ev.kickoff,
+        "leg_side": str(spec.get("side") or ""), "competition": ev.code,
+        "home": ev.home, "away": ev.away, "outcome": label or None,
+        "token_id": (leg or {}).get("token_id"), "condition_id": (leg or {}).get("condition_id"),
+        "stage": stage, "reason": reason[:200],
+        "minutes_to_ko": round((ev.kickoff - now).total_seconds() / 60, 1),
+        "gamma_mid": (leg or {}).get("mid"),
+        "bid": (book or {}).get("best_bid"), "ask": (book or {}).get("best_ask"),
+        "ask_depth_usd": (book or {}).get("ask_depth_usd"),
+        "form": form, "paper_trade_id": trade_id,
+    }
+
+
+def merge_decisions(rows: list[dict]) -> list[dict]:
+    """One row per key, the furthest stage winning. A fixture can be seen twice
+    in a cycle (its "More Markets" sibling), and one INSERT … ON CONFLICT may not
+    touch a row twice. Pure."""
+    best: dict[tuple, dict] = {}
+    for r in rows:
+        k = (r["strategy_id"], r["event_title"], r["kickoff"], r["leg_side"])
+        if k not in best or STAGE_RANK[r["stage"]] > STAGE_RANK[best[k]["stage"]]:
+            best[k] = r
+    return list(best.values())
+
+
+DECISION_COLS = ("strategy_id", "event_title", "kickoff", "leg_side", "competition", "home",
+                 "away", "outcome", "token_id", "condition_id", "stage", "reason",
+                 "minutes_to_ko", "gamma_mid", "bid", "ask", "ask_depth_usd", "form",
+                 "paper_trade_id")
+
+
+def write_decisions(conn, rows: list[dict]) -> int:
+    """Upsert the cycle's decisions in one transaction. A row that entered is
+    never overwritten. Returns how many were sent."""
+    rows = merge_decisions(rows)
+    if not rows:
+        return 0
+    values = [tuple(json.dumps(r[c]) if c == "form" and r[c] is not None else r[c]
+                    for c in DECISION_COLS) for r in rows]
+    with db_txn.atomic(conn):
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(cur, f"""
+                INSERT INTO lab_decisions ({", ".join(DECISION_COLS)}) VALUES %s
+                ON CONFLICT (strategy_id, event_title, kickoff, leg_side) DO UPDATE SET
+                    last_seen_at = now(), looks = lab_decisions.looks + 1,
+                    home = coalesce(EXCLUDED.home, lab_decisions.home),
+                    away = coalesce(EXCLUDED.away, lab_decisions.away),
+                    outcome = coalesce(EXCLUDED.outcome, lab_decisions.outcome),
+                    token_id = coalesce(EXCLUDED.token_id, lab_decisions.token_id),
+                    condition_id = coalesce(EXCLUDED.condition_id, lab_decisions.condition_id),
+                    stage = EXCLUDED.stage, reason = EXCLUDED.reason,
+                    minutes_to_ko = EXCLUDED.minutes_to_ko, gamma_mid = EXCLUDED.gamma_mid,
+                    bid = EXCLUDED.bid, ask = EXCLUDED.ask,
+                    ask_depth_usd = EXCLUDED.ask_depth_usd,
+                    form = coalesce(EXCLUDED.form, lab_decisions.form),
+                    paper_trade_id = EXCLUDED.paper_trade_id
+                WHERE lab_decisions.stage <> 'entered'""",
+                values, template="(" + ", ".join(
+                    "%s::jsonb" if c == "form" else "%s" for c in DECISION_COLS) + ")")
+    return len(rows)
+
+
 def book_verdict(book: dict | None, spec: dict) -> str | None:
     """None when the quote is a price this spec may buy at; else why not."""
     if not book:
@@ -785,6 +910,7 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
     espn_cache: dict[tuple, list] = {}
     form_cache: dict[tuple, TeamForm | None] = {}
     entered = considered = 0
+    decisions: list[dict] = []
     for raw in events:
         if not is_full_match_event(raw.get("title") or ""):
             continue
@@ -806,6 +932,10 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
         for strat, spec in ((s, one) for s in strategies for one in flat_legs(s["spec"])):
             leg, label, why = pick(spec, ev)
             if leg is None:
+                if is_decision(spec, ev, why):
+                    seen, seen_label = would_buy(spec, ev)
+                    decisions.append(decision_row(strat["id"], spec, ev, "rule", why, now,
+                                                  seen, seen_label))
                 continue
             considered += 1
             cids = [x["condition_id"] for x in (
@@ -816,25 +946,42 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
                 continue
             # Last of the free checks, so a rule on a team's form costs ESPN
             # requests only on fixtures that fit everything else.
+            forms = None
             if needs_form(spec):
-                bad = form_verdict(spec, *forms_for(ev, form_cache))
+                forms = forms_for(ev, form_cache)
+                bad = form_verdict(spec, *forms)
                 if bad:
                     log.info(f"[lab_runner] #{strat['id']} {label}: skip — {bad}")
+                    decisions.append(decision_row(strat["id"], spec, ev, "form", bad, now,
+                                                  leg, label, forms=forms))
                     continue
             book = _fetch_book({"token_id": leg["token_id"]})
             bad = book_verdict(book, spec)
             if bad:
                 log.info(f"[lab_runner] #{strat['id']} {label}: skip — {bad}")
+                decisions.append(decision_row(strat["id"], spec, ev, "book", bad, now,
+                                              leg, label, book, forms))
                 continue
             if dry_run:
                 log.info(f"[lab_runner] DRY #{strat['id']} would buy {label} at {book['best_ask']:.3f}")
                 continue
             tid = write_trade(conn, strat, ev, leg, label, book)
             entered += 1
+            decisions.append(decision_row(strat["id"], spec, ev, "entered", "entered", now,
+                                          leg, label, book, forms, tid))
             log.info(f"[lab_runner] #{strat['id']} ENTERED pt#{tid} {label} at {book['best_ask']:.3f}")
 
+    logged = 0
+    if conn is not None and not dry_run:
+        # After every trade is written: a stalled database may lose the log,
+        # never a trade.
+        try:
+            logged = write_decisions(conn, decisions)
+        except psycopg2.Error as exc:
+            log.warning(f"[lab_runner] decision log not written: {exc}")
     log.info(f"[lab_runner] {len(strategies)} running · {len(events)} fixtures in the window · "
-             f"{considered} fits · {entered} entered")
+             f"{considered} fits · {entered} entered · "
+             f"{len(merge_decisions(decisions))} decisions{'' if logged or not decisions else ' (not written)'}")
     return entered
 
 
@@ -866,7 +1013,113 @@ def settle() -> int:
                         ("won" if won else "lost", won, p["id"]))
         settled += 1
     log.info(f"[lab_runner] settled {settled} of {len(pending)} finished trades")
+    try:
+        fill_closes(conn)
+        fill_decision_results(conn, winners)
+    except psycopg2.Error as exc:
+        log.warning(f"[lab_runner] closes / decision results not written: {exc}")
     return settled
+
+
+CLOSE_BATCH = 400              # tokens asked for a close per settle run
+RESULT_BATCH = 300             # markets asked for a winner per settle run
+NO_CLOSE_AFTER_H = 6           # tries this long after kick-off, then gives up
+
+
+def fill_closes(conn, get_close=pm_close.close_from_history) -> int:
+    """Polymarket's price at kick-off, for the decision log (entered and skipped
+    rows) and for the agents' own trades, where it becomes `pm_clv`.
+
+    The last 1-minute point at or before kick-off, at most 5 minutes old and
+    never 0 or 1 (pm_close). Only within 7 days: past that the series can come
+    back as the result. A token with no point NO_CLOSE_AFTER_H hours after
+    kick-off is marked 'none' so it is not asked again every half hour.
+    Network first, writes after (db_txn)."""
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT token_id, kickoff FROM lab_decisions
+             WHERE close_source IS NULL AND token_id IS NOT NULL
+               AND kickoff < now() - make_interval(mins => %(lag)s)
+               AND kickoff > now() - make_interval(days => %(days)s)
+            UNION
+            SELECT pt.pm_token_id, pm.resolution_time FROM paper_trades pt
+              JOIN strategies s ON s.id = pt.strategy_id
+              JOIN pm_markets pm ON pm.id = pt.market_id
+             WHERE s.source = 'lab' AND pt.pm_closing_price IS NULL AND pt.pm_token_id IS NOT NULL
+               AND pm.resolution_time < now() - make_interval(mins => %(lag)s)
+               AND pm.resolution_time > now() - make_interval(days => %(days)s)
+             ORDER BY 2 LIMIT %(n)s""",
+                    {"lag": pm_close.SETTLE_LAG_MIN, "days": pm_close.HISTORY_DAYS, "n": CLOSE_BATCH})
+        todo = cur.fetchall()
+    if not todo:
+        return 0
+    session = requests.Session()
+    found, gave_up = [], []
+    now = datetime.now(timezone.utc)
+    for token, kickoff in todo:
+        hit = get_close(token, int(kickoff.timestamp()), session=session)
+        if hit is not None:
+            found.append((token, kickoff, datetime.fromtimestamp(hit[0], timezone.utc), hit[1]))
+        elif now - kickoff > timedelta(hours=NO_CLOSE_AFTER_H):
+            gave_up.append((token, kickoff))
+    with db_txn.atomic(conn):
+        with conn.cursor() as cur:
+            for token, kickoff, at, price in found:
+                cur.execute("""UPDATE lab_decisions SET close_price = %s, close_at = %s,
+                                      close_source = 'prices_history_1m'
+                                WHERE token_id = %s AND kickoff = %s AND close_source IS NULL""",
+                            (round(price, 4), at, token, kickoff))
+                # The agents' own trades: same close, and the CLV it gives,
+                # on the same basis as the every-game agents (pm_close).
+                cur.execute("""UPDATE paper_trades pt
+                                  SET pm_closing_price = %s, pm_closing_at = %s,
+                                      pm_clv = round(%s::numeric / pt.entry_price - 1, 5),
+                                      pm_clv_source = 'prices_history_1m'
+                                 FROM strategies s, pm_markets pm
+                                WHERE s.id = pt.strategy_id AND pm.id = pt.market_id
+                                  AND s.source = 'lab' AND pt.pm_token_id = %s
+                                  AND pm.resolution_time = %s AND pt.pm_closing_price IS NULL
+                                  AND pt.entry_price > 0""",
+                            (round(price, 4), at, price, token, kickoff))
+            for token, kickoff in gave_up:
+                cur.execute("""UPDATE lab_decisions SET close_source = 'none'
+                                WHERE token_id = %s AND kickoff = %s AND close_source IS NULL""",
+                            (token, kickoff))
+    log.info(f"[lab_runner] closes: {len(found)} found, {len(gave_up)} given up, of {len(todo)} asked")
+    return len(found)
+
+
+def fill_decision_results(conn, known: dict | None = None, get_winner=None) -> int:
+    """Did the leg the rule would have bought win? The CLOB `winner` flag of that
+    token, as the agents' own trades are settled; skipped rows included, which
+    is the point. `known` reuses the winners settle() already fetched."""
+    get_winner = get_winner or _clob_winner
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT condition_id FROM lab_decisions
+             WHERE won IS NULL AND token_id IS NOT NULL AND condition_id IS NOT NULL
+               AND kickoff < now() - interval '2 hours'
+               AND kickoff > now() - interval '30 days'
+             LIMIT %s""", (RESULT_BATCH,))
+        cids = [r[0] for r in cur.fetchall()]
+    if not cids:
+        return 0
+    known = known or {}
+    winners = {cid: known[cid] if known.get(cid) else get_winner(cid) for cid in cids}
+    pairs = [(won, tok, cid) for cid, w in winners.items() if w for tok, won in w.items()]
+    if not pairs:
+        return 0
+    with db_txn.atomic(conn):
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(cur, """
+                UPDATE lab_decisions d SET won = v.won, settled_at = now()
+                  FROM (VALUES %s) AS v(won, token_id, condition_id)
+                 WHERE d.token_id = v.token_id AND d.condition_id = v.condition_id
+                   AND d.won IS NULL""", pairs)
+            n = cur.rowcount
+    log.info(f"[lab_runner] decision results: {n} rows from {sum(1 for w in winners.values() if w)} "
+             f"settled markets of {len(cids)} asked")
+    return n
 
 
 def main() -> None:
