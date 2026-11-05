@@ -643,12 +643,12 @@ def fixture_title(title: str) -> str:
 def decision_row(strategy_id: int, spec: dict, ev: EventView, stage: str, reason: str,
                  now: datetime, leg: dict | None = None, label: str = "",
                  book: dict | None = None, forms: tuple | None = None,
-                 trade_id: int | None = None) -> dict:
+                 trade_id: int | None = None, variant_id: int | None = None) -> dict:
     form = None
     if forms is not None:
         form = {side: (asdict(f) if f else None) for side, f in zip(("home", "away"), forms)}
     return {
-        "strategy_id": strategy_id, "event_title": fixture_title(ev.title), "kickoff": ev.kickoff,
+        "strategy_id": strategy_id, "variant_id": variant_id, "event_title": fixture_title(ev.title), "kickoff": ev.kickoff,
         "leg_side": str(spec.get("side") or ""), "competition": ev.code,
         "home": ev.home, "away": ev.away, "outcome": label or None,
         "token_id": (leg or {}).get("token_id"), "condition_id": (leg or {}).get("condition_id"),
@@ -667,13 +667,13 @@ def merge_decisions(rows: list[dict]) -> list[dict]:
     touch a row twice. Pure."""
     best: dict[tuple, dict] = {}
     for r in rows:
-        k = (r["strategy_id"], r["event_title"], r["kickoff"], r["leg_side"])
+        k = (r["strategy_id"], r.get("variant_id"), r["event_title"], r["kickoff"], r["leg_side"])
         if k not in best or STAGE_RANK[r["stage"]] > STAGE_RANK[best[k]["stage"]]:
             best[k] = r
     return list(best.values())
 
 
-DECISION_COLS = ("strategy_id", "event_title", "kickoff", "leg_side", "competition", "home",
+DECISION_COLS = ("strategy_id", "variant_id", "event_title", "kickoff", "leg_side", "competition", "home",
                  "away", "outcome", "token_id", "condition_id", "stage", "reason",
                  "minutes_to_ko", "gamma_mid", "bid", "ask", "ask_depth_usd", "form",
                  "paper_trade_id")
@@ -691,7 +691,7 @@ def write_decisions(conn, rows: list[dict]) -> int:
         with conn.cursor() as cur:
             psycopg2.extras.execute_values(cur, f"""
                 INSERT INTO lab_decisions ({", ".join(DECISION_COLS)}) VALUES %s
-                ON CONFLICT (strategy_id, event_title, kickoff, leg_side) DO UPDATE SET
+                ON CONFLICT (strategy_id, variant_id, event_title, kickoff, leg_side) DO UPDATE SET
                     last_seen_at = now(), looks = lab_decisions.looks + 1,
                     home = coalesce(EXCLUDED.home, lab_decisions.home),
                     away = coalesce(EXCLUDED.away, lab_decisions.away),
@@ -732,7 +732,7 @@ def book_verdict(book: dict | None, spec: dict) -> str | None:
 
 # ── the network ──────────────────────────────────────────────────────────────
 
-def fetch_upcoming(now: datetime) -> list[dict]:
+def fetch_upcoming(now: datetime, minutes: int | None = None) -> list[dict]:
     """Soccer events kicking off inside the entry window, not yet started.
 
     Bounded by `end_date_*` given as plain DATES. A fixture event's `endDate`
@@ -743,7 +743,7 @@ def fetch_upcoming(now: datetime) -> list[dict]:
     had not reached September, so the first version of this saw 0 fixtures in a
     24-hour window with 863 on the board (2026-09-11). The window does the exact
     bounding, client-side."""
-    horizon = now + timedelta(minutes=ENTRY_WINDOW_MIN)
+    horizon = now + timedelta(minutes=minutes or ENTRY_WINDOW_MIN)
     params = {
         "tag_slug": "soccer", "closed": "false", "limit": 100,
         "order": "startTime", "ascending": "true",
@@ -886,8 +886,72 @@ def forms_for(ev: EventView, cache: dict) -> tuple[TeamForm | None, TeamForm | N
     return one(getattr(fx, "home_id", ""), True), one(getattr(fx, "away_id", ""), False)
 
 
+# ── shadow variants (db/088) ─────────────────────────────────────────────────
+#
+# A variant is an agent's spec with one change, run beside it in the same cycle
+# on the same fixtures at the same prices. It never writes paper_trades: what it
+# would have done is a decision row with its variant_id, priced by settle like
+# any other. The agent's own trading does not change in any way.
+
+MAX_VARIANT_WINDOW = 1440      # a variant may enter up to a day before kick-off
+
+
+def variant_window(spec: dict) -> int:
+    """Minutes before kick-off a variant may enter. `enter_minutes_before` is a
+    variant-only key: an agent built on Create entered at the close in its
+    backtest, so its own window stays ENTRY_WINDOW_MIN whatever its spec says."""
+    w = spec.get("enter_minutes_before")
+    return int(w) if isinstance(w, (int, float)) and 5 <= w <= MAX_VARIANT_WINDOW else ENTRY_WINDOW_MIN
+
+
+def variant_blocker(spec: dict) -> str | None:
+    """Why this variant cannot run, or None. The agent's own rules, plus a sane
+    entry window."""
+    why = run_blocker(spec)
+    if why:
+        return why
+    w = spec.get("enter_minutes_before")
+    if w is not None and not (isinstance(w, (int, float)) and 5 <= w <= MAX_VARIANT_WINDOW):
+        return f"enter_minutes_before must be 5 to {MAX_VARIANT_WINDOW}"
+    return None
+
+
+def running_variants(conn, strategies: list[dict]) -> list[dict]:
+    """Running variants of the running agents. A variant of a paused agent does
+    not run: its owner stopped the idea. One that cannot run is marked blocked."""
+    ids = [s["id"] for s in strategies if s.get("id")]
+    if not ids:
+        return []
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""SELECT id, strategy_id, spec FROM lab_variants
+                        WHERE status = 'running' AND strategy_id = ANY(%s) ORDER BY id""", (ids,))
+        rows = [dict(r) for r in cur.fetchall()]
+    ok = []
+    for r in rows:
+        spec = r["spec"] if isinstance(r["spec"], dict) else json.loads(r["spec"] or "{}")
+        why = variant_blocker(spec)
+        if why:
+            with conn.cursor() as cur:
+                cur.execute("""UPDATE lab_variants SET status = 'blocked', blocker = %s, stopped_at = now()
+                                WHERE id = %s""", (why, r["id"]))
+            log.info(f"[lab_runner] blocked variant v{r['id']}: {why}")
+            continue
+        ok.append({"id": r["strategy_id"], "variant_id": r["id"], "spec": spec})
+    return ok
+
+
+def variants_entered(conn, now: datetime) -> set[tuple]:
+    """(variant_id, fixture, kick-off) a variant already 'entered', for fixtures
+    still ahead. One shadow entry per fixture, like the agent's one trade."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT variant_id, event_title, kickoff FROM lab_decisions
+                        WHERE variant_id IS NOT NULL AND stage = 'entered' AND kickoff > %s""", (now,))
+        return {tuple(r) for r in cur.fetchall()}
+
+
 def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
     conn = None
+    variants: list[dict] = []
     if adhoc_spec is not None:
         # --spec: hold a spec against today's boards without a saved agent.
         # Always a dry run — an ad-hoc spec has no strategy row to trade under,
@@ -901,15 +965,32 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
     else:
         conn = _conn()
         strategies = running_strategies(conn)
+        try:
+            variants = running_variants(conn, strategies)
+        except psycopg2.Error as exc:     # shadows are never worth an agent's cycle
+            log.warning(f"[lab_runner] variants not loaded: {exc}")
     if not strategies:
         log.info("[lab_runner] no running Lab agents")
         return 0
 
     now = datetime.now(timezone.utc)
-    events = fetch_upcoming(now)
+    shadow_done: set[tuple] = set()
+    if variants:
+        try:
+            shadow_done = variants_entered(conn, now)
+        except psycopg2.Error as exc:
+            log.warning(f"[lab_runner] variants' entries not read, variants skip this cycle: {exc}")
+            variants = []
+    # Each arm: the agent itself (variant_id None, ENTRY_WINDOW_MIN) or a variant.
+    arms = ([{"strat": s, "variant_id": None, "spec": s["spec"], "window": ENTRY_WINDOW_MIN}
+             for s in strategies]
+            + [{"strat": v, "variant_id": v["variant_id"], "spec": v["spec"],
+                "window": variant_window(v["spec"])} for v in variants])
+    events = fetch_upcoming(now, max(a["window"] for a in arms))
     espn_cache: dict[tuple, list] = {}
     form_cache: dict[tuple, TeamForm | None] = {}
-    entered = considered = 0
+    books: dict[str, dict | None] = {}
+    entered = considered = shadowed = 0
     decisions: list[dict] = []
     for raw in events:
         if not is_full_match_event(raw.get("title") or ""):
@@ -920,7 +1001,11 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
             continue
         ev = EventView(code=code, title=raw.get("title") or "", kickoff=kickoff_of(raw),
                        markets=parse_markets(raw))
-        if any(needs_sides(leg) for s in strategies for leg in flat_legs(s["spec"])) and code in ESPN_CODE:
+        to_ko = (ev.kickoff - now).total_seconds() / 60
+        live = [a for a in arms if to_ko <= a["window"]]
+        if not live:
+            continue
+        if any(needs_sides(leg) for a in live for leg in flat_legs(a["spec"])) and code in ESPN_CODE:
             orient, fixture = orientation(teams[0], teams[1], espn_around(code, ev.kickoff, espn_cache))
             if orient == "same":
                 ev.home, ev.away = teams
@@ -929,20 +1014,28 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
             if orient:
                 ev.espn = fixture
 
-        for strat, spec in ((s, one) for s in strategies for one in flat_legs(s["spec"])):
+        for arm, spec in ((a, one) for a in live for one in flat_legs(a["spec"])):
+            strat, vid = arm["strat"], arm["variant_id"]
+            tag = f"#{strat['id']}" + (f" v{vid}" if vid else "")
+
+            def note(stage, reason, leg=None, label="", book=None, forms=None, tid=None):
+                decisions.append(decision_row(strat["id"], spec, ev, stage, reason, now, leg,
+                                              label, book, forms, tid, variant_id=vid))
             leg, label, why = pick(spec, ev)
             if leg is None:
                 if is_decision(spec, ev, why):
                     seen, seen_label = would_buy(spec, ev)
-                    decisions.append(decision_row(strat["id"], spec, ev, "rule", why, now,
-                                                  seen, seen_label))
+                    note("rule", why, seen, seen_label)
                 continue
-            considered += 1
-            cids = [x["condition_id"] for x in (
-                list((ev.markets.get("win") or {}).values())
-                + [ev.markets.get("draw")]
-                + list((ev.markets.get("ou25") or {}).values())) if x and x.get("condition_id")]
-            if conn is not None and already_in(conn, strat["id"], cids):
+            if vid is None:
+                considered += 1
+                cids = [x["condition_id"] for x in (
+                    list((ev.markets.get("win") or {}).values())
+                    + [ev.markets.get("draw")]
+                    + list((ev.markets.get("ou25") or {}).values())) if x and x.get("condition_id")]
+                if conn is not None and already_in(conn, strat["id"], cids):
+                    continue
+            elif (vid, fixture_title(ev.title), ev.kickoff) in shadow_done:
                 continue
             # Last of the free checks, so a rule on a team's form costs ESPN
             # requests only on fixtures that fit everything else.
@@ -951,37 +1044,47 @@ def run_once(dry_run: bool = False, adhoc_spec: dict | None = None) -> int:
                 forms = forms_for(ev, form_cache)
                 bad = form_verdict(spec, *forms)
                 if bad:
-                    log.info(f"[lab_runner] #{strat['id']} {label}: skip — {bad}")
-                    decisions.append(decision_row(strat["id"], spec, ev, "form", bad, now,
-                                                  leg, label, forms=forms))
+                    log.info(f"[lab_runner] {tag} {label}: skip — {bad}")
+                    note("form", bad, leg, label, forms=forms)
                     continue
-            book = _fetch_book({"token_id": leg["token_id"]})
+            if leg["token_id"] not in books:
+                books[leg["token_id"]] = _fetch_book({"token_id": leg["token_id"]})
+            book = books[leg["token_id"]]
             bad = book_verdict(book, spec)
             if bad:
-                log.info(f"[lab_runner] #{strat['id']} {label}: skip — {bad}")
-                decisions.append(decision_row(strat["id"], spec, ev, "book", bad, now,
-                                              leg, label, book, forms))
+                log.info(f"[lab_runner] {tag} {label}: skip — {bad}")
+                note("book", bad, leg, label, book, forms)
+                continue
+            if vid is not None:
+                # In shadow: what the variant would have bought, and nothing else.
+                shadow_done.add((vid, fixture_title(ev.title), ev.kickoff))
+                shadowed += 1
+                note("entered", "entered", leg, label, book, forms)
+                log.info(f"[lab_runner] {tag} SHADOW {label} at {book['best_ask']:.3f}")
                 continue
             if dry_run:
-                log.info(f"[lab_runner] DRY #{strat['id']} would buy {label} at {book['best_ask']:.3f}")
+                log.info(f"[lab_runner] DRY {tag} would buy {label} at {book['best_ask']:.3f}")
                 continue
             tid = write_trade(conn, strat, ev, leg, label, book)
             entered += 1
-            decisions.append(decision_row(strat["id"], spec, ev, "entered", "entered", now,
-                                          leg, label, book, forms, tid))
-            log.info(f"[lab_runner] #{strat['id']} ENTERED pt#{tid} {label} at {book['best_ask']:.3f}")
+            note("entered", "entered", leg, label, book, forms, tid)
+            log.info(f"[lab_runner] {tag} ENTERED pt#{tid} {label} at {book['best_ask']:.3f}")
 
     logged = 0
     if conn is not None and not dry_run:
         # After every trade is written: a stalled database may lose the log,
-        # never a trade.
-        try:
-            logged = write_decisions(conn, decisions)
-        except psycopg2.Error as exc:
-            log.warning(f"[lab_runner] decision log not written: {exc}")
-    log.info(f"[lab_runner] {len(strategies)} running · {len(events)} fixtures in the window · "
-             f"{considered} fits · {entered} entered · "
-             f"{len(merge_decisions(decisions))} decisions{'' if logged or not decisions else ' (not written)'}")
+        # never a trade. The agents' rows and the variants' go separately, so a
+        # variant row the database refuses cannot take the agents' log with it.
+        for rows, what in (([d for d in decisions if d["variant_id"] is None], "decision log"),
+                           ([d for d in decisions if d["variant_id"] is not None], "variant log")):
+            try:
+                logged += write_decisions(conn, rows)
+            except psycopg2.Error as exc:
+                log.warning(f"[lab_runner] {what} not written: {exc}")
+    log.info(f"[lab_runner] {len(strategies)} running · {len(variants)} variants · "
+             f"{len(events)} fixtures in the window · {considered} fits · {entered} entered · "
+             f"{shadowed} shadow · {len(merge_decisions(decisions))} decisions"
+             f"{'' if logged or not decisions else ' (not written)'}")
     return entered
 
 
