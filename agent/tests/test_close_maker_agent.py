@@ -86,10 +86,10 @@ def test_choose_takes_the_bigger_gap_and_respects_the_book():
 def test_fill_needs_a_print_below_the_bid_or_the_ask_at_it():
     yes, no = "Y", "N"
     t0 = 1_000.0
-    at_bid = [{"asset": yes, "price": 0.40, "timestamp": t0 + 10}]
-    below = [{"asset": yes, "price": 0.39, "timestamp": t0 + 20}]
-    no_side = [{"asset": no, "price": 0.62, "timestamp": t0 + 30}]                 # Yes-equivalent 0.38
-    before = [{"asset": yes, "price": 0.30, "timestamp": t0 - 5}]                  # before we posted
+    at_bid = [{"token_id": yes, "price": 0.40, "timestamp": t0 + 10}]
+    below = [{"token_id": yes, "price": 0.39, "timestamp": t0 + 20}]
+    no_side = [{"token_id": no, "price": 0.62, "timestamp": t0 + 30}]                 # Yes-equivalent 0.38
+    before = [{"token_id": yes, "price": 0.30, "timestamp": t0 - 5}]                  # before we posted
     book_above = _bk(0.39, 0.41)
     assert ag.fill_from(book_above, at_bid, yes, 0.40, t0)[0] is None
     assert ag.fill_from(book_above, at_bid, yes, 0.40, t0)[2] == t0 + 10           # touched only
@@ -112,3 +112,83 @@ def test_history_gap_judges_a_team_against_its_own_league():
                      "2": {"league": "ENG-PR", "last": (ko - timedelta(days=60)).isoformat()}}}
     f.away_id = 2
     assert ag.history_gap(old, f).startswith("league data stale")
+
+
+# ── manage_open: the tape read decides, and a failed read decides nothing ────
+
+class _Cur:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, params=None):
+        self.log.append((" ".join(sql.split()), params))
+
+
+class _Conn:
+    def __init__(self):
+        self.sql = []
+
+    def cursor(self, **kw):
+        return _Cur(self.sql)
+
+
+NOW = datetime(2026, 11, 6, 19, 5, tzinfo=timezone.utc)
+
+
+def _order(ko, **kw):
+    o = {"id": 63, "token_id": "Y", "condition_id": "0xc", "bid_price": 0.24, "status": "resting",
+         "kickoff": ko, "created_at": ko - timedelta(hours=30), "touched_at": None,
+         "paper_trade_id": None, "close_mid": None, "close_bid": None, "close_ask": None,
+         "close_at": None, "team_name": "Metz"}
+    o.update(kw)
+    return o
+
+
+def _run(monkeypatch, order, trades, book=None):
+    conn, asked, written = _Conn(), [], []
+    monkeypatch.setattr(ag, "open_orders", lambda c, sid: [order])
+    monkeypatch.setattr(ag, "fetch_books", lambda toks: {"Y": book})
+    monkeypatch.setattr(ag, "fetch_trades", lambda cid, a, b: asked.append((cid, a, b)) or trades)
+    monkeypatch.setattr(ag, "write_trade", lambda c, sid, o, at: written.append((o["fill_rule"], at)) or 901)
+    ag.manage_open(conn, 1, NOW)
+    return conn.sql, asked, written
+
+
+def _expired(sql):
+    return any("status = 'expired'" in s for s, _ in sql)
+
+
+def test_after_kick_off_a_failed_trades_read_leaves_the_bid_resting(monkeypatch):
+    sql, asked, written = _run(monkeypatch, _order(NOW - timedelta(minutes=5)), None)
+    assert asked and not written and not _expired(sql)
+
+
+def test_after_kick_off_the_tape_up_to_kick_off_is_read_before_expiry(monkeypatch):
+    ko = NOW - timedelta(minutes=5)
+    sql, asked, written = _run(monkeypatch, _order(ko), [], book=_bk(0.20, 0.22))
+    assert asked[0][1:] == ((ko - timedelta(hours=30)).timestamp(), ko.timestamp())
+    assert not written and _expired(sql)          # the book after kick-off fills nothing
+
+
+def test_a_print_through_the_bid_before_kick_off_fills_late_with_the_stored_close(monkeypatch):
+    ko = NOW - timedelta(minutes=5)
+    t = ko.timestamp() - 120
+    o = _order(ko, close_mid=0.26, close_bid=0.25, close_ask=0.27, close_at=ko - timedelta(minutes=10))
+    sql, _, written = _run(monkeypatch, o, [{"token_id": "Y", "price": 0.23, "timestamp": t}])
+    assert written == [("traded_through", datetime.fromtimestamp(t, timezone.utc))]
+    assert not _expired(sql)
+    close = [p for s, p in sql if s.startswith("UPDATE paper_trades SET pm_closing_price")]
+    assert close and close[0][0] == 0.26 and close[0][-1] == 901
+
+
+def test_before_kick_off_a_failed_read_still_lets_the_close_be_taken(monkeypatch):
+    ko = NOW + timedelta(minutes=10)
+    sql, _, written = _run(monkeypatch, _order(ko), None, book=_bk(0.20, 0.22))
+    assert not written and not _expired(sql)
+    assert any(s.startswith("UPDATE close_maker_orders SET close_bid") for s, _ in sql)
