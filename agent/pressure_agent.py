@@ -1699,6 +1699,14 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
             if conn is not None:
                 conn.close()
             return
+        # The first-half table conditions on the PRE-MATCH total, which the board
+        # shows only before kick-off, and most fixtures are first seen after it.
+        # A failed read costs this cycle its pre-match totals, never the cycle.
+        if conn is not None:
+            try:
+                ht.fill_pre_match(conn, pm_fixtures, ht_state)
+            except psycopg2.Error as exc:
+                log.warning(f"pre-match totals not read ({exc.__class__.__name__})")
         rows = observe(signals, table, pm_fixtures, pre_cache,
                        tracker.window_minutes, tracker.enrich_status)
         ht_rows = ht.observe(signals, ht_table, pm_fixtures, ht_state,
