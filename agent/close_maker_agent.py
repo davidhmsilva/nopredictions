@@ -379,10 +379,16 @@ def posted_events(conn, sid: int) -> set[str]:
 
 
 def open_orders(conn, sid: int) -> list[dict]:
+    """Orders still to manage: every resting bid, however long ago its kick-off
+    (it stays resting until the tape up to kick-off has been read, so a bid whose
+    last cycles never ran is decided late rather than left resting for ever, as
+    #53 and #54 were after the 2026-10-30 database stalls), and for 30 minutes
+    after kick-off any order still without its close."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""SELECT * FROM close_maker_orders
-                        WHERE strategy_id = %s AND kickoff > now() - interval '30 minutes'
-                          AND (status = 'resting' OR close_mid IS NULL)""", (sid,))
+                        WHERE strategy_id = %s
+                          AND (status = 'resting'
+                               OR (kickoff > now() - interval '30 minutes' AND close_mid IS NULL))""", (sid,))
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -648,7 +654,8 @@ def settle() -> int:
                          FROM close_maker_orders o
                          JOIN strategies s ON s.id = o.strategy_id
                          LEFT JOIN paper_trades pt ON pt.id = o.paper_trade_id
-                        WHERE s.name = %s AND o.payout IS NULL
+                        WHERE s.name = %s
+                          AND (o.payout IS NULL OR (o.paper_trade_id IS NOT NULL AND pt.result IS NULL))
                           AND o.kickoff < now() - interval '3 hours'""", (STRATEGY_NAME,))
         pending = [dict(r) for r in cur.fetchall()]
     verdicts = {cid: clob_winner(cid) for cid in {p["condition_id"] for p in pending}}  # network, no txn

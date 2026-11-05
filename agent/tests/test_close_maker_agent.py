@@ -192,3 +192,17 @@ def test_before_kick_off_a_failed_read_still_lets_the_close_be_taken(monkeypatch
     sql, _, written = _run(monkeypatch, _order(ko), None, book=_bk(0.20, 0.22))
     assert not written and not _expired(sql)
     assert any(s.startswith("UPDATE close_maker_orders SET close_bid") for s, _ in sql)
+
+
+def test_a_bid_whose_kick_off_passed_days_ago_is_still_decided_from_the_tape(monkeypatch):
+    # #53/#54: no cycle ran in their last 30 minutes, so they sat resting for days
+    sql, asked, written = _run(monkeypatch, _order(NOW - timedelta(days=6)), [])
+    assert asked and not written and _expired(sql)
+
+
+def test_open_orders_keeps_every_resting_bid_and_settle_reaches_a_late_fill():
+    import inspect
+    q = inspect.getsource(ag.open_orders)
+    assert "(status = 'resting'" in q                                   # no kick-off bound on a resting bid
+    assert "kickoff > now() - interval '30 minutes' AND close_mid IS NULL" in q
+    assert "pt.result IS NULL" in inspect.getsource(ag.settle)
