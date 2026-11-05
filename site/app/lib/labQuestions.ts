@@ -10,7 +10,7 @@
  *  Client-safe: schema, types and the prompt (plain strings).
  */
 import { z } from 'zod'
-import { LEAGUES, NO_OU_LEAGUES } from './backtest'
+import { LEAGUES, NO_OU_LEAGUES, VENUE_NO_HISTORY } from './backtest'
 
 export const QuestionSchema = z.object({
   header: z.string(),          // ≤ 14 chars, a chip
@@ -48,16 +48,17 @@ export function clarify(theory: string, chosen: string[]): string {
 
 const LEAGUE_NAMES = LEAGUES.map((l) => `${l.name} (${l.country})`).join(', ')
 const NO_OU_NAMES = LEAGUES.filter((l) => NO_OU_LEAGUES.has(l.code)).map((l) => l.name).join(', ')
+const NO_VENUE_NAMES = LEAGUES.filter((l) => (VENUE_NO_HISTORY as readonly string[]).includes(l.code)).map((l) => l.name).join(', ')
 
 export const PLAN_SYSTEM = `You are the strategist of an AI agent builder for sports betting. A user has described an idea — a bet they believe makes money — and wants it turned into an agent that trades it. Before the strategy is written and tested, you decide which kind of rule it is and ask the FEW questions whose answers change what the agent would do — the way a sharp analyst would before writing any code.
 
 # The two kinds of rule the tool can run
 
-PREMATCH — decided before kick-off, replayed over ~145,000 finished football matches (2012-2026, ${LEAGUE_NAMES}) at the sharp closing price, plus the NBA 2014-2022. Markets: 1X2 (home/draw/away) and over/under 2.5 goals (over/under not in ${NO_OU_NAMES}, where we hold no prices). It can back the home team, the away team, the draw, the goals market, or "the team" wherever it plays: the favourite, the underdog, a named team, or whoever plays a named team. Filters, on either team: odds band, season, league, favourite/underdog, a named team, rest days, the result and margin of its last game, runs (wins, unbeaten, losses, winless, up to 10 games), points in its last 5, points in its last 5 at home or away, goals scored, conceded and in total per game in its last 5. All from league games.
+PREMATCH — decided before kick-off, replayed over ~145,000 finished football matches (2012-2026, ${LEAGUE_NAMES}) at the sharp closing price, plus the NBA 2014-2022. Markets: 1X2 (home/draw/away) and over/under 2.5 goals (over/under not in ${NO_OU_NAMES}, where we hold no prices); and, replayed over about a year at Polymarket's own prices rather than the close, both teams to score (yes/no) and over/under 1.5, 3.5 and 4.5 goals (not in ${NO_VENUE_NAMES}, where we hold no such prices). It can back the home team, the away team, the draw, the goals market, or "the team" wherever it plays: the favourite, the underdog, a named team, or whoever plays a named team. Filters, on either team: odds band, season, league, favourite/underdog, a named team, rest days, the result and margin of its last game, runs (wins, unbeaten, losses, winless, up to 10 games), points in its last 5, points in its last 5 at home or away, goals scored, conceded and in total per game in its last 5. All from league games.
 
 INPLAY — a live rule on a match in progress, paper-traded on Polymarket football from now on (no historical replay). Buys one of: a team to win, the draw, or "one more goal". Entry conditions: which team (favourite / underdog / home / away), that team's odds at kick-off, a minute window, the score (any / level / 0-0 / team ahead / team behind), pressure (none / that team pressing / either side pressing / both — an open game), how strong ("pressing" ≈ top quarter of readings, "dominating" ≈ top tenth), pressure over the whole match so far or the last 15 minutes, the price paid, leagues. Exit: hold to the end, sell N minutes after a goal (any goal / only that team's / only the opponent's; a goal that does not stand cancels it), or sell at a set minute.
 
-UNSUPPORTED — neither (other sports live, corners, cards, player props, half-time markets in-play, anything needing data we do not have). Ask nothing; the next step explains.
+UNSUPPORTED — neither (other sports live, corners, cards, player props, other goal lines such as 0.5 and 5.5, half-time markets in-play, anything needing data we do not have). Ask nothing; the next step explains.
 
 # The questions
 

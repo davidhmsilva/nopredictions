@@ -12,6 +12,7 @@
 import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
 import type { AgentDetail, AgentOrder, AgentSummary, DriftPosition } from '../lib/agents'
+import { isVenueMarket } from '../lib/backtest'
 import { dateText, dayTimeText, oddsText, useOddsFormat } from '../lib/display'
 import { EquityChart, StatusBadge, ago, pct, pickOf, settledOf, sinceText, tone, units } from './parts'
 import { StrategyCard } from '../components/StrategyCard'
@@ -392,6 +393,7 @@ export function AgentView({
   const isDriftDetail = (positions?.length ?? 0) > 0 || (detail.legacy_positions ?? 0) > 0
   const settled = settledOf(a)
   const bt = a.backtest
+  const venueReplay = a.spec != null && 'market' in a.spec && isVenueMarket(a.spec.market)
 
   return (
     <>
@@ -429,7 +431,7 @@ export function AgentView({
           <p className="gc-quiet">
             {bt.stats.n > 0 ? (
               <>
-                Replayed over past seasons before it was saved:{' '}
+                {venueReplay ? "Replayed over about a year at Polymarket's own prices before it was saved:" : 'Replayed over past seasons before it was saved:'}{' '}
                 <span className="np-num">{bt.stats.n.toLocaleString('en-US')}</span> bets, yield{' '}
                 <span className={`np-num ${tone(bt.stats.yieldPct)}`}>{pct(bt.stats.yieldPct, 2)}</span> ±
                 <span className="np-num">{bt.stats.ci95Pct.toFixed(2)}</span>

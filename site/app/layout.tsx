@@ -7,7 +7,7 @@ import { Analytics } from '@vercel/analytics/next'
 // agents only: describe an idea, get an agent that trades it, or copy one.
 const TITLE = 'NOPREDICTIONS — Turn your betting idea into an AI agent'
 const DESCRIPTION =
-  'Describe a betting idea in your own words. The AI turns it into a strategy, tests it on 14 years of real odds, and deploys it as an agent that paper-trades on Polymarket. Or copy an agent from the Marketplace.'
+  'Describe a betting idea in your own words. The AI turns it into a strategy, tests it on up to 14 years of real odds, and deploys it as an agent that paper-trades on Polymarket. Or copy an agent from the Marketplace.'
 const CARD =
   'Your idea, as an AI agent. Describe a strategy, see what it would have made, deploy it — or copy an agent someone already runs.'
 

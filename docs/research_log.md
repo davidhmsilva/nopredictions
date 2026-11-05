@@ -3301,6 +3301,82 @@ team-matches, 11 figures, 0 differences. `form_of` over ESPN against `matches`, 
 - `sco.3` and `sco.4` answer with a season frozen on 2025-09-27. A code answering is not a code
   being current: check `leagues[0].season.year`.
 
+## Both teams to score and the other goal lines, at Polymarket's prices (2026-10-31)
+
+**What the replay is.** Over/Under 1.5, 3.5, 4.5 and both teams to score, in `bt_venue_lines`
+(db/085): 18,837 bets on 3,664 fixtures, 2025-10 to 2026-09-27, 19 leagues, measured before the
+11 new leagues (below). Each is the last
+taker buy in the hour before kick-off, plus the market's own fee. Mid is only a ceiling.
+
+| market | side | bets | return at the price paid, net of fee | at the mid (ceiling) | average odds |
+|---|---|---|---|---|---|
+| BTTS | yes | 2,789 | +1.00% | +2.50% | 1.81 |
+| BTTS | no | 2,121 | −6.51% | −5.31% | 2.19 |
+| O/U 1.5 | over | 2,784 | −0.47% | +0.38% | 1.29 |
+| O/U 1.5 | under | 2,118 | −5.48% | −3.41% | 4.59 |
+| O/U 3.5 | over | 2,632 | −4.31% | −2.30% | 3.19 |
+| O/U 3.5 | under | 2,486 | −1.59% | −0.74% | 1.49 |
+| O/U 4.5 | over | 1,841 | −11.89% | −8.46% | 6.44 |
+| O/U 4.5 | under | 2,066 | +0.09% | +0.89% | 1.19 |
+
+These are flat rules over one year, to check the replay reads sensibly, not findings. No rule
+here was tested out of sample, and none was filtered down to find one. The gap between each
+pair is what these markets charged a taker over this year; it says nothing about a rule that
+buys only some of them. The first test of any of these is an agent's own record.
+
+**`bt_features` could not be the join.** It holds games with a Pinnacle close, which ended
+2026-01-14. Joined to it, 3,003 of the 3,664 fixtures would vanish. The figures are computed
+from `matches` in `refresh_bt_venue_lines`; on the 616 fixtures in both, all 22 figures have
+0 differences.
+
+**Venue payouts against our results, every market in these leagues: 16,652 markets, 0
+disagree** (BTTS 4,412, O/U 1.5 4,160, 3.5 4,213, 4.5 3,867). Voids: 0.
+
+**A club back after years away has a last 5 that old.** `refresh_bt_features` reads back to
+2012, so Cottbus in August 2026 would read 4,473 days of rest and a form figure from over a
+decade ago. The live runner reads ESPN and has no such history. `refresh_bt_venue_lines`
+starts in 2023-07, so these are NULL and fail the rule as they do live: 53 fixtures. Worth a
+look in `refresh_bt_features` too, for any rule tested on a promoted club's first games.
+
+**A daily Stage J had two quiet ways to stop.** Fixtures are read before Football-Data has
+their result, and each was `no_candidate` for good: now retried for 21 days. And a failed
+`/trades` read was stored as `ok` with no price, which reads as "nobody bought" and is never
+asked again: now `error`, retried, and the job fails if over half the reads do. Data API v1
+was due to retire on 2026-10-24 and still answered on 10-31. `/v2/trades` takes `condition=`
+but ignored `end=` when tried, so porting is not a rename. All 15,103 soccer markets on one
+checked day were still `version: v1`.
+
+**The refresh was 172s on a nested loop over a CTE the planner thinks is tiny**, and 16s with
+`enable_nestloop = off` on the function, same rows.
+
+**PR 38's 11 leagues, measured against this replay (2026-11-01).** The figures above are the 19
+leagues before they arrived. The replay's league list reads `bt_features`, so all 11 came in with
+db/086, in whatever state Stage J left them:
+
+| league | bets | fixtures | window | |
+|---|---|---|---|---|
+| MEX-LMX | 723 | 146 | 2025-11 → 2026-05 | in |
+| ARG-PD | 53 | 27 | 2025-10 → 2025-12 | in, thin |
+| BRA-SA | 34 | 23 | 2025-11 → 2025-12 | held: 3 bets on BTTS yes |
+| USA-MLS | 9 | 6 | 2025-10 → 2025-11 | held |
+| JPN-J1, SWE-AL, NOR-EL, RUS-PL, CHN-CSL, DEN-SL, AUT-BL | 0 | 0 | | held |
+
+Under 50 bets over all eight sides is not a test of a league, so it is held by name in all three
+lists, and a test keeps them equal. On the four with rows: payouts against results 899 markets, 0
+disagree, 0 voids; figures against `bt_features` on the 35 fixtures in both, 0 differences. That
+leaves 21 leagues: 19,613 bets, 3,837 fixtures. `run_backtest` is unchanged on the specs checked.
+
+**That is not what the venue holds.** The table has these leagues' goal markets, unlinked: MLS 1,641
+(23 linked), the Argentine Primera 1,570 (108), Brasileirão 1,246 (121), Liga MX 1,015 (651), J1 960,
+China 808, Eliteserien 720, Russia 612, Denmark 504, Allsvenskan 404, Austria 168. Stage J ran before
+Stage K loaded their results, marked them `no_candidate`, and fetches prices only for linked rows.
+`matches` holds those games now. So the next test is a relink and a price backfill, then the same
+checks per league. A daily Stage J will not do it alone: its retry only reaches back 21 days, and
+Stage K, which fills `matches` for these leagues, is not scheduled.
+
+**The replay charges the fee and the paper record does not.** `write_trade` books `1 / ask`, on
+every market, for every agent. At 5% and even money that is about 2.5% of the stake a bet. The
+page says so. Next test: book the record net of the fee, with old rows left as they are.
 
 ## 11 more leagues, and which 6 stayed out (2026-10-31)
 

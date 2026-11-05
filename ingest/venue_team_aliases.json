@@ -1,0 +1,222 @@
+{
+ "_about": "Venue spellings of clubs in our teams table, learned by stage_j_venue_history.py --learn-aliases from kick-off-time co-occurrence (one side certain, our row within 15 min, the same club every time, at least 3 fixtures). Hand-curated agent/team_aliases.json wins over this file.",
+ "aliases": {
+  "1. FC Cologne": "FC Koln",
+  "APO Levadiakos FC": "Levadeiakos",
+  "AS Saint-Étienne": "St Etienne",
+  "Atletico": "Ath Madrid",
+  "Basaksehir": "Buyuksehyr",
+  "Borussia Mönchengladbach": "M'gladbach",
+  "Bristol Rovers FC": "Bristol Rvs",
+  "Celta Fortuna": "Celta B",
+  "Enschede": "Twente",
+  "Erzurum": "Erzurumspor",
+  "Espanyol": "Espanol",
+  "GA Eagles": "Go Ahead Eagles",
+  "Goztepe Izmir": "Goztep",
+  "Göztepe SK": "Goztep",
+  "Istanbul Basaksehir": "Buyuksehyr",
+  "Karlsruher SC": "Karlsruhe",
+  "Kocaeli": "Kocaelispor",
+  "Larissa": "Larisa",
+  "Levadiakos": "Levadeiakos",
+  "Madeira": "Maritimo",
+  "M´gladbach": "M'gladbach",
+  "NEC": "Nijmegen",
+  "Nuremberg": "Nurnberg",
+  "Olympiacos": "Olympiakos",
+  "Olympiacos Piraeus": "Olympiakos",
+  "Panaitolikos": "Panetolikos",
+  "Panaitolikos Agrinio": "Panetolikos",
+  "Peterborough": "Peterboro",
+  "Peterborough United FC": "Peterboro",
+  "RC Deportivo A Coruña": "La Coruna",
+  "RCD Espanyol de Barcelona": "Espanol",
+  "Rams Başakşehir FK": "Buyuksehyr",
+  "Real Racing Club": "Santander",
+  "Saint-Etienne": "St Etienne",
+  "St. Truidense": "St Truiden",
+  "St. Truidense VV": "St Truiden",
+  "Stade Lavallois": "Laval",
+  "Stade Rennais FC 1901": "Rennes",
+  "Union Gilloise": "St. Gilloise",
+  "Union Saint-Gilloise": "St. Gilloise",
+  "Vicente Barcelos": "Gil Vicente",
+  "Vitória SC": "Guimaraes",
+  "Volos NPS": "Volos NFC"
+ },
+ "evidence": {
+  "1. FC Cologne": {
+   "team": "FC Koln",
+   "fixtures": 19
+  },
+  "APO Levadiakos FC": {
+   "team": "Levadeiakos",
+   "fixtures": 3
+  },
+  "AS Saint-Étienne": {
+   "team": "St Etienne",
+   "fixtures": 27
+  },
+  "Atletico": {
+   "team": "Ath Madrid",
+   "fixtures": 36
+  },
+  "Basaksehir": {
+   "team": "Buyuksehyr",
+   "fixtures": 23
+  },
+  "Borussia Mönchengladbach": {
+   "team": "M'gladbach",
+   "fixtures": 34
+  },
+  "Bristol Rovers FC": {
+   "team": "Bristol Rvs",
+   "fixtures": 15
+  },
+  "Celta Fortuna": {
+   "team": "Celta B",
+   "fixtures": 12
+  },
+  "Enschede": {
+   "team": "Twente",
+   "fixtures": 25
+  },
+  "Erzurum": {
+   "team": "Erzurumspor",
+   "fixtures": 6
+  },
+  "Espanyol": {
+   "team": "Espanol",
+   "fixtures": 47
+  },
+  "GA Eagles": {
+   "team": "Go Ahead Eagles",
+   "fixtures": 24
+  },
+  "Goztepe Izmir": {
+   "team": "Goztep",
+   "fixtures": 25
+  },
+  "Göztepe SK": {
+   "team": "Goztep",
+   "fixtures": 34
+  },
+  "Istanbul Basaksehir": {
+   "team": "Buyuksehyr",
+   "fixtures": 3
+  },
+  "Karlsruher SC": {
+   "team": "Karlsruhe",
+   "fixtures": 27
+  },
+  "Kocaeli": {
+   "team": "Kocaelispor",
+   "fixtures": 24
+  },
+  "Larissa": {
+   "team": "Larisa",
+   "fixtures": 15
+  },
+  "Levadiakos": {
+   "team": "Levadeiakos",
+   "fixtures": 17
+  },
+  "Madeira": {
+   "team": "Maritimo",
+   "fixtures": 6
+  },
+  "M´gladbach": {
+   "team": "M'gladbach",
+   "fixtures": 32
+  },
+  "NEC": {
+   "team": "Nijmegen",
+   "fixtures": 37
+  },
+  "Nuremberg": {
+   "team": "Nurnberg",
+   "fixtures": 19
+  },
+  "Olympiacos": {
+   "team": "Olympiakos",
+   "fixtures": 16
+  },
+  "Olympiacos Piraeus": {
+   "team": "Olympiakos",
+   "fixtures": 3
+  },
+  "Panaitolikos": {
+   "team": "Panetolikos",
+   "fixtures": 19
+  },
+  "Panaitolikos Agrinio": {
+   "team": "Panetolikos",
+   "fixtures": 4
+  },
+  "Peterborough": {
+   "team": "Peterboro",
+   "fixtures": 13
+  },
+  "Peterborough United FC": {
+   "team": "Peterboro",
+   "fixtures": 16
+  },
+  "RC Deportivo A Coruña": {
+   "team": "La Coruna",
+   "fixtures": 6
+  },
+  "RCD Espanyol de Barcelona": {
+   "team": "Espanol",
+   "fixtures": 26
+  },
+  "Rams Başakşehir FK": {
+   "team": "Buyuksehyr",
+   "fixtures": 35
+  },
+  "Real Racing Club": {
+   "team": "Santander",
+   "fixtures": 34
+  },
+  "Saint-Etienne": {
+   "team": "St Etienne",
+   "fixtures": 5
+  },
+  "St. Truidense": {
+   "team": "St Truiden",
+   "fixtures": 27
+  },
+  "St. Truidense VV": {
+   "team": "St Truiden",
+   "fixtures": 9
+  },
+  "Stade Lavallois": {
+   "team": "Laval",
+   "fixtures": 6
+  },
+  "Stade Rennais FC 1901": {
+   "team": "Rennes",
+   "fixtures": 35
+  },
+  "Union Gilloise": {
+   "team": "St. Gilloise",
+   "fixtures": 27
+  },
+  "Union Saint-Gilloise": {
+   "team": "St. Gilloise",
+   "fixtures": 9
+  },
+  "Vicente Barcelos": {
+   "team": "Gil Vicente",
+   "fixtures": 26
+  },
+  "Vitória SC": {
+   "team": "Guimaraes",
+   "fixtures": 35
+  },
+  "Volos NPS": {
+   "team": "Volos NFC",
+   "fixtures": 4
+  }
+ }
+}

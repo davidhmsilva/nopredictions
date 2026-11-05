@@ -12,7 +12,7 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { isNbaMarket, seasonName, type BacktestStats, type Spec } from '../lib/backtest'
+import { isNbaMarket, isVenueMarket, seasonName, type BacktestStats, type Spec } from '../lib/backtest'
 import type { RecentBet } from '../lib/labQuick'
 import { dateText, oddsText, useOddsFormat } from '../lib/display'
 import { StrategyCard } from '../components/StrategyCard'
@@ -128,7 +128,8 @@ export function KeepActions({
  *  plus the closing-line value, which that function does not read — and rule 5
  *  of this project says money made without the price moving your way is
  *  probably luck, so the plain verdict has to. */
-export function plainVerdict(s: BacktestStats, code: string): { tone: Tone; label: string; line: string } {
+export function plainVerdict(s: BacktestStats, code: string, market?: string): { tone: Tone; label: string; line: string } {
+  if (market && isVenueMarket(market)) return venueVerdict(s, code)
   if (code === 'NO_MATCHES') {
     return { tone: 'flat', label: 'No games fit this', line: 'Nothing in 14 seasons matches every condition. Loosen one and try again.' }
   }
@@ -172,9 +173,45 @@ export function plainVerdict(s: BacktestStats, code: string): { tone: Tone; labe
     : { tone: 'flat', label: 'The market already prices this', line: 'The result is about what the bookmaker’s margin costs. Nothing here beats the price.' }
 }
 
+/** The same verdict for a market replayed at Polymarket's own prices. It buys at the
+ *  last price before kick-off, so no later price can say whether the market agreed:
+ *  a profit here never reads as more than "not proven yet". */
+function venueVerdict(s: BacktestStats, code: string): { tone: Tone; label: string; line: string } {
+  if (code === 'NO_MATCHES') {
+    return { tone: 'flat', label: 'No games fit this', line: 'Nothing in about a year of Polymarket prices matches every condition. Loosen one and try again.' }
+  }
+  if (code === 'INSUFFICIENT_SAMPLE') {
+    return {
+      tone: 'flat',
+      label: 'A record, not a result',
+      line: `${s.n} bets at Polymarket’s prices. Under 200 it is a record, not a result: a good run looks like a pattern for a long time.`,
+    }
+  }
+  if (code === 'EDGE_FOUND') {
+    return {
+      tone: 'warn',
+      label: 'Made money — not proven yet',
+      line: 'It made money at Polymarket’s own prices, over about a year. One year is not fourteen, and this buys at the last price before kick-off, so no later price can say whether the market agreed. Worth tracking on new games.',
+    }
+  }
+  if (code === 'SIGNIFICANTLY_NEGATIVE') {
+    return {
+      tone: 'flat',
+      label: 'Loses money, steadily',
+      line: 'Over about a year this lost more than the spread and the fee alone would explain. Betting the opposite is not a fix: you pay the spread and the fee on that side too.',
+    }
+  }
+  return s.yieldPct > 0
+    ? { tone: 'flat', label: 'Slightly up, within luck', line: 'A small profit, but well inside what chance produces over this many bets.' }
+    : { tone: 'flat', label: 'Nothing here beats the price', line: 'Over about a year the result is about what the spread and the fee cost.' }
+}
+
 function units(x: number, dp = 1): string {
   return `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(dp)}`
 }
+
+const monthYear = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })
 
 function Curve({ monthly }: { monthly: { month: string; pnl: number }[] }) {
   if (monthly.length < 2) return null
@@ -220,7 +257,8 @@ export function LabResult({
   const fmt = useOddsFormat()
   const [open, setOpen] = useState(false)
   const s = r.stats!
-  const v = plainVerdict(s, r.verdict!.code)
+  const v = plainVerdict(s, r.verdict!.code, r.spec?.market)
+  const venue = r.spec != null && isVenueMarket(r.spec.market)
   const seasons = r.seasons ?? []
   const seasonLabel = (y: number) => seasonName(y, r.spec?.leagues)
   const best = seasons.length ? seasons.reduce((a, b) => (b.pnl > a.pnl ? b : a)) : null
@@ -269,6 +307,14 @@ export function LabResult({
         <strong>{v.label}</strong>
         <span>{v.line}</span>
       </div>
+
+      {venue && (
+        <p className="lr-note">
+          Replayed over about a year{s.firstMatch && s.lastMatch ? ` (${monthYear(s.firstMatch)} to ${monthYear(s.lastMatch)})` : ''} at
+          Polymarket&apos;s own prices, the last price a taker paid before kick-off plus the fee. Not 14 years
+          at Pinnacle&apos;s close. Under 200 bets it is a record, not a result.
+        </p>
+      )}
 
       {r.spec && <StrategyCard spec={r.spec} label="Your agent's strategy" />}
 
@@ -369,9 +415,18 @@ export function LabResult({
               <p>
                 {s.clvPct != null
                   ? `Average move from the opening price to the close. Bettors who really have an edge usually see the price shorten after they bet.${s.nOpen < s.n ? ` Measured on the ${s.nOpen.toLocaleString('en-US')} of these bets that have an opening price.` : ''}`
-                  : 'This dataset has no opening price, so the move cannot be measured.'}
+                  : venue
+                    ? 'It buys at the last price before kick-off, so there is no later price to compare with.'
+                    : 'This dataset has no opening price, so the move cannot be measured.'}
               </p>
             </div>
+            {s.midYieldPct != null && (
+              <div>
+                <dt>The ceiling: the same bets at the mid</dt>
+                <dd className="np-num">{units(s.midYieldPct, 2)}%</dd>
+                <p>The middle of the book, plus the fee. Nobody buys there, so this is an upper limit and never a result.</p>
+              </div>
+            )}
           </dl>
 
           {seasons.length > 1 && (
