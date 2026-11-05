@@ -40,7 +40,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 
 import psycopg2.extras
@@ -48,10 +47,9 @@ import requests
 
 import db_txn
 import nba_agent as na
+import pm_trades
 
 log = logging.getLogger("nba_maker")
-
-DATA_API = "https://data-api.polymarket.com"
 
 STRATEGY_NAME = "NBA Every Game — maker bids"
 OBS_VERSION = 1
@@ -63,7 +61,6 @@ MAX_SPREAD = na.MAX_SPREAD    # 3c, on the token we bid, as nba_agent gates its 
 MIN_LIQUIDITY_USD = na.MIN_LIQUIDITY_USD
 MIN_BID, MAX_BID = na.MIN_ASK, na.MAX_ASK
 STAKE_U = 1.0
-TRADES_PAGE = 500
 
 
 # ── what is bid on ───────────────────────────────────────────────────────────
@@ -163,7 +160,7 @@ def fill_from(trades: list[dict], token_id: str, price: float, since_ts: float,
         ts, px = na._f(t.get("timestamp")), na._f(t.get("price"))
         if ts is None or px is None or ts <= since_ts or ts > until_ts:
             continue
-        yes_px = px if str(t.get("asset")) == token_id else round(1.0 - px, 6)
+        yes_px = px if str(t.get("token_id")) == token_id else round(1.0 - px, 6)
         if yes_px < price - 1e-9:
             fill_t, fill_p = ts, yes_px
             break
@@ -204,29 +201,13 @@ def fetch_books(tokens: list[str]) -> dict[str, dict | None]:
 
 
 def fetch_trades(condition_id: str, start: int, end: int) -> list[dict] | None:
-    """Every taker fill on the market in [start, end], paged backwards by time
-    (`offset` stops at 10,000). None when the API did not answer: the order
-    keeps its checkpoint and is read again next cycle."""
-    out, hi = [], end
-    for _ in range(40):
-        try:
-            r = requests.get(f"{DATA_API}/trades", params={"market": condition_id, "takerOnly": "true",
-                                                            "start": start, "end": hi,
-                                                            "limit": TRADES_PAGE}, timeout=20)
-            r.raise_for_status()
-            batch = r.json()
-        except Exception as exc:                                     # noqa: BLE001
-            log.warning(f"trades {condition_id[:10]}: {exc}")
-            return None
-        if not isinstance(batch, list) or not batch:
-            break
-        out += batch
-        if len(batch) < TRADES_PAGE:
-            break
-        hi = int(min(na._f(x.get("timestamp")) or start for x in batch)) - 1
-        if hi < start:
-            break
-        time.sleep(0.2)
+    """Every taker fill on the market in [start, end], from data-api v2
+    (`pm_trades`; v1's /trades has answered 410 Gone since 2026-11-02). None
+    when the API did not answer: the order keeps its checkpoint and is read
+    again next cycle, so a bid is never expired on trades it could not see."""
+    out = pm_trades.trades(condition_id, start, end)
+    if out is None:
+        log.warning(f"trades {condition_id[:10]}: data-api v2 did not answer")
     return out
 
 
@@ -356,6 +337,13 @@ def write_trade(conn, sid: int, o: dict, filled_at: datetime, fill_price: float)
             cur.execute("""UPDATE nba_maker_orders SET status = 'filled', status_at = now(),
                                   filled_at = %s, fill_price = %s, paper_trade_id = %s
                             WHERE id = %s""", (filled_at, fill_price, tid, o["id"]))
+            # A fill found late (trades unreadable until after tip-off) meets an
+            # order whose close is already stored: the trade carries it too.
+            cur.execute("""UPDATE paper_trades pt SET pm_closing_price = o.close_price,
+                                  pm_closing_at = o.close_at, pm_clv = o.close_price / o.bid_price - 1
+                             FROM nba_maker_orders o
+                            WHERE o.id = %s AND pt.id = o.paper_trade_id
+                              AND o.close_price IS NOT NULL""", (o["id"],))
     return tid
 
 

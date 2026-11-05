@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import nba_agent as na  # noqa: E402
 import nba_maker as mk  # noqa: E402
+import pm_trades  # noqa: E402
 
 NOW = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
 KO = NOW + timedelta(hours=8)
@@ -121,7 +122,7 @@ T0 = 1_000_000.0
 
 
 def _tr(ts, price, asset="yes"):
-    return {"timestamp": ts, "price": price, "asset": asset}
+    return {"timestamp": ts, "price": price, "token_id": asset}     # pm_trades' row shape
 
 
 def test_a_print_strictly_below_the_bid_fills():
@@ -150,6 +151,105 @@ def test_trades_before_the_bid_or_after_tip_off_never_count():
 def test_the_first_trade_through_is_the_fill_whatever_the_order_given():
     t, px, _ = mk.fill_from([_tr(T0 + 90, 0.45), _tr(T0 + 30, 0.49)], "yes", 0.50, T0, T0 + 1000)
     assert t == T0 + 30 and px == 0.49
+
+
+def test_a_v1_row_is_not_read_as_this_token():
+    # v1 called the token `asset`; a row without `token_id` must not count as
+    # this token's own print (it would invert the price)
+    assert mk.fill_from([{"timestamp": T0 + 10, "price": 0.49, "asset": "yes"}], "yes", 0.50,
+                        T0, T0 + 1000)[0] is None
+
+
+# ── the trades read (data-api v2) ────────────────────────────────────────────
+
+class _Resp:
+    def __init__(self, body, status=200):
+        self.body, self.status_code = body, status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise pm_trades.requests.HTTPError(f"{self.status_code}")
+
+    def json(self):
+        if isinstance(self.body, Exception):
+            raise self.body
+        return self.body
+
+
+class _Feed:
+    """Pages served newest first, as /v2/trades does, recording every request."""
+    def __init__(self, pages):
+        self.pages, self.calls = pages, []
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append((url, dict(params)))
+        page = self.pages[len(self.calls) - 1]
+        return page if isinstance(page, _Resp) else _Resp(page)
+
+
+def _v2(ts, price=0.5, tok="yes"):
+    return {"timestamp": ts, "price": price, "token_id": tok, "size": 10, "side": "BUY",
+            "condition_id": "c1", "outcome_index": 0, "proxy_wallet": "0xw", "transaction_hash": "0xh"}
+
+
+def _page(rows, cursor=None):
+    return {"data": rows, "pagination": {"has_more": cursor is not None, "next_cursor": cursor}}
+
+
+def test_trades_ask_v2_by_condition_with_no_v1_parameters():
+    f = _Feed([_page([_v2(T0 + 5)])])
+    pm_trades.trades("c1", int(T0), int(T0 + 10), session=f, pause=0)
+    url, q = f.calls[0]
+    assert url == "https://data-api.polymarket.com/v2/trades"
+    assert q["condition"] == "c1" and q["taker_only"] == "true" and q["filter_amount"] == 0
+    assert not {"market", "offset", "takerOnly"} & set(q)
+
+
+def test_trades_follow_the_cursor_with_the_same_filters_and_return_oldest_first():
+    f = _Feed([_page([_v2(T0 + 30), _v2(T0 + 20)], "k1"), _page([_v2(T0 + 10)])])
+    out = pm_trades.trades("c1", int(T0), int(T0 + 100), session=f, pause=0)
+    assert [x["timestamp"] for x in out] == [T0 + 10, T0 + 20, T0 + 30]
+    assert f.calls[1][1]["cursor"] == "k1" and f.calls[1][1]["condition"] == "c1"
+
+
+def test_trades_stop_paging_once_a_page_reaches_back_past_start():
+    # the market shape ignores start/end: the window is ours to apply
+    f = _Feed([_page([_v2(T0 + 50), _v2(T0 - 5)], "k1"), _page([_v2(T0 - 100)])])
+    out = pm_trades.trades("c1", int(T0), int(T0 + 40), session=f, pause=0)
+    assert len(f.calls) == 1
+    assert out == []                         # T0+50 is after end, T0-5 before start
+
+
+def test_trades_window_is_inclusive_at_both_ends():
+    f = _Feed([_page([_v2(T0 + 40), _v2(T0 + 20), _v2(T0)])])
+    out = pm_trades.trades("c1", int(T0), int(T0 + 40), session=f, pause=0)
+    assert [x["timestamp"] for x in out] == [T0, T0 + 20, T0 + 40]
+
+
+def test_a_failed_read_is_none_never_no_trades():
+    assert pm_trades.trades("c1", 0, 10, session=_Feed([_Resp({"error": "Gone"}, 410)]), pause=0) is None
+    assert pm_trades.trades("c1", 0, 10, session=_Feed([_Resp(ValueError("not json"))]), pause=0) is None
+    assert pm_trades.trades("c1", 0, 10, session=_Feed([[_v2(5)]]), pause=0) is None      # v1's bare list
+    # a failure on a later page loses the whole window, not just its tail
+    f = _Feed([_page([_v2(T0 + 30)], "k1"), _Resp({}, 503)])
+    assert pm_trades.trades("c1", int(T0), int(T0 + 40), session=f, pause=0) is None
+
+
+def test_an_empty_market_is_an_empty_list():
+    assert pm_trades.trades("c1", 0, 10, session=_Feed([_page([])]), pause=0) == []
+
+
+def test_a_walk_that_never_reaches_start_is_none(monkeypatch):
+    monkeypatch.setattr(pm_trades, "MAX_PAGES", 2)
+    f = _Feed([_page([_v2(T0 + 90)], "k1"), _page([_v2(T0 + 80)], "k2")])
+    assert pm_trades.trades("c1", int(T0), int(T0 + 100), session=f, pause=0) is None
+
+
+def test_v2_rows_feed_the_fill_rule():
+    f = _Feed([_page([_v2(T0 + 60, 0.52, tok="no"), _v2(T0 + 30, 0.50)])])
+    rows = pm_trades.trades("c1", int(T0), int(T0 + 100), session=f, pause=0)
+    t, px, touch = mk.fill_from(rows, "yes", 0.50, T0, T0 + 100)
+    assert t == T0 + 60 and abs(px - 0.48) < 1e-9 and touch == T0 + 30
 
 
 # ── the close and the payout ─────────────────────────────────────────────────
