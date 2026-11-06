@@ -41,6 +41,10 @@ case "$job" in
     # flock singleton inside the observer; systemd does the restarting.
     AF_COUNTER_NAME=sweep exec python settled_sweep_observer.py --interval 30 \
       >> settled_sweep_observer.log 2>&1 ;;
+  price-reader)
+    # Price Reader (#46, db/089): every sport, price only. flock singleton inside;
+    # it connects per 60 s cycle through 6543 and holds no pooler slot between.
+    exec python price_reader_agent.py >> price_reader.log 2>&1 ;;
 
   # ── periodic jobs (Type=oneshot, driven by a .timer) ────────────────────────
   pressure-settle)
@@ -74,6 +78,8 @@ case "$job" in
     exec python lab_strategy_runner.py --once >> lab_runner.log 2>&1 ;;
   lab-settle)
     exec python lab_strategy_runner.py --settle >> lab_runner.log 2>&1 ;;
+  price-reader-review)
+    exec python price_reader_review.py >> price_reader_review.log 2>&1 ;;
   venue-open)
     # where each market opened on the venue, and its last quote before kick-off
     exec python venue_open_recorder.py --once >> venue_open_recorder.log 2>&1 ;;
