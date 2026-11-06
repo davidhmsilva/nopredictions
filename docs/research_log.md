@@ -3427,3 +3427,37 @@ shadow, 21 skipped on the book (mostly spreads of 5-8pp that Gamma had shown ins
 that fired: grid_no 7, pre_favourite 5, pre_steam 3, live_leader 1. post_sweep found nothing:
 ended events' tokens sit at 0.999 / 1 or have no book, as the sweep observer saw. The move arms
 need 10 minutes of their own memory after any restart.
+
+### Price Reader reads behaviour, from the trade tape (2026-11-07)
+
+The operator: "reading the price" means finding patterns and behaviour in the market that may
+signal something, such as drifting odds or many people backing the same thing and moving the
+odd. So six arms now read behaviour (db/090 adds `signal` to each position: the flow for and
+against, the wallets, the biggest bet, the move).
+
+🔑 **Polymarket's whole taker tape is public and cheap.** `data-api /v2/trades` with no market
+filter, `taker_only=true`, `limit=1000`, newest first, paged with `cursor` = `next_cursor`:
+1,000 fills cover ~85 s of the whole venue (~700 fills a minute), the newest is ~50-85 s old,
+and each row has `proxy_wallet`, the taker's `side`, `token_id`, `condition_id`, `size`,
+`price`, `timestamp`, `transaction_hash`. 26 minutes = 32 pages = 32,000 fills, 5.3 s; 5,806 of
+them on the ~23,000 sports tokens in the window, $1.05M. Gamma's `volumeNum` did NOT change in
+77 s on any of 10,809 markets: it is cached, useless for minute flow.
+
+A taker BUY of one outcome and a SELL of the other are one opinion; flow is read on a token
+with its complement. Arms: money_in ($2k+ net in 30 min, 65%+ of the flow, price +2pp),
+crowd (12+ wallets, 75%+ of those trading it, $500+), big_bet (one buy ≥ $3k in 10 min, price
+≤ 2pp past it), thin_move (pre-match only: 5pp in 30 min on < $200 → buy the faller),
+day_steam / day_drift (Gamma `oneDayPriceChange` ±6pp, last 3 h). First live read, one cycle:
+"78 different wallets backed Sevilla to win in 30 min, 26 the other", "one bet of $20,000 on
+Over 3.5 at 0.628", money_in "$18,204 net on Over 3.5, +46.5pp" (in play, after a goal).
+
+Two things the first read showed. **In play a price falls with no trade** when a goal goes in or
+the clock runs (makers move their quotes): thin_move flagged "Over 1.5 −29.5pp on $125" — that is
+information, so thin_move is pre-match only. **day_steam and day_drift are one market from two
+sides**: booking both pays the spread and fee twice for no position, so day_drift starts
+watched (books only if the review's resume rule clears it), and no arm books a token whose
+complement an open booked position already holds. The review's exclusions now also take a phase
+off an arm ("phase:live" / "phase:pre"), not only a sport. Priors still apply: following a
+pre-match PM shortening lost in football (H-STEAM-FOLLOW), and 24-48 h flow was a martingale
+(H-PM-FLOW); informed WALLETS did beat the close, which is the next arm worth building
+(smart_money: wallets whose own settled record on the tape beats their prices).

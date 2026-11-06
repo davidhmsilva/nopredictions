@@ -6,7 +6,10 @@ review that changes which of them trade is price_reader_review.py.
 One cycle, every CYCLE_S seconds:
   1. Read every sports event Polymarket lists that starts in the next 3 hours or
      started in the last 8 (Gamma, ~400 events, ~12,000 open markets, ~3 s).
-  2. Remember each token's mid (the move arms need the last 10-60 minutes).
+  2. Remember each token's mid (the move arms need the last 10-60 minutes), and
+     read Polymarket's public trade tape since the last cycle (data-api
+     /v2/trades, every taker fill on the venue, newest first, ~1 minute late),
+     keeping the fills on those tokens: who bought which side, and how much.
   3. Ask every arm, active or shadow, which token it would buy in each event,
      on the listing price. One position per arm per event, a daily cap per arm.
   4. Read the real CLOB books of those tokens and of every flip position due to
@@ -48,6 +51,7 @@ log = logging.getLogger("price_reader")
 
 GAMMA = "https://gamma-api.polymarket.com"
 CLOB = "https://clob.polymarket.com"
+TAPE = "https://data-api.polymarket.com/v2/trades"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 CYCLE_S = 60
@@ -56,6 +60,10 @@ MAX_BOOKS_PER_CYCLE = 1000
 BOOK_CHUNK = 400
 RETRY_AFTER_SKIP_MIN = 10        # a token whose book failed the gate is not re-read sooner
 SETTLE_BATCH = 200               # markets asked for a winner per settle pass
+TAPE_PAGE = 1000                 # fills per page (the API's maximum)
+TAPE_PAGES = 10                  # pages per cycle: ~1,000 fills is ~85 s of the venue
+TAPE_WARMUP_MIN = 30             # after a start, read the tape this far back…
+TAPE_WARMUP_PAGES = 40           # …in at most this many pages
 VOID_AFTER_D = 3                 # a closed market with no winner this long after the start is void
 LOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".price_reader.lock")
 
@@ -133,6 +141,35 @@ def read_books(session: requests.Session, tokens: list[str]) -> dict[str, dict]:
     return out
 
 
+def fetch_tape(session: requests.Session, since_ts: int, max_pages: int) -> tuple[list[dict], bool]:
+    """(fills, complete): every taker fill on Polymarket back to `since_ts`,
+    newest first, following `next_cursor`. `complete` is False when the pages
+    ran out before reaching back that far (a gap: the flow is undercounted)
+    or a page failed."""
+    out: list[dict] = []
+    cursor = None
+    for _ in range(max_pages):
+        params = {"taker_only": "true", "limit": TAPE_PAGE}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            r = session.get(TAPE, params=params, timeout=30)
+            if r.status_code != 200:
+                return out, False
+            body = r.json()
+        except (requests.RequestException, ValueError):
+            return out, False
+        rows = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            return out, False
+        out += rows
+        cursor = (body.get("pagination") or {}).get("next_cursor")
+        oldest = min((int(x.get("timestamp") or 0) for x in rows), default=0)
+        if not rows or not cursor or oldest < since_ts:
+            return out, True
+    return out, False
+
+
 def clob_market(session: requests.Session, condition_id: str) -> dict | None:
     """{'closed': bool, 'winners': {token: won} or None} from the CLOB, None
     when it could not be read."""
@@ -167,7 +204,7 @@ def ensure_arms(conn) -> int:
                            ON CONFLICT (key) DO NOTHING""",
                         (a["key"], a["base_key"], a["label"], json.dumps(a["params"]), a["mode"],
                          "Started trading on day one." if a["mode"] == "active"
-                         else "A variant, watched in shadow from day one."))
+                         else "Watched from day one; books only on evidence."))
             added += cur.rowcount
     return added
 
@@ -239,13 +276,12 @@ def write_position(conn, sid: int | None, arm: dict, c: pr.Candidate, book: dict
                         else "after the final whistle")
                 exit_txt = (f"Sold at the bid {p.get('hold_min')} minutes later." if p.get("exit") == "flip"
                             else "Held to the end.")
-                moved = ""
-                if c.move_pp is not None:
-                    moved = f"; the price moved {c.move_pp * 100:+.1f}pp in {p.get('move_window_min')} min"
+                seen = c.why.split(", ", 1)[1] if ", " in c.why and c.why.startswith(q.label) else ""
                 reasoning = (
                     f"Price Reader · {arm['label']}. {q.label}, {q.event_title} ({q.sport}), {when}. "
-                    f"Bought at the CLOB ask {ask:.3f} (bid {book['best_bid']:.3f}, ask depth "
-                    f"${book['ask_depth_usd']:.0f}){moved}. "
+                    + (f"What the market did: {seen}. " if seen else "")
+                    + f"Bought at the CLOB ask {ask:.3f} (bid {book['best_bid']:.3f}, ask depth "
+                    f"${book['ask_depth_usd']:.0f}). "
                     f"Odds {pr.net_odds(ask):.3f} net of the {pr.FEE_RATE:.0%}·p(1−p) taker fee. "
                     f"{exit_txt} Only the price was read. 1u, PAPER.")
                 cur.execute("""
@@ -261,8 +297,8 @@ def write_position(conn, sid: int | None, arm: dict, c: pr.Candidate, book: dict
                   (arm_id, arm_key, booked, paper_trade_id, event_id, event_slug, event_title,
                    event_start, sport, league, phase, minutes_from_start, condition_id, token_id,
                    market_type, family, question, outcome, label, gamma_ask, entry_ask, entry_bid,
-                   ask_depth_usd, move_pp, shares, fee_rate, stake, exit_rule, exit_due_at, entered_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ask_depth_usd, move_pp, shares, fee_rate, stake, exit_rule, exit_due_at, entered_at, signal)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
                 ON CONFLICT (arm_id, event_id) DO NOTHING
                 RETURNING id""",
                 (arm["id"], arm["key"], ptid is not None, ptid, q.event_id, q.event_slug, q.event_title,
@@ -270,7 +306,8 @@ def write_position(conn, sid: int | None, arm: dict, c: pr.Candidate, book: dict
                  q.condition_id, q.token_id, q.market_type, q.family, q.question, q.outcome, q.label,
                  q.ask, ask, book.get("best_bid"), book.get("ask_depth_usd"),
                  round(c.move_pp * 100, 2) if c.move_pp is not None else None,
-                 round(shares, 6), pr.FEE_RATE, pr.STAKE_UNITS, p.get("exit", "hold"), due, now))
+                 round(shares, 6), pr.FEE_RATE, pr.STAKE_UNITS, p.get("exit", "hold"), due, now,
+                 json.dumps(c.signal) if c.signal is not None else None))
             row = cur.fetchone()
             if row is None:                       # entered by a concurrent run: undo the trade
                 raise _AlreadyIn()
@@ -308,6 +345,7 @@ def close_position(conn, pos: dict, *, status: str, payout: float, reason: str,
 class State:
     def __init__(self):
         self.memory = pr.PriceMemory()
+        self.flow = pr.FlowMemory()
         self.skip_until: dict = {}          # (arm_id, event_id) → when to look again
         self.last_settle: float = 0.0
         self.session = requests.Session()
@@ -319,6 +357,15 @@ def cycle(state: State, dry_run: bool = False) -> dict:
     events = fetch_events(state.session, now)
     qbe = {str(ev.get("id")): pr.quotes_of(ev) for ev in events}
     state.memory.observe([q for qs in qbe.values() for q in qs], now)
+    watch = {q.token_id for qs in qbe.values() for q in qs}
+    now_ts = int(now.timestamp())
+    first = state.flow.last_ts == 0
+    since = now_ts - TAPE_WARMUP_MIN * 60 if first else state.flow.last_ts - 120
+    fills, complete = fetch_tape(state.session, since, TAPE_WARMUP_PAGES if first else TAPE_PAGES)
+    added = state.flow.add(fills, watch)
+    state.flow.prune(now_ts)
+    if not complete:
+        log.warning(f"[price_reader] tape: {len(fills)} fills read, did not reach back to the last cycle")
     for k in [k for k, t in state.skip_until.items() if t <= now]:
         del state.skip_until[k]
 
@@ -336,7 +383,7 @@ def cycle(state: State, dry_run: bool = False) -> dict:
         left = int(arm["daily_cap"]) - today.get(arm["id"], 0)
         if left <= 0:
             continue
-        for c in pr.arm_candidates(arm["params"], events, state.memory, now, qbe):
+        for c in pr.arm_candidates(arm["params"], events, state.memory, now, qbe, state.flow):
             key = (arm["id"], c.quote.event_id)
             if key in pairs or key in state.skip_until:
                 continue
@@ -349,7 +396,7 @@ def cycle(state: State, dry_run: bool = False) -> dict:
     asked = set(tokens[:MAX_BOOKS_PER_CYCLE])
     books = read_books(state.session, list(asked))
 
-    stats = Counter(events=len(events), quotes=sum(len(v) for v in qbe.values()),
+    stats = Counter(events=len(events), quotes=sum(len(v) for v in qbe.values()), fills=added,
                     arms=len(arms), candidates=len(cands), books=len(books), due=len(due))
     if dry_run:
         for arm, c in cands:
@@ -373,8 +420,10 @@ def cycle(state: State, dry_run: bool = False) -> dict:
                 stats["skipped"] += 1
                 state.skip_until[(arm["id"], c.quote.event_id)] = now + timedelta(minutes=RETRY_AFTER_SKIP_MIN)
                 continue
-            booked = (arm["mode"] == "active" and c.quote.sport not in (arm["excluded_sports"] or [])
-                      and c.quote.token_id not in held)
+            # Never both sides of one market on the tab: the second is watched.
+            booked = (arm["mode"] == "active"
+                      and not pr.excluded(arm["excluded_sports"], c.quote.sport, c.phase.phase)
+                      and c.quote.token_id not in held and c.quote.other_token not in held)
             try:
                 write_position(conn, sid, arm, c, book, booked, now)
             except _AlreadyIn:
