@@ -35,6 +35,7 @@ export function PublicAgent({ id, initial }: { id: number; initial: AgentDetail 
                   orders: d.orders ?? [],
                   positions: d.positions ?? [],
                   legacy_positions: d.legacy_positions ?? 0,
+                  learning: d.learning ?? null,
                 },
               }
             : { state: 'error' }
