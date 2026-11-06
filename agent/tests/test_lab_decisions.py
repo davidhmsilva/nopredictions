@@ -130,7 +130,7 @@ def test_the_upsert_never_overwrites_a_row_that_entered(monkeypatch):
                             ev.markets["win"]["Arsenal"], "x", forms=(lr.TeamForm(form_pts5=4), None))]
     assert lr.write_decisions(_Conn(), rows) == 1
     assert sent["sql"].endswith("WHERE lab_decisions.stage <> 'entered'")
-    assert "ON CONFLICT (strategy_id, event_title, kickoff, leg_side)" in sent["sql"]
+    assert "ON CONFLICT (strategy_id, variant_id, event_title, kickoff, leg_side)" in sent["sql"]
     row = dict(zip(lr.DECISION_COLS, sent["values"][0]))
     assert json.loads(row["form"])["home"]["form_pts5"] == 4
     assert "%s::jsonb" in sent["template"]
@@ -193,7 +193,8 @@ def test_a_cycle_logs_the_skips_and_the_entry_and_trades_exactly_as_before(monke
     monkeypatch.setattr(lr, "datetime", type("D", (datetime,), {"now": staticmethod(lambda tz=None: NOW)}))
     monkeypatch.setattr(lr, "_conn", lambda: object())
     monkeypatch.setattr(lr, "running_strategies", lambda conn: strategies)
-    monkeypatch.setattr(lr, "fetch_upcoming", lambda now: [raw])
+    monkeypatch.setattr(lr, "running_variants", lambda conn, strategies: [])
+    monkeypatch.setattr(lr, "fetch_upcoming", lambda now, minutes=None: [raw])
     monkeypatch.setattr(lr, "espn_around", lambda code, ko, cache: [])
     monkeypatch.setattr(lr, "orientation", lambda h, a, fx: ("same", None))
     monkeypatch.setattr(lr, "already_in", lambda conn, sid, cids: False)
@@ -215,6 +216,7 @@ def test_a_dry_run_writes_no_log(monkeypatch):
     monkeypatch.setattr(lr, "_conn", lambda: object())
     monkeypatch.setattr(lr, "running_strategies", lambda conn: [
         {"id": 1, "name": "x", "theory": None, "spec": {"market": "1x2", "side": "draw"}}])
-    monkeypatch.setattr(lr, "fetch_upcoming", lambda now: [])
+    monkeypatch.setattr(lr, "running_variants", lambda conn, strategies: [])
+    monkeypatch.setattr(lr, "fetch_upcoming", lambda now, minutes=None: [])
     monkeypatch.setattr(lr, "write_decisions", lambda *a: (_ for _ in ()).throw(AssertionError))
     assert lr.run_once(dry_run=True) == 0

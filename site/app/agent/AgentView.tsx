@@ -11,7 +11,7 @@
 
 import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
-import type { AgentDetail, AgentOrder, AgentSummary, DriftPosition } from '../lib/agents'
+import type { AgentDetail, AgentLearning, AgentOrder, AgentSummary, DriftPosition, LearningArm } from '../lib/agents'
 import { dateText, dayTimeText, oddsText, useOddsFormat } from '../lib/display'
 import { EquityChart, StatusBadge, ago, pct, pickOf, settledOf, sinceText, tone, units } from './parts'
 import { StrategyCard } from '../components/StrategyCard'
@@ -30,6 +30,101 @@ const ORDER: Record<AgentOrder['status'], { label: string; cls: string }> = {
   filled: { label: 'FILLED', cls: 'is-good' },
   expired: { label: 'NOT FILLED', cls: '' },
   cancelled: { label: 'CANCELLED', cls: '' },
+}
+
+const ARM_MODE: Record<LearningArm['mode'], { label: string; cls: string }> = {
+  active: { label: 'TRADING', cls: 'is-good' },
+  shadow: { label: 'WATCHING', cls: 'is-info' },
+  stopped: { label: 'STOPPED', cls: '' },
+}
+
+/** A learning agent (the Price Reader, db/089): the ways it reads a price, how
+ *  each is doing, and what its daily review last decided. Watched approaches
+ *  are priced and settled like bets but never reach the tab, so their numbers
+ *  are here and nowhere else. */
+function Learning({ learning }: { learning: AgentLearning }) {
+  const [latest, ...earlier] = learning.reviews
+  return (
+    <section className="gc-section">
+      <h2 className="gc-h2">How it is learning</h2>
+      <p className="gc-quiet">
+        It reads only the price: where it is, how it moved, the depth of the book and the clock. Never the
+        score. Seven ways of reading it run side by side, each with two variants it watches without betting.
+        Every morning it reviews its own bets. An approach that is clearly losing stops trading and is only
+        watched; a variant that is clearly better on the same days takes over. Watched bets are priced and
+        settled like real ones, but never reach the tab above.
+      </p>
+      {latest ? (
+        <>
+          <p className="ag-note">
+            <b>Review of {dateText(new Date(`${latest.review_date}T12:00:00Z`))}</b>
+          </p>
+          <p className="gc-quiet" style={{ whiteSpace: 'pre-line', marginTop: 6 }}>{latest.summary}</p>
+        </>
+      ) : (
+        <p className="ag-note">The first review runs at 06:00 UTC, once its first bets have settled.</p>
+      )}
+      <div className="sc-table-wrap" style={{ marginTop: 12 }}>
+        <table className="sc-table">
+          <thead>
+            <tr>
+              <th>Approach</th>
+              <th className="ag-c-status">Now</th>
+              <th className="ag-c-num">Settled</th>
+              <th className="ag-c-num ag-hide-m">Open</th>
+              <th className="ag-c-num">P&amp;L</th>
+              <th className="ag-c-num">Yield</th>
+              <th className="ag-c-num ag-hide-m">CLV</th>
+            </tr>
+          </thead>
+          <tbody>
+            {learning.arms.map((r) => {
+              const m = ARM_MODE[r.mode] ?? ARM_MODE.stopped
+              const y = r.staked > 0 ? (r.pl / r.staked) * 100 : null
+              const variant = r.key !== r.base_key
+              return (
+                <tr key={r.key}>
+                  <td>
+                    <span className="ag-t-pick" style={variant ? { fontWeight: 400, paddingLeft: 12 } : undefined}>
+                      {r.label}
+                    </span>
+                    {(r.excluded_sports?.length ?? 0) > 0 && (
+                      <span className="ag-t-event">Not booking: {r.excluded_sports.join(', ')}</span>
+                    )}
+                    {r.note && r.note.includes(':') && /^\d{4}-/.test(r.note) && (
+                      <span className="ag-t-event">{r.note}</span>
+                    )}
+                  </td>
+                  <td className="ag-c-status"><span className={`np-badge ${m.cls}`}>{m.label}</span></td>
+                  <td className="ag-c-num np-num">{r.n}</td>
+                  <td className="ag-c-num ag-hide-m np-num">{r.n_open}</td>
+                  <td className={`ag-c-num np-num ${tone(r.n ? r.pl : null)}`}>{r.n ? units(r.pl) : '—'}</td>
+                  <td className={`ag-c-num np-num ${tone(y)}`}>{y != null ? pct(y) : '—'}</td>
+                  <td className={`ag-c-num ag-hide-m np-num ${tone(r.clv)}`}>{r.clv != null ? pct(r.clv * 100, 2) : '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="ag-note">
+        Settled counts every bet of an approach, on the tab or watched. Under {VERDICT_N} settled bets an
+        approach has a record, not a result. CLV is the move from the price it paid to Polymarket&apos;s price at
+        the start, for bets placed before it.
+      </p>
+      {earlier.length > 0 && (
+        <details style={{ marginTop: 12 }}>
+          <summary className="ag-note" style={{ cursor: 'pointer' }}>Earlier reviews</summary>
+          {earlier.map((r) => (
+            <div key={r.review_date} style={{ marginTop: 10 }}>
+              <p className="ag-note"><b>{dateText(new Date(`${r.review_date}T12:00:00Z`))}</b></p>
+              <p className="gc-quiet" style={{ whiteSpace: 'pre-line' }}>{r.summary}</p>
+            </div>
+          ))}
+        </details>
+      )}
+    </section>
+  )
 }
 
 /** A maker agent's bids: the price it asked for, the market's price when it
@@ -447,6 +542,8 @@ export function AgentView({
           </p>
         </section>
       )}
+
+      {detail.learning && <Learning learning={detail.learning} />}
 
       {detail.orders?.length > 0 && <Bids orders={detail.orders} />}
 

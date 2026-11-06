@@ -64,6 +64,13 @@ This pipeline IS the product. Each step, and where it lives:
    where Polymarket closed and whether that leg won. The settle job also gives the
    agents' own trades `pm_clv`. This is step 1 of agents that review their own record
    (look → propose a variation → test it in shadow → promote on evidence).
+   Step 2: **shadow variants** (`lab_variants`, db/088, `agent/lab_variants.py`). A
+   variant is the agent's spec with one change, including `enter_minutes_before`
+   (variants only). It runs in the same cycle on the same fixtures at the same
+   prices, writes decision rows with its `variant_id` and never `paper_trades`, so it
+   cannot reach the agent's record. There are at most 5 per agent.
+   `lab_variants.py compare <id>` sets the agent against each variant from the
+   variant's start. A winner is never swapped in: promoting makes a new agent.
 8. **Manage.** `/agent`, `/agent/<id>`. A rule is never edited in place, because the
    record was earned on it: "Build a variation" opens Create with the words prefilled
    (`?draft=`) and makes a new agent.
@@ -268,7 +275,9 @@ fine. `NEXT_DIST_DIR=.next-build npx next build` keeps them apart.
 ## The operator's own agents
 
 The operator's account (`profiles.role = 'owner'`, unlimited) also holds hand-written
-agents (`strategies.source = 'agent'`): Live Pressure Overs and its first-half arms,
+agents (`strategies.source = 'agent'`): Price Reader (#46, every sport from the price
+alone, reviews itself daily: `agent/price_reader*.py`, db/089, its page's "How it is
+learning"), Live Pressure Overs and its first-half arms,
 Favourite Pressing HT, Low Pressure HT Under, Favourite Swing, Pre-Match Drift, NFL /
 NBA / Nations League Every Game, Close Forecast, the strategy factory's paper bots; and
 the observers and recorders (settled-market sweep, late goals, soccer and NFL live).
