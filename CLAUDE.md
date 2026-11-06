@@ -275,7 +275,9 @@ fine. `NEXT_DIST_DIR=.next-build npx next build` keeps them apart.
 ## The operator's own agents
 
 The operator's account (`profiles.role = 'owner'`, unlimited) also holds hand-written
-agents (`strategies.source = 'agent'`): Live Pressure Overs and its first-half arms,
+agents (`strategies.source = 'agent'`): Price Reader (#46, every sport from the price
+alone, reviews itself daily: `agent/price_reader*.py`, db/089, its page's "How it is
+learning"), Live Pressure Overs and its first-half arms,
 Favourite Pressing HT, Low Pressure HT Under, Favourite Swing, Pre-Match Drift, NFL /
 NBA / Nations League Every Game, Close Forecast, the strategy factory's paper bots; and
 the observers and recorders (settled-market sweep, late goals, soccer and NFL live).
