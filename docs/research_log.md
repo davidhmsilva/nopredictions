@@ -3643,3 +3643,48 @@ What remains, all traced game by game:
   now sets the club's league, and the page warns if none is named.
 - A pooled backend on 6543 answered with `default_transaction_read_only = on` while others said
   off, source unknown. A script that writes (a temp table) has to check, and try again.
+
+## Price Reader: an agent that reads only the price, in every sport (2026-11-06)
+
+The operator's brief: an agent that tries to call a result in any Polymarket sports market, in
+any sport, by looking at the price alone; free to buy before or during the event, to hold or to
+sell; reviewing its own trades every day to do better. Built as hand-written agent #46
+(`source = 'agent'`, `rules.kind = 'price_reader'`), hypothesis #68 H-PRICE-READER, db/089.
+Code: `agent/price_reader.py` (rules), `price_reader_agent.py` (daemon, 60 s cycle),
+`price_reader_review.py` (daily, 06:00 UTC), `tests/test_price_reader.py`.
+
+**What it reads.** Gamma `/events?tag_slug=sports` over games starting in the next 3 h or in the
+last 8 h: ~410 events, ~23,000 tokens, ~3.5 s, no key. Polymarket splits one game into several
+events (`X vs Y`, `- More Markets`, `- Exact Score`, `- Halftime Result`…) that share a
+`gameId`; the agent keys a game on it (title before " - " + start when there is none), so an arm
+holds one position per GAME. Gamma's `bestBid`/`bestAsk` are the first outcome's; the second
+token is the complement. An empty side is quoted 0 / 1 and is not a price. Entries are confirmed
+on the CLOB book (`POST /books`, 400 at a time, ~0.15 s for 65): spread ≤ 4pp, ≥ $50 ask depth
+in the top five levels, CLOB ask inside the arm's band. 'post' needs Polymarket's own `ended`
+flag; the clock may only rule out. It never reads the score.
+
+**Seven arms, each with two shadow variants** (one setting moved each way): pre_favourite
+(1.08-1.33, last 90 min), pre_steam (+4pp in the last hour), grid_no (No on one exact score at
+0.88-0.97), live_leader (70%+ of the sport's usual length gone, 1.05-1.25), live_momentum (+10pp
+in 10 min, sell 15 min later), live_fade (−12pp in 10 min, sell 15 min later), post_sweep (ended,
+0.90-0.995). Priors written into the hypothesis: against, PM in-play football calibrated (#44),
+PM's pre-match mid = Pinnacle, dropping-odds follower dead; for, swisstony / 0x2c33 earn ~1% of
+volume on 0.90+ and exact-score Nos, GSX- made half its profit after the whistle.
+
+🔑 **An arm's record is ALL its positions, booked or shadow.** `booked` only says whether it also
+wrote a paper trade. So stopping an arm, excluding a sport, or a second arm finding the token
+already held (it goes to shadow) never changes what an arm is measured on.
+
+**The daily review is fixed rules, no LLM:** stop an active arm at 50+ settled bets with its 90%
+interval wholly below zero (it keeps running in shadow); promote a variant over its base only on
+the same days, 100+ bets each, yield > 0 and a margin over 1.645 SE of the difference; bring a
+stopped group back at 100+ bets since the move with the interval wholly above zero; drop a sport
+from an arm at 40+ bets wholly below zero, back on 40+ in the last 30 days wholly above; daily cap
+10 + 30·P(edge > 0) within 5-40 (25 while exploring). Three-day cooldown on any move. Never "best
+of the lot" (strategy factory: +11.6pp train, −12.6pp forward).
+
+**First cycle (2026-11-06 22:14 UTC, from the Mac):** 407 events, 80 candidates, 16 booked, 43
+shadow, 21 skipped on the book (mostly spreads of 5-8pp that Gamma had shown inside 6pp). Arms
+that fired: grid_no 7, pre_favourite 5, pre_steam 3, live_leader 1. post_sweep found nothing:
+ended events' tokens sit at 0.999 / 1 or have no book, as the sweep observer saw. The move arms
+need 10 minutes of their own memory after any restart.

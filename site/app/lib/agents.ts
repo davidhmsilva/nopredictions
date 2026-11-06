@@ -86,6 +86,8 @@ export interface AgentSummary {
   /** Who it is shown under: a public name, NOPREDICTIONS for the operator, or
    *  a pseudonym derived from the account. Never an email. */
   author: string
+  /** rules.kind: 'lab', 'drift', 'price_reader'… null for the older daemons. */
+  kind: string | null
   // The paper record since it started running.
   n_trades: number
   n_open: number
@@ -167,9 +169,40 @@ export interface DriftPosition {
   pl_units: number | null
 }
 
+/** One way the Price Reader reads a price (db/089), with its whole record,
+ *  booked and watched. `mode` is what the daily review last decided. */
+export interface LearningArm {
+  key: string
+  base_key: string
+  label: string
+  mode: 'active' | 'shadow' | 'stopped'
+  daily_cap: number
+  excluded_sports: string[]
+  note: string | null
+  n: number
+  n_open: number
+  pl: number
+  staked: number
+  clv: number | null
+}
+
+/** One day's review, in the words the agent wrote it. */
+export interface LearningReview {
+  review_date: string
+  summary: string
+}
+
+export interface AgentLearning {
+  arms: LearningArm[]
+  reviews: LearningReview[]
+}
+
 export interface AgentDetail {
   agent: AgentSummary
   trades: AgentTrade[]
+  /** A learning agent (rules.kind = 'price_reader') only: how it is changing
+   *  the way it trades. Null for every other agent. */
+  learning: AgentLearning | null
   /** Maker agents only: their bids, newest first. Empty for every other agent. */
   orders: AgentOrder[]
   /** Drift agents only: their positions, newest first. Empty for every other. */
@@ -286,7 +319,7 @@ function cumulative(pls: number[]): number[] {
   return pls.map((x) => (run += x))
 }
 
-type SummaryRow = Omit<AgentSummary, 'spark'> & { pls: number[] | null; rules: { kind?: string } | null }
+type SummaryRow = Omit<AgentSummary, 'spark' | 'kind'> & { pls: number[] | null; rules: { kind?: string } | null }
 
 /** Is this a Pre-Match Drift agent? Its record lives in drift_positions, not
  *  paper_trades, so v_strategy_performance has nothing for it and its summary
@@ -361,7 +394,8 @@ async function summaries(scope: Scope, onlyId?: number): Promise<AgentSummary[]>
   const driftIds = rows.filter((r) => isDrift(r.rules)).map((r) => r.id)
   const perf = driftIds.length ? await driftPerf(driftIds) : new Map<number, DriftPerf>()
 
-  return rows.map(({ pls, rules, ...a }) => {
+  return rows.map(({ pls, rules, ...r }) => {
+    const a = { ...r, kind: rules?.kind ?? null }
     const d = isDrift(rules) ? perf.get(a.id) : undefined
     if (d) {
       return {
@@ -523,6 +557,39 @@ async function driftPositionsOf(id: number): Promise<{ positions: DriftPosition[
   }
 }
 
+/** The Price Reader's arms with their records, and its last week of reviews
+ *  (db/089). These tables hold one agent's working, so the caller's scope check
+ *  on that agent is the scope. */
+async function learningOf(): Promise<AgentLearning | null> {
+  const sql = getSql()
+  try {
+    const [arms, reviews] = await Promise.all([
+      sql<LearningArm[]>`
+        select a.key, a.base_key, a.label, a.mode, a.daily_cap, a.excluded_sports, a.note,
+               count(p.id) filter (where p.status in ('sold', 'settled'))::int        as n,
+               count(p.id) filter (where p.status = 'open')::int                      as n_open,
+               coalesce(sum(p.pl) filter (where p.status in ('sold', 'settled')), 0)::float8    as pl,
+               coalesce(sum(p.stake) filter (where p.status in ('sold', 'settled')), 0)::float8 as staked,
+               avg(p.clv)::float8                                                     as clv
+          from public.price_reader_arms a
+          left join public.price_reader_positions p on p.arm_id = a.id
+         group by a.id
+         order by a.base_key, (a.mode = 'active') desc, a.id
+      `,
+      sql<LearningReview[]>`
+        select review_date::text as review_date, summary
+          from public.price_reader_reviews
+         order by review_date desc
+         limit 7
+      `,
+    ])
+    return { arms, reviews }
+  } catch (err) {
+    if ((err as { code?: string }).code === '42P01') return null   // db/089 not applied
+    throw err
+  }
+}
+
 /** One agent with its latest trades and its whole curve, or null when it does
  *  not exist or is not this user's — the two are deliberately the same answer. */
 export async function getAgent(userId: string, id: number): Promise<AgentDetail | null> {
@@ -542,6 +609,11 @@ export async function getPublished(id: number): Promise<AgentDetail | null> {
  *  hands `numeric` back as a string, and arithmetic on "1.000" concatenates
  *  instead of adding. */
 async function detailOf(agent: AgentSummary): Promise<AgentDetail> {
+  const learning = agent.kind === 'price_reader' ? await learningOf() : null
+  return { ...(await recordOf(agent)), learning }
+}
+
+async function recordOf(agent: AgentSummary): Promise<Omit<AgentDetail, 'learning'>> {
   const id = agent.id
   const sql = getSql()
   const [trades, settled] = await Promise.all([
