@@ -453,7 +453,7 @@ def test_draftkings_edges_need_twice_the_pinnacle_threshold():
     assert na.decide(_cand(-1.0, "dk_exact"), fresh=True, mins=35) == "forced"
 
 
-def test_a_fresh_odds_api_line_beats_draftkings_and_a_stale_one_does_not():
+def test_the_close_benchmark_is_a_fresh_odds_api_line_before_draftkings():
     pin, dk = _sharp(), _sharp()
     dk.book = "dk_espn"
     assert na.pick_sharp(pin, 10, dk, 45) == (pin, True)
@@ -461,6 +461,31 @@ def test_a_fresh_odds_api_line_beats_draftkings_and_a_stale_one_does_not():
     assert na.pick_sharp(pin, 300, None, 45) == (pin, False)     # forced only, never edge
     assert na.pick_sharp(None, None, dk, None) == (dk, True)
     assert na.pick_sharp(None, None, None, 45) == (None, False)
+
+
+def test_draftkings_decides_a_new_bet_whenever_espn_has_its_line():
+    """obs_version 3: DraftKings is the reference; Pinnacle only where ESPN has none."""
+    pin, dk = _sharp(), _sharp()
+    dk.book = "dk_espn"
+    assert na.pick_reference(pin, 10, dk, 45) == (dk, True)      # even a fresh Pinnacle line
+    assert na.pick_reference(pin, 300, dk, 45) == (dk, True)
+    assert na.pick_reference(pin, 10, None, 45) == (pin, True)
+    assert na.pick_reference(pin, 300, None, 45) == (pin, False)   # forced only, never edge
+    assert na.pick_reference(None, None, None, 45) == (None, False)
+
+
+def test_no_credits_are_spent_on_a_game_draftkings_already_prices():
+    now = datetime.now(timezone.utc)
+    g = na.game_from_event(_event([]))
+    dk = _sharp()
+    dk.book = "dk_espn"
+    stale = {"fetched_at_dt": now - timedelta(hours=6)}
+    assert na._odds_needed([g], {}, stale, now) == "edge"
+    assert na._odds_needed([g], {}, stale, now, {g.slug: dk}) is None
+    assert na._odds_needed([g], {}, stale, now, {g.slug: None}) == "edge"
+    # a bet game still reads the sharp close, DraftKings line or not
+    bet = {g.slug: {"closing_price": None}}
+    assert na._odds_needed([g], bet, stale, g.kickoff - timedelta(minutes=10), {g.slug: dk}) == "close"
 
 
 def test_the_snapshot_read_asks_by_game_not_the_whole_table():

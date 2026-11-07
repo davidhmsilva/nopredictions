@@ -7,20 +7,28 @@ exactly one bet, of the agent's choosing: across the game's full-match
 moneyline, ~25 spreads and ~20 totals (both sides of each), buy the token whose
 executable ask is cheapest against the sharp line, net of the taker fee.
 
-Fair value is never ours. It comes from Pinnacle (The Odds API,
-`basketball_nba`; a median of other books when Pinnacle has not posted),
-de-vigged. When the Odds API has no fresh snapshot (obs_version 2, 2026-10-26:
-the shared key ran dry and v1 bet 43 games on Polymarket's own mid), the line
-is DraftKings', read free off ESPN's scoreboard — sources `dk_exact` /
-`dk_model`, edge thresholds doubled to 3% / 5% because a retail book is a
-weaker estimate of fair than Pinnacle. Where Polymarket's line is the same half-point Pinnacle quotes, that
-price IS the fair value (`sharp_exact`); everywhere else it is read off
-`nba_model`, anchored per game to Pinnacle's spread + moneyline + total
-(`sharp_model`, docked a haircut that grows with the distance from the sharp
-line).
+Fair value is never ours. Since obs_version 3 (2026-11-07, by the operator's
+decision) it is DraftKings' line, read free off ESPN's scoreboard every cycle,
+de-vigged — sources `dk_exact` / `dk_model`, edge thresholds 3% / 5%. Only a
+game ESPN carries no DraftKings line for is priced off Pinnacle (The Odds API,
+`basketball_nba`; a median of other books when Pinnacle has not posted) —
+`sharp_exact` / `sharp_model`, 1.5% / 3%. Why: v2 (2026-10-26) put Pinnacle
+first and DraftKings behind it, so which book decided a bet depended on the
+credits left on the shared key. It ran dry in late October (46 bets on
+DraftKings, +10.6u) and refilled on 11-02 (39 bets on Pinnacle, −7.7u): one
+record, two rules. Neither period kept its price at the close (pm_clv −0.6%
+and −0.2%), so the split says nothing yet about which book is better; v3
+makes the record one rule again. The sharp CLOSE is still read Pinnacle
+first: it is the benchmark, not the decision.
+
+Where Polymarket's line is the same half-point the book quotes, that price IS
+the fair value (`*_exact`); everywhere else it is read off `nba_model`,
+anchored per game to the book's spread + moneyline + total (`*_model`, docked
+a haircut that grows with the distance from the book's line).
 
 Two kinds of bet, never pooled — the same split as the NFL agent:
-  * EDGE   — net EV at the CLOB ask >= 1.5% (exact) / 3% (model), 1u, from 24h out.
+  * EDGE   — net EV at the CLOB ask >= 3% (exact) / 5% (model) against
+             DraftKings (1.5% / 3% against Pinnacle), 1u, from 24h out.
   * FORCED — inside 40 minutes with no bet yet: the best EV on the board,
              whatever its sign, 1u. This is the price of "every game".
 
@@ -40,6 +48,7 @@ What is different from the NFL, and why:
     no mass, so a moneyline has no 50-50 case to price.
   * **The Odds API key is shared** with nfl_agent and unl_agent on a small
     plan, and an NBA night has up to seven tip-off clusters. So this agent
+    fetches a snapshot for a new bet only when a game has no DraftKings line,
     reads the pool from whichever agent fetched last, stops refreshing for EDGE
     below RESERVE_CREDITS and stops fetching altogether below FLOOR_CREDITS,
     which leaves the last credits to the NFL agent's forced bets.
@@ -90,7 +99,8 @@ ET = ZoneInfo("America/New_York")
 
 STRATEGY_NAME = "NBA Every Game"
 OWNER_FROM = "NFL Every Game"   # the new strategy is owned by whoever owns this one
-OBS_VERSION = 2               # 2026-10-26: ESPN/DraftKings line when the Odds API has none
+OBS_VERSION = 3               # 2026-11-07: DraftKings first, Pinnacle only where ESPN has none
+                              # (v2, 10-26: Pinnacle first, DraftKings when the Odds API had none)
 
 # ── the sharp feed ───────────────────────────────────────────────────────────
 # One request returns every NBA game: 3 markets × ceil(books / 10) = 3 credits.
@@ -130,10 +140,9 @@ UNIT_USD = 10.0               # for the depth check only
 
 EDGE_MIN_EXACT = 1.5          # % net EV on cash, fair value = the book's own price
 EDGE_MIN_MODEL = 3.0          # % net EV, fair value read off the model
-# DraftKings through ESPN's scoreboard (free, no key) stands in when the Odds
-# API has no snapshot. It is a retail book, not Pinnacle: wider margin, slower
-# to move, so its de-vigged price is a weaker estimate of fair and an edge
-# against it has to be twice the size before it counts.
+# DraftKings through ESPN's scoreboard (free, no key) is the reference since
+# obs_version 3. It is a retail book, not Pinnacle: wider margin, slower to
+# move, so an edge against it has to be twice the size before it counts.
 EDGE_MIN_DK_EXACT = 3.0
 EDGE_MIN_DK_MODEL = 5.0
 EDGE_MIN = {"sharp_exact": EDGE_MIN_EXACT, "sharp_model": EDGE_MIN_MODEL,
@@ -795,9 +804,10 @@ def _conn():
 def _rules_now() -> dict:
     return {"venue": "polymarket", "sport": "nba", "phase": "paper-only",
             "self_settling": True, "obs_version": OBS_VERSION,
-            "fair_value": "pinnacle de-vigged; nba_model for alternates",
-            "fair_value_fallback": "draftkings via ESPN scoreboard, de-vigged, when the "
-                                   "odds api has no fresh snapshot",
+            "fair_value": "draftkings via ESPN scoreboard, de-vigged; nba_model for alternates",
+            "fair_value_fallback": "pinnacle (odds api) de-vigged, only for a game ESPN "
+                                   "has no draftkings line for",
+            "close_benchmark": "pinnacle first, draftkings when no fresh snapshot",
             "season_types": sorted(BET_SEASON_TYPES),
             "edge_min_exact_pct": EDGE_MIN_EXACT, "edge_min_model_pct": EDGE_MIN_MODEL,
             "edge_min_dk_exact_pct": EDGE_MIN_DK_EXACT, "edge_min_dk_model_pct": EDGE_MIN_DK_MODEL,
@@ -936,9 +946,11 @@ def write_trade(conn, sid: int, game: Game, sh: Sharp | None, c: Cand, kind: str
 
 # ── the cycle ────────────────────────────────────────────────────────────────
 
-def _odds_needed(games: list[Game], bets: dict, cache: dict | None, now: datetime) -> str | None:
+def _odds_needed(games: list[Game], bets: dict, cache: dict | None, now: datetime,
+                 dk_lines: dict | None = None) -> str | None:
     """Why a fresh snapshot is needed now, or None. The reason decides whether
-    the credit reserve may be spent."""
+    the credit reserve may be spent. A game not yet bet that has a DraftKings
+    line needs none: DraftKings decides its bet (obs_version 3)."""
     age = (now - cache["fetched_at_dt"]).total_seconds() / 60 if cache else 1e9
     for g in games:
         mins = (g.kickoff - now).total_seconds() / 60
@@ -946,6 +958,8 @@ def _odds_needed(games: list[Game], bets: dict, cache: dict | None, now: datetim
             b = bets[g.slug]
             if b.get("closing_price") is None and 0 < mins <= CLOSE_MIN and age > 8:
                 return "close"
+            continue
+        if (dk_lines or {}).get(g.slug):
             continue
         req = required_age_min(mins)
         if req is not None and age > req:
@@ -966,13 +980,26 @@ def may_fetch(why: str | None, left: int | None) -> bool:
 
 def pick_sharp(odds_sh: Sharp | None, odds_age: float | None, dk_sh: Sharp | None,
                max_age: float | None) -> tuple[Sharp | None, bool]:
-    """(line, fresh). A fresh Odds API line (Pinnacle or consensus) wins; else
-    ESPN's DraftKings line, read this cycle and so always fresh; else a stale
-    Odds API line, which may still price a forced bet but never an edge."""
+    """(line, fresh) for the CLOSE, the benchmark: a fresh Odds API line
+    (Pinnacle or consensus) wins; else ESPN's DraftKings line, read this cycle
+    and so always fresh; else a stale Odds API line, which is not fresh."""
     if odds_sh and odds_age is not None and max_age is not None and odds_age <= max_age:
         return odds_sh, True
     if dk_sh:
         return dk_sh, True
+    return odds_sh, False
+
+
+def pick_reference(odds_sh: Sharp | None, odds_age: float | None, dk_sh: Sharp | None,
+                   max_age: float | None) -> tuple[Sharp | None, bool]:
+    """(line, fresh) for a NEW bet (obs_version 3): ESPN's DraftKings line,
+    read this cycle and so always fresh, whenever it has one; else a fresh Odds
+    API line; else a stale one, which may still price a forced bet but never an
+    edge."""
+    if dk_sh:
+        return dk_sh, True
+    if odds_sh and odds_age is not None and max_age is not None and odds_age <= max_age:
+        return odds_sh, True
     return odds_sh, False
 
 
@@ -1004,8 +1031,9 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             else "not on ESPN" if st is None else f"season type {st}"
         skipped[why] = skipped.get(why, 0) + 1
 
+    dk_lines = {g.slug: sharp_for(g, dk_cache) for g in games} if dk_cache else {}
     cache = load_cache()
-    why = _odds_needed(games, bets, cache, now)
+    why = _odds_needed(games, bets, cache, now, dk_lines)
     if why and allow_fetch:
         left = pool_remaining()
         if may_fetch(why, left):
@@ -1036,7 +1064,7 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
         mins = (g.kickoff - now).total_seconds() / 60
         req = required_age_min(mins)
         odds_sh = sharp_for(g, cache) if cache else None
-        dk_sh = sharp_for(g, dk_cache) if dk_cache else None
+        dk_sh = dk_lines.get(g.slug)
 
         if g.slug in bets:          # read the close for a game already bet
             b = bets[g.slug]
@@ -1051,7 +1079,7 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
         if req is None:
             continue
 
-        sh, fresh = pick_sharp(odds_sh, age, dk_sh, req + 5)
+        sh, fresh = pick_reference(odds_sh, age, dk_sh, req + 5)
         cands = candidates(g, sh)
         if not cands:
             log.info(f"  {g.title:<28} {mins:6.0f}m  no book passes the gates")
@@ -1291,8 +1319,8 @@ def report() -> None:
     if not rows:
         print("no NBA trades yet")
         return
-    # never pooled across obs_versions: v1 had no line at all (pm_mid), v2 adds
-    # DraftKings via ESPN, and the two measure different things
+    # never pooled across obs_versions: v1 had no line at all (pm_mid), v2 put
+    # Pinnacle first and DraftKings behind it, v3 puts DraftKings first
     print(f"{'':12}{'n':>4}{'settled':>9}{'won':>5}{'stake':>8}{'net P&L':>9}{'yield':>8}"
           f"{'avg EV':>8}{'pm_clv':>9}")
     for obs, kind in [(o, k) for o in sorted({r["obs"] for r in rows})
