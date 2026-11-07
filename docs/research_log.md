@@ -3698,8 +3698,11 @@ against, the wallets, the biggest bet, the move).
 
 🔑 **Polymarket's whole taker tape is public and cheap.** `data-api /v2/trades` with no market
 filter, `taker_only=true`, `limit=1000`, newest first, paged with `cursor` = `next_cursor`:
-1,000 fills cover ~85 s of the whole venue (~700 fills a minute), the newest is ~50-85 s old,
-and each row has `proxy_wallet`, the taker's `side`, `token_id`, `condition_id`, `size`,
+1,000 fills cover ~65-85 s of the whole venue (~700-900 fills a minute). ⚠️ The plain first-page URL
+is a CloudFront copy kept 5 minutes (`cache-control: public, max-age=300`): read through it, the
+newest fill is 2-7 minutes old and new fills arrive in 5-minute lumps (the "~1 minute late" first
+measured was the copy's age). A URL of its own (`_=<unix time>`) is a CloudFront miss and the newest
+fill is ~2 s old (2026-11-07). Cursor pages are new URLs and were never stale. Each row has `proxy_wallet`, the taker's `side`, `token_id`, `condition_id`, `size`,
 `price`, `timestamp`, `transaction_hash`. 26 minutes = 32 pages = 32,000 fills, 5.3 s; 5,806 of
 them on the ~23,000 sports tokens in the window, $1.05M. Gamma's `volumeNum` did NOT change in
 77 s on any of 10,809 markets: it is cached, useless for minute flow.

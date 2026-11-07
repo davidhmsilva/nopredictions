@@ -438,3 +438,32 @@ def test_a_flip_with_no_sellable_bid_waits_then_is_held_to_the_end():
     ag._exit_one(conn, pos, None, NOW, stats)                    # past the give-up: hold it
     assert stats["held_no_bid"] == 1
     assert "SET exit_rule = 'hold'" in conn.sql[0][0] and conn.sql[0][1][1] == 7
+
+
+def test_the_tape_s_first_page_is_read_at_the_source_not_from_the_cdn_copy():
+    import price_reader_agent as ag
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class _Session:
+        def __init__(self):
+            self.params = []
+
+        def get(self, url, params=None, timeout=None):
+            self.params.append(dict(params))
+            page = len(self.params)
+            ts = 2_000_000_000 - 100 * page
+            return _Resp({"data": [{"timestamp": ts}], "pagination": {"next_cursor": f"c{page}"}})
+
+    s = _Session()
+    fills, complete = ag.fetch_tape(s, since_ts=2_000_000_000 - 250, max_pages=5)
+    assert complete and len(fills) == 3
+    assert "_" in s.params[0] and "cursor" not in s.params[0]        # its own URL: no 5-min copy
+    assert all("cursor" in p and "_" not in p for p in s.params[1:])  # the pages follow the cursor
