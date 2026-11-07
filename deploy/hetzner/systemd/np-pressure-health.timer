@@ -1,0 +1,12 @@
+# pressure_health.py --quiet --recover — was */10
+[Unit]
+Description=NOPREDICTIONS timer pressure-health
+
+[Timer]
+OnCalendar=*:00/10
+Persistent=true
+AccuracySec=1s
+Unit=np-job@pressure-health.service
+
+[Install]
+WantedBy=timers.target

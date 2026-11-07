@@ -318,6 +318,11 @@ def ht_over05_market(fixture: dict) -> dict | None:
             prices = json.loads(mkt.get("outcomePrices") or "[]")
         except (json.JSONDecodeError, TypeError):
             continue
+        # The Under is read off its own label, never assumed to be "the other
+        # index": a token on the wrong side inverts the Under arm's bet.
+        under = [token_ids[i] for i, name in enumerate(outcomes)
+                 if str(name).strip().lower().startswith("under")
+                 and i < len(token_ids) and token_ids[i]]
         for i, name in enumerate(outcomes):
             if not str(name).strip().lower().startswith("over"):
                 continue
@@ -326,6 +331,7 @@ def ht_over05_market(fixture: dict) -> dict | None:
             return {
                 "question": q,
                 "token_id": token_ids[i],
+                "under_token_id": under[0] if len(under) == 1 else None,
                 "condition_id": mkt.get("conditionId"),
                 "gamma_price": _f(prices[i]) if i < len(prices) else None,
             }
@@ -594,6 +600,7 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             continue
         row["condition_id"] = mkt["condition_id"]
         row["token_id"] = mkt["token_id"]
+        row["under_token_id"] = mkt.get("under_token_id")
 
         # The CLOB, not Gamma. Booking paper fills at prices nobody was quoting
         # is what turned the convergence trader's +141% paper into +3.4% real.
@@ -859,6 +866,10 @@ def _base_row(sig: PressureSignals) -> dict:
         # stays recoverable per entry (db/055, H-BEST-VENUE).
         "venue": venues.POLYMARKET, "alt_venue_ask": None, "venue_saving_pp": None,
         "entry_ask": None, "entry_ticker": None,
+        # The Under arm (db/076, ht_under_agent) decides on this same row.
+        "under_token_id": None, "under_ask": None,
+        "under_would_enter": False, "under_entered": False,
+        "under_paper_trade_id": None, "under_skip_reason": None,
     }
 
 
@@ -881,6 +892,8 @@ _COLS = [
     "edge_base_pp", "edge_pressure_pp", "would_enter", "entered",
     "paper_trade_id", "skip_reason",
     "venue", "alt_venue_ask", "venue_saving_pp", "entry_ask", "entry_ticker",
+    "under_token_id", "under_ask", "under_would_enter", "under_entered",
+    "under_paper_trade_id", "under_skip_reason",
 ]
 
 
@@ -896,22 +909,37 @@ def write(conn, rows: list[dict]) -> None:
     conn.commit()
 
 
-def strategy_id(conn) -> int:
+def strategy_id(conn) -> int | None:
+    """s17's id, or None once it is archived.
+
+    Archived 2026-10-12 (db/076): it failed its own verdict gate (308 bets,
+    -11.0% net, CI[-22,+0]). The arm keeps OBSERVING, because the Under arm
+    (ht_under_agent) decides on these rows and the calibration arm needs them;
+    it only stops buying.
+    """
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM strategies WHERE name = %s", (STRATEGY_NAME,))
+        cur.execute("SELECT id, retired_at FROM strategies WHERE name = %s", (STRATEGY_NAME,))
         got = cur.fetchone()
     if not got:
         raise SystemExit(f"strategy '{STRATEGY_NAME}' missing — apply db/033")
+    if got[1] is not None:
+        log.info(f"'{STRATEGY_NAME}' is archived — observing only, no trades")
+        return None
     return got[0]
 
 
-def open_trades(conn, sid: int, rows: list[dict]) -> int:
+def open_trades(conn, sid: int | None, rows: list[dict]) -> int:
     """One 1u paper position per qualifying fixture.
 
     The unique index on (fixture_id) WHERE entered is what stops the agent
     re-buying the same market every cycle while a team keeps pressing — there is
     only one line here, so a second entry would be a stake-size artifact.
+
+    `sid` is None when the strategy is archived: rows still carry would_enter
+    (the rule, for the record), and nothing is bought.
     """
+    if sid is None:
+        return 0
     opened = 0
     for r in rows:
         if not r["would_enter"]:

@@ -76,6 +76,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── .env                           ← DB connection string + API keys (gitignored)
 │   └── tests/
 │       └── test_stage_a_end_to_end.py
+├── deploy/hetzner/                    ← VPS: systemd units + np-job.sh + MIGRATION.md ✅ NEW
 ├── db/
 │   ├── 001_schema.sql                 ← deployed ✅
 │   ├── 002_seeds.sql                  ← deployed ✅
@@ -94,6 +95,7 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── soccer_line_model.py           ← Dixon-Coles fitted to sharp 1X2 + total ✅ NEW
 │   ├── nba_agent.py                   ← NBA Every Game (paper) ✅ NEW 2026-10-06
 │   ├── nba_model.py                   ← NBA margin/total model anchored on Pinnacle ✅ NEW
+│   ├── nba_maker.py                   ← NBA maker bids: both sides, ML + main spread ✅ NEW 2026-10-25
 │   ├── close_model.py                 ← forecasts where a 1X2 price will CLOSE (H-STATS-CLOSE) ✅ NEW 2026-10-10
 │   ├── close_maker_agent.py           ← Close Forecast: paper maker bids on PM from that forecast ✅ NEW
 │   ├── factory/v2/                    ← Factory v2, pre-match: families, CLV, power gate, locked holdout ✅ NEW 2026-10-10
@@ -103,8 +105,9 @@ riding the AI + prediction-markets wave simultaneously.
 │   ├── market_flow.py                 ← whale activity + smart money signals ✅
 │   ├── live_tracker.py                ← rolling-window pressure signals ✅
 │   ├── pressure_agent.py              ← Live Pressure Overs + drives the HT arm ✅
-│   ├── ht_pressure_agent.py           ← Live Pressure HT Over 0.5 (first half) ✅
-│   ├── fav_pressure_agent.py          ← Live Pressure Favourite HT ✅
+│   ├── ht_pressure_agent.py           ← first-half observations (s17 archived 2026-10-12, still observing) ✅
+│   ├── ht_under_agent.py              ← Low Pressure HT Under 0.5, rides on those rows ✅ NEW
+│   ├── fav_pressure_agent.py          ← Favourite Pressing HT (replaced s18 on 2026-10-12) ✅
 │   ├── first_half_table.py            ← empirical P(goal before HT | 0-0 at m) ✅
 │   ├── favourite_ht_table.py          ← empirical P(fav leads at HT | 0-0 at m) ✅
 │   ├── sim/                           ← Monte Carlo match simulator ✅ NEW
@@ -440,8 +443,10 @@ python sim_demo.py                         # sanity-check sim vs analytical Pois
 | Strategy 7 — Sim Model In-Play | ✅ NEW — same MC sim from in-play state |
 | Over Late Goals — observation | 🔬 Paper only, no orders. Fair value known, PM side unmeasured |
 | Live Pressure Overs (strategy 16) | 🔬 Paper only — the only agent still running. **obs_version 4** (book gates, db/037) |
-| Live Pressure HT Over 0.5 (strategy 17) | 🔬 Paper only, first-half arm of the same signal. **obs_version 4** (min odds 1.75 + armed monitoring) |
-| Live Pressure Favourite HT (strategy 18) | 🔬 Paper only, favourite ahead at HT. **obs_version 3** (rolling reading, entry to 40') |
+| Live Pressure HT Over 0.5 (strategy 17) | 🗄️ Archived 2026-10-12 (308 bets, −11.0% net, failed its gate). Still observes: the Under arm reads its rows |
+| Low Pressure HT Under 0.5 | 🔬 Paper only, first-half Under in quiet games, on s17's rows. db/076 |
+| Live Pressure Favourite HT (strategy 18) | 🗄️ Archived 2026-10-12 (154 bets, −11.4% net). Replaced by Favourite Pressing HT |
+| Favourite Pressing HT | 🔬 Paper only, favourite ahead at HT on its own pressure for the minute. **obs_version 5**, db/075 |
 | Monte Carlo sim engine | ✅ Vectorized, 50k sims in <600ms; passes Poisson sanity |
 | InjuryTracker + MarketFlow | ✅ Real-time injury / whale-money signals |
 | Resolver | ✅ Settles trades + calculates CLV |
@@ -531,6 +536,12 @@ expect to have to widen the universe before it is reachable.
 
 ## Live Pressure HT Over 0.5 — first-half arm (paper, 2026-08-19)
 
+🗄️ **Archived 2026-10-12.** It passed its n ≥ 200 gate and failed it: 308 bets,
+−11.0% net, CI[−22,+0]. The arm still observes, but `strategy_id()` returns
+None for a retired strategy, so it buys nothing. Its rows feed
+[Low Pressure HT Under 0.5](#low-pressure-ht-under-05--the-other-side-of-the-same-rows-paper-2026-10-12).
+This section is its history.
+
 Same signal as Live Pressure Overs, one market over. The rule: a fixture is still
 **0-0**, the clock has passed **15 minutes**, and those first 15 minutes were
 played at **high pressure** → buy PM **"1st Half O/U 0.5"** (over), 1u, paper —
@@ -619,6 +630,10 @@ v5 gives up stays countable.
 
 ## Live Pressure Favourite HT — third arm (paper, 2026-08-19)
 
+🗄️ **Archived 2026-10-12** and replaced by
+[Favourite Pressing HT](#favourite-pressing-ht--the-favourites-own-pressure-for-the-minute-paper-2026-10-12).
+This section is its history.
+
 Buy the pre-match favourite to be **ahead at half time**, but only once it has
 shown it is living up to the price. Strategy id **18**, hypothesis
 `H-PRESSURE-FAV`, table `fav_ht_observations` (db/034), view `v_fav_ht_trades`.
@@ -687,11 +702,70 @@ entry window runs to 40'. Same thresholds, same book gates.
 
 ---
 
+## Favourite Pressing HT — the favourite's own pressure for the minute (paper, 2026-10-12)
+
+It replaces strategy 18, by the operator's decision, with rules he confirmed.
+Same daemon, same table (`fav_ht_observations`, **obs_version 5**), same
+market. Hypothesis `H-FAV-PRESS-REL`, migration db/075.
+
+**The rule.** Buy "<favourite> leading at halftime?" Yes **at the ask**, 1u,
+paper, once per fixture, at the first poll where all of these hold:
+- the pre-kickoff favourite is ≥ 0.50;
+- the score is 0-0, between 15' and 40';
+- the favourite's own `fav_pressure_now` is at least the frozen bar for its
+  minute (`FAV_PRESS_BAR`): 15-19' **25.6** · 20-24' **29.3** · 25-29' **26.2**
+  · 30-34' **27.3** · 35-40' **26.9**;
+- the book is clean, as in s18 (spread ≤ 3pp, two-sided, ≥ $25 ask, ask ≤ 0.85).
+
+There is **no dominance term and no odds filter.** It settles on Polymarket's
+resolution.
+
+**Why strategy 18 went.** Against the price, the underdog's pressure also
+raised the chance the favourite led at the break. Its coefficient was +0.61
+per percentile, beside +0.69 for the favourite's own. So dominance (favourite
+minus underdog) cancelled the signal: 117 clean-book entries under that gate
+made −8.4%, and the live record was 154 bets at −11.4% net.
+
+**What separated** the favourite's own pressure, relative to its minute
+(359 clean-book fixtures, one bet each):
+- top third **+6.8%**, bottom third **−24.0%**;
+- a difference of **+30.8pp CI[+4,+60]**, the same in both halves of the
+  period, both obs_version groups, and home and away.
+
+⚠️ **The level is not established:** +6.8% CI[−13,+28], and +1.4% on the
+v3-v4 axis alone. The bar is the 2/3 quantile on clean-book v3-v4 rows, frozen
+on 2026-10-12. **Never refit it to later rows**, because that turns the forward
+test back into a backtest. It fires on about 2.3 fixtures a day on ESPN-era
+rows. 91 groups were scanned to find it, which is why only rows from v5 on
+count.
+
+Three sub-rules are **registered, not traded**:
+- **`-A`, favourite 50-60%:** a subset of the strategy's own trades, so it
+  is read straight off its record.
+- **`-B`, odds 4.00+, and `-C`, 30-34':** both enter later than the
+  strategy does, so they are read off the observation rows. 64 of B's 82
+  fixtures are also in C.
+
+On shuffled outcomes, the best of the 13 cuts reached +27% one time in seven.
+
+**Verdict:**
+- **Primary:** the top third beats the bottom third on forward observation
+  rows, CI clear of zero. That needs about 200 fixtures a side, roughly 3-4
+  months.
+- **Money:** net yield CI clear of zero after the fee, which needs thousands of
+  bets.
+
+`--report` prints one paper line per strategy, so the archived s18 record never
+pools with this one. `strategy_id()` refuses a retired strategy.
+
+---
+
 ## Favourite Swing — ticks and a control arm (db/078, 2026-10-20)
 
 `agent/fav_swing_agent.py` (H-FAV-SWING, db/061, the user's rule of 2026-09-29):
 buy a 1.30-1.50 kick-off favourite that presses while level, sell 5 minutes
-after any goal, hold to the end if none. Runs inside `pressure_agent.py`.
+after the first goal (a further goal does not restart the clock), hold to
+the end if none. Runs inside `pressure_agent.py`.
 
 At 18 settled positions (10-09 → 10-18): **−2.32u, ROI −13%**. When a goal came
 after entry the favourite scored it 11 times in 13 (+0.20u each); the loss is the
@@ -1405,6 +1479,49 @@ on both ends by construction: consulted only inside 15-40' on a fixture still
 0-0, dropped by `prune()`, and never a substitute for a live reading anywhere it
 is recorded.
 
+## Low Pressure HT Under 0.5 — the other side of the same rows (paper, 2026-10-12)
+
+By the operator's decision, with rules he confirmed. `agent/ht_under_agent.py`
+decides on s17's rows inside `pressure_agent.py`, so it costs no api-football
+call. Its columns are `under_*` on `ht_pressure_observations`. Migration
+db/076, hypothesis `H-HT-UNDER-QUIET`.
+
+**The rule.** Buy the "1st Half O/U 0.5" **Under**, 1u, once per fixture, at
+the first poll where all of these hold:
+- the score is 0-0, between 15' and 40';
+- s17's `pressure_now` (both ends) is **below** the frozen ceiling for its
+  minute (`LOW_PRESS_BAR`): 15-19' **11.4** · 20-24' **13.6** · 25-29' **12.8**
+  · 30-34' **12.5** · 35-40' **13.2**. A match with no reading is never quiet;
+- both books are two-sided, with spread ≤ 6pp, ≥ $25 at the ask and an ask
+  ≤ 0.85.
+
+The price is the **Under's own CLOB ask**, read only when every other gate has
+passed; it is never 1 − the Over's bid. The order is a **taker** order: a
+resting Under bid fills the instant a goal kills it. It settles on Polymarket's
+resolution of the Under token.
+
+**Why.** On 1,379 clean-book fixtures the Over's ask sits 3.3pp above what
+happens, while the Under's is fair (+0.03pp). So the Under at the ask loses
+about the fee (−2.5%). In quiet games:
+- the bottom third of pressure made **+0.9% CI[−8,+10]**;
+- with this exact bar on v6-v7, **+4.1% on 279 fixtures**. That is in-sample,
+  because the bar was fitted on those rows.
+
+The ceiling is the 1/3 quantile on clean-book obs_version 6-7 rows. **Never
+refit it.** It fires on about 5.8 fixtures a day on ESPN-era rows.
+
+**Verdict.**
+- **Separation:** quiet versus pressing Under yield on forward observation
+  rows, about 1,000 fixtures a side for the ~9pp seen.
+- **Money:** +2% at odds of about 2.0 takes about 10,000 bets.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python ht_under_agent.py --report
+python ht_under_agent.py --settle        # also run by pressure_agent.py --settle
+python -m pytest tests/test_ht_under_agent.py -q
+```
+
 ## The site is two products now — SaaS + the agent (2026-09-06)
 
 `nopredictions.com` was a waitlist landing plus a public record of a paper
@@ -1748,6 +1865,17 @@ the first Git build ran at the repo root, found no `package.json` and failed
 (`missing_pages_app`). A failed deploy never replaces the live one.
 `cd site && vercel --prod --yes` still works for a manual deploy.
 Web Analytics is on too: `<Analytics />` in `app/layout.tsx`.
+
+## Off the Mac — a Hetzner VPS under systemd (2026-09-26, prepared, not cut over)
+
+`deploy/hetzner/`: `np-job.sh` holds every command the Mac crontab and launchd
+ran (same flags, `AF_COUNTER_NAME`s and logs); `systemd/` has two templates
+(`np-daemon@` for pressure + settled-sweep, `np-job@` oneshot) and 14 timers.
+`cron_guard.sh` is not used there: `Persistent=true` covers missed runs and a
+oneshot cannot overlap itself. Daily times are written in UTC (stage-a 05:00,
+factory grid 04:00 — the Mac's 07:00/06:00 at UTC+2). Steps, the cut-over order
+and rollback: `deploy/hetzner/MIGRATION.md`. ⚠️ Never both machines at once, and
+the server's `.env` omits `POLYMARKET_PRIVATE_KEY`.
 
 ## The anon key could TRUNCATE the research — closed 2026-09-08
 
@@ -2175,6 +2303,48 @@ example hit a sign-in wall, so a visitor never saw what either one does.
   event bootstrap, a plain reading, the latest 10 positions) with the old
   report behind "Show the full analysis". `WalletProfile.recent` is site-only;
   the Python has no equivalent and `--verify-site` does not read it.
+
+## The Game Center's CHEAP cards — corrected, and on the record (2026-10-26)
+
+Asked by the user: "if I back every CHEAP card long-term, do I make money?"
+Not known, and the cards were biased towards saying yes on Unders.
+
+**The late-goal table runs low on the fixtures Polymarket lists.** Measured on
+`pressure_observations` (PM-listed, api-football finals, one row per fixture
+per even minute), out of sample by date: the real rate beat the table by
+**+2.0pp on one more goal and +3.3pp on two**, in every minute band (+10pp on
+the 143 Big-5 fixtures, so it is not only the imported leagues). Every Under
+therefore read cheap and every Over rich for that alone.
+`agent/late_goals_recalibrate.py` fits `logit(p') = logit(p) + a + b·(m−55)/35`
+per rung on 1,189 fixtures (a = +0.13 / +0.22) and writes
+`site/app/lib/late_goals_calibration.json`. Out of sample the bias falls to
+−0.8 / −0.6pp and log loss improves. `gamecenter.lateGoalRate` applies it
+**only if the calibration's `table_built_at` matches the table's** — rebuild the
+table, refit this. `looks.ts` now uses that one lookup (it had its own copy);
+cards say "corrected for PM games". ⚠️ The pressure agents' own copy of the
+table is untouched.
+
+**A disputed score builds no goal card.** Rizespor v Trabzonspor, 33': the
+live score said 1 goal, the ladder already priced 2, and the page called Under
+2.5 at 10.00 "+18.9pp cheap". When the live total and a certain ladder total
+disagree, `buildLooks` builds nothing — a wrong score always looks like edge
+(the sweep's phantom goals, again).
+
+**The forward record** — `look_observations` (db/081, RLS on, no grants):
+`site/scripts/record-looks.ts` builds each live fixture's payload with the
+page's own route handler and writes every CHEAP card on a real book, once per
+(fixture, card, score), with the raw and corrected fair. `--settle` pays on
+the CLOB `winner` flag of the token; `--report` prints hit vs ask vs fair and
+1u net of the fee. Read hit vs ask first; a yield needs thousands of rows.
+
+```bash
+cd site && set -a && source .env.local && set +a
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts --dry-run   # one cycle, nothing written
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts             # forever, 60s (BOARDS_DIR reads the publisher's scout.json)
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts --settle
+NP_PUBLISHER=1 npx tsx scripts/record-looks.ts --report
+cd ../agent && python late_goals_recalibrate.py --dry-run  # refit report
+```
 
 ## Results against the price — Yesterday · Today · Tomorrow (2026-09-29)
 
@@ -2651,6 +2821,97 @@ python -m pytest tests/test_nba_agent.py -q
   the NFL board's shape again.
 - ⚠️ `nba_scanner.py` (Strategy 5, NBA Elo) is a different, older agent and is
   not scheduled on the server.
+
+### DraftKings via ESPN when the Odds API has nothing — obs_version 2 (2026-10-26)
+
+All 43 v1 bets (10-20 → 10-25) were FORCED at `pm_mid`: the shared Odds API
+key was down to **2 of 500 credits**, so no NBA snapshot ever existed and
+"the best EV on the board" was picked by the fee formula alone, i.e. heavy
+favourites near 0.95.
+
+🔑 **ESPN's NBA scoreboard carries DraftKings' moneyline, spread and total,
+with prices, for every game, in the one request the season gate already
+makes** (`competitions[].odds[]`, provider DraftKings; `close` is the CURRENT
+line until tip-off, total lines spelled `o226.5` / `u226.5`). Free, no key,
+no credit. `_dk_markets` turns it into the Odds API's shape under bookmaker
+`draftkings_espn`, so `sharp_for` and `nba_model` read it unchanged.
+
+- **Precedence** (`pick_sharp`): a fresh Odds API line (Pinnacle / consensus)
+  → DraftKings via ESPN (read this cycle, so always fresh) → a stale Odds API
+  line (forced only) → `pm_mid`. Closes follow the same order.
+- **Sources `dk_exact` / `dk_model`**, never `sharp_*`. **EDGE needs 3% / 5%**
+  against 1.5% / 3% on Pinnacle: a retail book's de-vigged price is a weaker
+  estimate of fair. Haircuts unchanged.
+- `obs_version 2` on every trade and candidate row; `--report` splits by
+  version. **Never pool v1 (`pm_mid`) with v2.**
+- The scoreboard is now asked for every listed game, bet or not, because a
+  close read needs the line too. Still free.
+- First dry run (2026-10-26, 9 games): 9/9 lines, best token per game −1.9% to
+  +2.4% EV against DraftKings, 0 EDGE.
+- ⚠️ DraftKings is not the benchmark this agent was built on. A paid Odds API
+  plan (Pinnacle) is still the real fix; this keeps the agent from betting
+  blind meanwhile. The maker arm still only reads the Odds API cache.
+
+### NBA maker bids — the same games, at the bid (paper, 2026-10-25)
+
+By the operator's decision, after measuring the FORCED arm. Its first 36 bets
+(10-20 → 10-25) were all `pm_mid` FORCED buys 36 min before tip-off, because
+the shared Odds API key never gave the NBA a snapshot: **−4.2% at the ask**.
+The same tokens at the bid, no fee: **−1.9%**. But only **8 of 36** bids
+placed 36 min out ever traded at the bid and **2** traded through it: FORCED
+picks deep alternate spreads (fee 5%·(1−p) is smallest at 0.85-0.94), and 23
+of those 36 tokens had no trade at all before tip-off. PM's NBA price moved
+like a martingale from T-12h on those tokens (+0.49 / +0.16 / −0.01pp at
+T-12/6/3h), and the NBA had no liquidity rewards (one moneyline at
+$0.001/day on 10-25).
+
+Strategy **"NBA Every Game — maker bids"**, hypothesis `H-NBA-MAKER`, table
+`nba_maker_orders` (db/080, applied 2026-10-25). `agent/nba_maker.py`, run by
+`nba_agent.py` itself — `--once` (inside `run_once`, after the ESPN preseason
+gate, on the same games), `--settle` and `--report` — so no new cron line and
+no Odds API credit. A failure in it is logged and the taker arm carries on.
+
+- **What:** the full-game moneyline and the **main spread** (the spread whose
+  mid sits nearest 0.50, inside 0.40-0.60; a tie goes to the deeper market),
+  **both sides of each**: no sharp line is needed to pick a side, and a pair
+  measures fills and adverse selection per side with no model in the way.
+- **When:** the first cycle a game is inside 24h with both sides passing the
+  gates (spread ≤ 3¢, $2,000 Gamma liquidity, bid 0.05-0.95); never inside
+  15 min. One posting per (game, market), both sides or neither.
+- **Price, fixed:** one tick above the best bid when the spread is ≥ 3 ticks,
+  else at the best bid. At two ticks the improved pair would meet at the same
+  Yes-equivalent price, which is a self-cross, not two bids.
+- **Fill:** only a trade **strictly below** the bid, from Data API `/trades`
+  (`takerOnly`, paged backwards by `start`/`end` from the order's
+  `trades_checked_until`, so nothing is read twice and the 500 cap never
+  hides a print). A trade on the other token at q is this token at 1 − q. A
+  print AT the bid is `touched_at` only (queue). A fill writes a 1u paper
+  trade at the bid, no fee, `confidence = 'maker'`, `self_settling`.
+- **Close and payout for every order:** `close_price` is CLOB
+  `prices-history` at the last point ≤ tip-off, read after tip-off, so it
+  does not depend on the agent's cadence (it appears to run at :24/:54). The
+  payout is the CLOB winner flag. Filled vs expired on `close − bid` and
+  `payout − bid` is the adverse-selection measurement (db/073's design).
+- When nba_agent already holds a sharp snapshot, the token's fair value is
+  stored beside the bid (`fair`, `fair_source`) for later analysis only. It
+  never chooses or prices a bid.
+- Verified end to end on 2026-10-25 on a real finished game (76ers ML, pt#6734's
+  token) inside a rolled-back transaction: filled at 23:26Z on a 0.83 print
+  against a 0.84 bid, close 0.835, won; a 0.10 bid on the other side expired
+  with its close (0.165) and payout (0). First dry run: 7 games, 28 bids.
+
+```bash
+cd agent && source ../ingest/.venv/bin/activate
+python nba_agent.py --once --dry-run   # also logs the bids the maker arm would post
+python nba_agent.py --report           # taker arms, then the maker table
+python -m pytest tests/test_nba_maker.py -q
+```
+
+⚠️ **Fixed bids are adverse by construction**: a bid rested from 24h out fills
+when the price falls through it. That is the thing being measured, not a
+defect; requoting to the live best bid is a v2 with its own `obs_version`.
+⚠️ Read `close − bid` on filled rows first (tens to hundreds of fills), yield
+much later; never pool with the EDGE / FORCED arms.
 
 ## Close Forecast — maker bids on where the price will close (paper, 2026-10-10)
 
