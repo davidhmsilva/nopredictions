@@ -453,6 +453,13 @@ class HTState:
                into a goalless match is not it: that price has already drifted
                down and would push the fixture into the 'lo' bucket and quietly
                lower our own fair value. Captured before kickoff or not used.
+               From 2026-11-05 it is also filled from venue_market_quotes
+               (fill_pre_match): this process first sees most fixtures after
+               kick-off, so before that 48 of ~16,000 rows had a pre-match total.
+    pre_looked — PM title -> when venue_market_quotes was last asked for it and
+               had nothing. Retried every PRE_RETRY_S, pruned like the rest:
+               a negative answer that never expires is the latch that froze the
+               PM-listed cache.
 
     ⚠️ `armed` is a latch, and this project has been bitten three times in three
     weeks by latches that never expired (the uncovered-league blacklist, the
@@ -467,6 +474,7 @@ class HTState:
     first15: dict[int, dict] = field(default_factory=dict)
     armed: dict[int, dict] = field(default_factory=dict)
     pre: dict[str, dict] = field(default_factory=dict)
+    pre_looked: dict[str, float] = field(default_factory=dict)
 
     def prune(self, older_than_s: float = 6 * 3600) -> None:
         """Forget fixtures that finished hours ago.
@@ -482,6 +490,75 @@ class HTState:
             del self.armed[fid]
         for title in [k for k, v in self.pre.items() if v["at"] < cutoff]:
             del self.pre[title]
+        for title in [k for k, at in self.pre_looked.items() if at < cutoff]:
+            del self.pre_looked[title]
+
+
+# A pre-KO quote older than this is a price from another day, not the close.
+PRE_MAX_AGE_H = 6
+PRE_MAX_SPREAD = 0.05
+PRE_RETRY_S = 600              # the recorder writes every 10 minutes
+PRE_LIVE_WINDOW_H = 3          # fixtures that can be in their first half now
+
+_PRE_SQL = """
+SELECT DISTINCT ON (event_title) event_title, kickoff, last_bid, last_ask
+  FROM venue_market_quotes
+ WHERE sport = 'soccer' AND venue = 'polymarket'
+   AND family = 'totals' AND line = 2.5 AND outcome = 'Over'
+   AND kickoff BETWEEN now() - make_interval(hours => %(live)s) AND now() + interval '15 minutes'
+   AND event_title = ANY(%(titles)s)
+   AND last_bid IS NOT NULL AND last_ask IS NOT NULL
+   AND last_ask - last_bid <= %(spread)s
+   AND last_at <= kickoff
+   AND last_at >= kickoff - make_interval(hours => %(age)s)
+ ORDER BY event_title, last_at DESC
+"""
+
+
+def fill_pre_match(conn, pm_fixtures: list[dict], state: HTState) -> int:
+    """PM's last pre-kick-off O/U 2.5 mid for the fixtures that can be live now,
+    from venue_market_quotes (db/071, written every 10 minutes by
+    venue_open_recorder). One indexed read, only for titles not yet known.
+
+    This is the pre-match total the first-half table conditions on. The board
+    this process reads is only a pre-match price if it was seen before kick-off,
+    and most fixtures are first seen after it.
+    """
+    now = datetime.now(timezone.utc)
+    t = time.time()
+    want = []
+    for fx in pm_fixtures:
+        title, ko = fx.get("title"), fx.get("kickoff")
+        if not title or not ko or not (now - timedelta(hours=PRE_LIVE_WINDOW_H) <= ko
+                                       <= now + timedelta(minutes=15)):
+            continue
+        have = state.pre.get(title)
+        if have and have["prematch"]:
+            continue
+        if t - state.pre_looked.get(title, 0.0) < PRE_RETRY_S:
+            continue
+        want.append(fx)
+    if not want:
+        return 0
+
+    with conn.cursor() as cur:
+        cur.execute(_PRE_SQL, {"titles": [fx["title"] for fx in want],
+                               "live": PRE_LIVE_WINDOW_H, "age": PRE_MAX_AGE_H,
+                               "spread": PRE_MAX_SPREAD})
+        got = {r[0]: r for r in cur.fetchall()}
+
+    filled = 0
+    for fx in want:
+        r = got.get(fx["title"])
+        # Same title, same kick-off: a title can repeat across a season.
+        if r is None or abs((r[1] - fx["kickoff"]).total_seconds()) > 3 * 3600:
+            state.pre_looked[fx["title"]] = t
+            continue
+        p = (float(r[2]) + float(r[3])) / 2.0
+        state.pre[fx["title"]] = {"p": p, "prematch": True, "at": t,
+                                  "source": "venue_market_quotes"}
+        filled += 1
+    return filled
 
 
 def _note_pre_match_total(state: HTState, fx: dict, cells: dict) -> dict:
