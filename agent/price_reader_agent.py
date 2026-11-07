@@ -8,7 +8,8 @@ One cycle, every CYCLE_S seconds:
      started in the last 8 (Gamma, ~400 events, ~12,000 open markets, ~3 s).
   2. Remember each token's mid (the move arms need the last 10-60 minutes), and
      read Polymarket's public trade tape since the last cycle (data-api
-     /v2/trades, every taker fill on the venue, newest first, ~1 minute late),
+     /v2/trades, every taker fill on the venue, newest first, a few seconds
+     late when the first page is read fresh: see fetch_tape),
      keeping the fills on those tokens: who bought which side, and how much.
   3. Ask every arm, active or shadow, which token it would buy in each event,
      on the listing price. One position per arm per event, a daily cap per arm.
@@ -152,6 +153,13 @@ def fetch_tape(session: requests.Session, since_ts: int, max_pages: int) -> tupl
         params = {"taker_only": "true", "limit": TAPE_PAGE}
         if cursor:
             params["cursor"] = cursor
+        else:
+            # The first page's plain URL is a CDN copy kept 5 minutes
+            # (cache-control max-age=300): read through it, the newest fill is
+            # 2-7 minutes old and arrives in 5-minute lumps. A URL of its own
+            # each cycle is read at the source, a few seconds old (2026-11-07).
+            # Still one request a cycle; the cursor pages are new URLs anyway.
+            params["_"] = str(int(time.time()))
         try:
             r = session.get(TAPE, params=params, timeout=30)
             if r.status_code != 200:
