@@ -20,8 +20,33 @@ to keep its record apart, never a reason to bet.
 
 HOW IT DECIDES: APPROACHES ("ARMS")
 -----------------------------------
-A price can be read in several ways, and which way pays (if any) is what the
-agent is there to find out. Each way is an arm, a fixed rule with its own record:
+A market can be read in several ways, and which way pays (if any) is what the
+agent is there to find out. Each way is an arm, a fixed rule with its own record.
+
+Since 2026-11-07 (the operator: "reading the price means finding patterns and
+behaviour in the market that may signal something, like drifting odds or many
+people backing the same thing") most arms read BEHAVIOUR, from Polymarket's
+public trade tape (data-api /v2/trades, every taker fill on the venue, ~700 a
+minute, ~1 minute late): who is buying which side, how much, how many different
+wallets, how big the biggest bet, and whether a move had money behind it.
+
+  money_in        Follow the money: $2,000+ net taken on one side in 30 min,
+                  65%+ of the market's flow, and the price up 2pp+.
+  crowd           Follow the crowd: 12+ different wallets on one side in 30 min,
+                  75%+ of the wallets that traded it, $500+ between them.
+  big_bet         Follow a big bet: one taker buy of $3,000+ in the last 10 min,
+                  and the price no more than 2pp past what it paid.
+  thin_move       Fade a move nobody paid for: before the start, 5pp+ in 30 min
+                  on under $200 traded; buy the side that fell. Not in play: there
+                  a price falls with no trade because a goal went in or the clock
+                  ran, and the makers moved their quotes — that is information.
+  day_steam       Back what shortened over the day: +6pp in 24h, last 3 hours.
+  day_drift       Back what drifted over the day: −6pp in 24h, last 3 hours.
+                  The same market as day_steam from the other side, so it starts
+                  WATCHED: booking both would pay the spread and the fee twice for
+                  no position. It books only if the review sees it earn it.
+
+and the first seven, which read the price's level or its own short move:
 
   pre_favourite   Short favourite before the start: a 1.08-1.33 price in the
                   last 90 minutes, held to the end. The favourite-longshot bias.
@@ -152,6 +177,33 @@ BASE_ARMS: dict[str, tuple[str, dict]] = {
         "trigger": "level", "exit": "hold"}),
 }
 
+BASE_ARMS.update({
+    "money_in": ("Follow the money", {
+        "phase": "any", "max_min_to_start": 180, "families": ["winner", "totals", "spreads"],
+        "ask_min": 0.10, "ask_max": 0.90, "trigger": "money", "move_window_min": 30,
+        "min_net_usd": 2000, "min_share": 0.65, "move_pp": 2, "exit": "hold"}),
+    "crowd": ("Follow the crowd", {
+        "phase": "any", "max_min_to_start": 180, "families": ["winner", "totals", "spreads"],
+        "ask_min": 0.10, "ask_max": 0.90, "trigger": "crowd", "move_window_min": 30,
+        "min_wallets": 12, "min_share": 0.75, "min_usd": 500, "exit": "hold"}),
+    "big_bet": ("Follow a big bet", {
+        "phase": "any", "max_min_to_start": 180, "families": ["winner", "totals", "spreads"],
+        "ask_min": 0.10, "ask_max": 0.92, "trigger": "whale", "move_window_min": 10,
+        "min_usd": 3000, "max_chase": 0.02, "exit": "hold"}),
+    "thin_move": ("Fade a move nobody paid for", {
+        "phase": "pre", "max_min_to_start": 180, "families": ["winner", "totals", "spreads"],
+        "ask_min": 0.10, "ask_max": 0.90, "trigger": "thin", "move_window_min": 30,
+        "move_pp": 5, "max_usd": 200, "exit": "hold"}),
+    "day_steam": ("Back what shortened over the day", {
+        "phase": "pre", "max_min_to_start": 180, "families": ["winner", "totals", "spreads"],
+        "no_period": True, "ask_min": 0.15, "ask_max": 0.85, "trigger": "rise",
+        "move_pp": 6, "move_window_min": 1440, "exit": "hold"}),
+    "day_drift": ("Back what drifted over the day", {
+        "phase": "pre", "max_min_to_start": 180, "families": ["winner", "totals", "spreads"],
+        "no_period": True, "ask_min": 0.15, "ask_max": 0.85, "trigger": "drop",
+        "move_pp": 6, "move_window_min": 1440, "exit": "hold"}),
+})
+
 # One setting moved each way. The review promotes a variant over its base arm
 # only when it is clearly better on the same days (price_reader_review).
 VARIANTS: dict[str, list[dict]] = {
@@ -162,6 +214,12 @@ VARIANTS: dict[str, list[dict]] = {
     "live_momentum": [{"hold_min": 5}, {"exit": "hold"}],
     "live_fade": [{"hold_min": 5}, {"hold_min": 30}],
     "post_sweep": [{"ask_max": 0.98}, {"ask_min": 0.95}],
+    "money_in": [{"min_net_usd": 1000}, {"min_net_usd": 5000}],
+    "crowd": [{"min_wallets": 6}, {"min_wallets": 25}],
+    "big_bet": [{"min_usd": 1000}, {"min_usd": 10000}],
+    "thin_move": [{"move_pp": 3}, {"max_usd": 50}],
+    "day_steam": [{"move_pp": 3}, {"move_pp": 10}],
+    "day_drift": [{"move_pp": 3}, {"move_pp": 10}],
 }
 
 
@@ -169,13 +227,17 @@ def variant_key(base: str, change: dict) -> str:
     return base + "@" + ",".join(f"{k}={change[k]}" for k in sorted(change))
 
 
+# Base arms that start watched, not booked (see day_drift above).
+START_WATCHED = {"day_drift"}
+
+
 def seed_arms() -> list[dict]:
-    """Every arm the agent starts with: the base arms active, the variants in
-    shadow. Idempotent by key (price_reader_agent.ensure_arms)."""
+    """Every arm the agent starts with: the base arms active (but START_WATCHED),
+    the variants in shadow. Idempotent by key (price_reader_agent.ensure_arms)."""
     out = []
     for key, (label, params) in BASE_ARMS.items():
         out.append({"key": key, "base_key": key, "label": label, "params": dict(params),
-                    "mode": "active"})
+                    "mode": "shadow" if key in START_WATCHED else "active"})
         for change in VARIANTS.get(key, []):
             desc = ", ".join(f"{k} {v}" for k, v in sorted(change.items()))
             out.append({"key": variant_key(key, change), "base_key": key,
@@ -305,6 +367,8 @@ class Quote:
     ask: float | None
     liquidity: float
     one_hour_change: float | None   # Gamma's, on this token's side
+    other_token: str = ""           # the other outcome of the same market
+    one_day_change: float | None = None
 
     @property
     def mid(self) -> float | None:
@@ -366,10 +430,13 @@ def quotes_of(event: dict) -> list[Quote]:
             ba = None
         ch = m.get("oneHourPriceChange")
         ch = float(ch) if ch not in (None, "") else None
-        sides = [(toks[0], outs[0], bb, ba, ch),
+        dch = m.get("oneDayPriceChange")
+        dch = float(dch) if dch not in (None, "") else None
+        sides = [(toks[0], outs[0], bb, ba, ch, dch, toks[1]),
                  (toks[1], outs[1], (1 - ba) if ba is not None else None,
-                  (1 - bb) if bb is not None else None, (-ch) if ch is not None else None)]
-        for tok, outcome, bid, ask, change in sides:
+                  (1 - bb) if bb is not None else None, (-ch) if ch is not None else None,
+                  (-dch) if dch is not None else None, toks[0])]
+        for tok, outcome, bid, ask, change, day, other in sides:
             out.append(Quote(
                 event_id=match_key(event), event_title=event.get("title") or "",
                 event_slug=event.get("slug"), event_start=start, sport=sport,
@@ -377,7 +444,8 @@ def quotes_of(event: dict) -> list[Quote]:
                 question=m.get("question") or "", outcome=str(outcome),
                 label=pick_label(m, str(outcome), fam), family=fam, period=period,
                 market_type=m.get("sportsMarketType"), bid=bid, ask=ask,
-                liquidity=float(m.get("liquidityNum") or 0.0), one_hour_change=change))
+                liquidity=float(m.get("liquidityNum") or 0.0), one_hour_change=change,
+                other_token=str(other), one_day_change=day))
     return out
 
 
@@ -419,6 +487,82 @@ class PriceMemory:
         return d[-1][1] - best[1]
 
 
+# ── its memory of the money ──────────────────────────────────────────────────
+
+@dataclass
+class FlowMemory:
+    """Every taker fill on the tokens it watches, from Polymarket's public tape,
+    for the last `keep_min` minutes: (ts, side, usd, wallet, price). `side` is
+    the TAKER's, on that token: BUY pushes its price up, SELL down. A buy of one
+    outcome and a sale of the other are the same opinion, so flow_on() reads a
+    token together with its complement."""
+    keep_min: int = 180
+    trades: dict = field(default_factory=dict)
+    seen: dict = field(default_factory=dict)        # fill key → ts, for de-duplication
+    last_ts: int = 0
+
+    def add(self, rows: list[dict], watch: set | None = None) -> int:
+        added = 0
+        for r in rows:
+            try:
+                tok = str(r["token_id"])
+                ts = int(r["timestamp"])
+                size, price = float(r.get("size") or 0), float(r["price"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            self.last_ts = max(self.last_ts, ts)            # how far the tape has been read
+            if watch is not None and tok not in watch:
+                continue
+            key = (r.get("transaction_hash"), tok, size, price, r.get("proxy_wallet"), r.get("side"))
+            if key in self.seen:
+                continue
+            self.seen[key] = ts
+            self.trades.setdefault(tok, deque()).append(
+                (ts, str(r.get("side") or "").upper(), size * price, r.get("proxy_wallet"), price))
+            added += 1
+        return added
+
+    def prune(self, now_ts: int) -> None:
+        cutoff = now_ts - self.keep_min * 60
+        for tok in list(self.trades):
+            d = self.trades[tok]
+            if d and any(d[i][0] < d[i - 1][0] for i in range(1, min(len(d), 50))):
+                self.trades[tok] = d = deque(sorted(d))
+            while d and d[0][0] < cutoff:
+                d.popleft()
+            if not d:
+                del self.trades[tok]
+        for k in [k for k, t in self.seen.items() if t < cutoff]:
+            del self.seen[k]
+
+    def flow_on(self, token: str, other: str, now_ts: int, minutes: float) -> dict:
+        """The money on `token`'s side and against it in the last `minutes`."""
+        since = now_ts - minutes * 60
+        f = {"usd_for": 0.0, "usd_against": 0.0, "wallets_for": set(), "wallets_against": set(),
+             "big_usd": 0.0, "big_price": None, "first_price": None, "first_ts": None, "n": 0}
+        for tok, mine in ((token, True), (other, False)):
+            for ts, side, usd, wallet, price in self.trades.get(tok, ()):
+                if ts < since:
+                    continue
+                f["n"] += 1
+                pro = (side == "BUY") == mine          # buying this token or selling its complement
+                p_here = price if mine else 1.0 - price
+                if f["first_ts"] is None or ts < f["first_ts"]:
+                    f["first_ts"], f["first_price"] = ts, p_here
+                if pro:
+                    f["usd_for"] += usd
+                    if wallet:
+                        f["wallets_for"].add(wallet)
+                    if usd > f["big_usd"]:
+                        f["big_usd"], f["big_price"] = usd, p_here
+                else:
+                    f["usd_against"] += usd
+                    if wallet:
+                        f["wallets_against"].add(wallet)
+        f["wallets_for"], f["wallets_against"] = len(f["wallets_for"]), len(f["wallets_against"])
+        return f
+
+
 # ── which token each arm would buy ───────────────────────────────────────────
 
 @dataclass
@@ -427,9 +571,14 @@ class Candidate:
     phase: Phase
     move_pp: float | None
     why: str
+    signal: dict | None = None      # what the market did: the flow, the wallets, the big bet
 
 
 def _phase_ok(p: dict, ph: Phase) -> bool:
+    if p["phase"] == "any":
+        if ph.phase == "pre":
+            return -ph.minutes_from_start <= p.get("max_min_to_start", PRE_HORIZON_MIN)
+        return ph.phase == "live"
     if ph.phase != p["phase"]:
         return False
     if ph.phase == "pre":
@@ -450,14 +599,85 @@ def _family_ok(p: dict, q: Quote) -> bool:
     return True
 
 
+def _usd(x: float) -> str:
+    return f"${x:,.0f}"
+
+
+def flow_signal(params: dict, q: Quote, memory: PriceMemory, flow: FlowMemory | None,
+                now: datetime) -> tuple[float, float | None, str, dict] | None:
+    """(score, move, why, signal) when the market's BEHAVIOUR fits the arm's
+    trigger on this token, else None. Score picks one token per game."""
+    trig = params.get("trigger", "level")
+    w = params.get("move_window_min", 10)
+    if trig in ("rise", "drop"):
+        if w >= 1440:
+            mv = q.one_day_change                          # Gamma's 24-hour change
+        else:
+            mv = memory.move(q.token_id, now, w)
+            if mv is None and w >= 60 and q.one_hour_change is not None:
+                mv = q.one_hour_change                     # Gamma's own, until the memory reaches back
+        if mv is None:
+            return None
+        need = params.get("move_pp", 10) / 100.0
+        if (trig == "rise" and mv < need) or (trig == "drop" and mv > -need):
+            return None
+        span = "the day" if w >= 1440 else f"{w} min"
+        return abs(mv), mv, f"moved {mv * 100:+.1f}pp in {span}", {"move_pp": round(mv * 100, 2)}
+
+    if trig not in ("money", "crowd", "whale", "thin") or flow is None:
+        return None
+    now_ts = int(now.timestamp())
+    f = flow.flow_on(q.token_id, q.other_token, now_ts, w)
+    total = f["usd_for"] + f["usd_against"]
+    mid = q.mid if q.mid is not None else q.ask
+    mv = memory.move(q.token_id, now, w)
+    if mv is None and f["first_price"] is not None and mid is not None:
+        mv = mid - f["first_price"]                        # from the tape, until the memory reaches back
+    sig = {"window_min": w, "usd_for": round(f["usd_for"]), "usd_against": round(f["usd_against"]),
+           "wallets_for": f["wallets_for"], "wallets_against": f["wallets_against"],
+           "big_usd": round(f["big_usd"]), "big_price": f["big_price"], "fills": f["n"],
+           "move_pp": round(mv * 100, 2) if mv is not None else None}
+
+    if trig == "money":
+        net = f["usd_for"] - f["usd_against"]
+        if net < params["min_net_usd"] or not total or f["usd_for"] / total < params["min_share"]:
+            return None
+        if mv is None or mv < params.get("move_pp", 0) / 100.0:
+            return None
+        why = (f"{_usd(net)} net taken on this side in {w} min ({f['usd_for'] / total:.0%} of the flow), "
+               f"price {mv * 100:+.1f}pp")
+        return net, mv, why, sig
+    if trig == "crowd":
+        wf, wa = f["wallets_for"], f["wallets_against"]
+        if wf < params["min_wallets"] or wf / max(1, wf + wa) < params["min_share"]:
+            return None
+        if f["usd_for"] < params.get("min_usd", 0):
+            return None
+        why = f"{wf} different wallets backed this side in {w} min, {wa} the other ({_usd(f['usd_for'])})"
+        return float(wf), mv, why, sig
+    if trig == "whale":
+        if f["big_usd"] < params["min_usd"] or f["big_price"] is None:
+            return None
+        if q.ask is None or q.ask > f["big_price"] + params.get("max_chase", 0.02) + 1e-9:
+            return None
+        why = f"one bet of {_usd(f['big_usd'])} at {f['big_price']:.3f} in the last {w} min"
+        return f["big_usd"], mv, why, sig
+    # thin: a move with no money behind it — buy the side that fell
+    if mv is None or mv > -params["move_pp"] / 100.0 or total > params["max_usd"]:
+        return None
+    why = f"fell {mv * 100:.1f}pp in {w} min on only {_usd(total)} traded"
+    return abs(mv), mv, why, sig
+
+
 def arm_candidates(params: dict, events: list[dict], memory: PriceMemory, now: datetime,
-                   quotes_by_event: dict | None = None) -> list[Candidate]:
+                   quotes_by_event: dict | None = None, flow: FlowMemory | None = None) -> list[Candidate]:
     """At most ONE candidate per game for this arm: the token that fits the
     rule on Gamma's listing price, the most liquid market first (or, for the
-    move arms, the biggest move), across all of the game's sub-events. Nothing
-    here touches the network; the CLOB book confirms the price before anything
-    is written (entry_verdict)."""
+    behaviour arms, the strongest signal), across all of the game's sub-events.
+    Nothing here touches the network; the CLOB book confirms the price before
+    anything is written (entry_verdict)."""
     per_game: dict[str, tuple] = {}
+    trig = params.get("trigger", "level")
     for ev in events:
         qs = quotes_by_event.get(str(ev.get("id"))) if quotes_by_event is not None else quotes_of(ev)
         if not qs:
@@ -473,34 +693,31 @@ def arm_candidates(params: dict, events: list[dict], memory: PriceMemory, now: d
                 continue
             if not _family_ok(params, q):
                 continue
-            mv = None
-            trig = params.get("trigger", "level")
-            if trig in ("rise", "drop"):
-                w = params.get("move_window_min", 10)
-                mv = memory.move(q.token_id, now, w)
-                if mv is None and w >= 60 and q.one_hour_change is not None:
-                    mv = q.one_hour_change                 # Gamma's own, until the memory reaches back
-                if mv is None:
-                    continue
-                need = params.get("move_pp", 10) / 100.0
-                if (trig == "rise" and mv < need) or (trig == "drop" and mv > -need):
-                    continue
-                score = abs(mv)
+            if trig == "level":
+                score, mv, why, sig = q.liquidity - (q.ask - q.bid) * 1e-6, None, "", None
             else:
-                score = q.liquidity - (q.ask - q.bid) * 1e-6
+                hit = flow_signal(params, q, memory, flow, now)
+                if hit is None:
+                    continue
+                score, mv, why, sig = hit
             if best is None or score > best[0]:
-                best = (score, q, mv)
+                best = (score, q, mv, why, sig)
         if best:
             prev = per_game.get(best[1].event_id)
             if prev is None or best[0] > prev[0]:
-                per_game[best[1].event_id] = (best[0], best[1], best[2], ph)
+                per_game[best[1].event_id] = (*best, ph)
     out = []
-    for _, q, mv, ph in per_game.values():
-        why = f"{q.label} at {q.ask:.3f}"
-        if mv is not None:
-            why += f", moved {mv * 100:+.1f}pp in {params.get('move_window_min')} min"
-        out.append(Candidate(q, ph, mv, why))
+    for _, q, mv, why, sig, ph in per_game.values():
+        text = f"{q.label} at {q.ask:.3f}" + (f", {why}" if why else "")
+        out.append(Candidate(q, ph, mv, text, sig))
     return out
+
+
+def excluded(arm_excl: list | None, sport: str, phase: str) -> bool:
+    """Has the review taken this sport, or this phase ("phase:live"), off the
+    arm's tab? The position is still taken, in shadow."""
+    ex = set(arm_excl or [])
+    return sport in ex or f"phase:{phase}" in ex
 
 
 # ── the book, fees, and the verdict ──────────────────────────────────────────

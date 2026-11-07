@@ -24,10 +24,11 @@ WHAT IT MAY CHANGE, AND THE EVIDENCE EACH NEEDS
             The arm it replaces goes to shadow. With no active arm in the group
             (all stopped), a shadow arm comes back when its record since it was
             last moved has 100+ bets and a 90% interval wholly above zero.
-  exclude   An active arm stops booking one sport where that sport alone has
-            40+ bets and a 90% interval wholly below zero; it books it again
-            when the last 30 days of that sport, in that arm, have 40+ bets and
-            an interval wholly above zero.
+  exclude   An active arm stops booking one sport, or one phase (before the
+            start / in play), where that segment alone has 40+ bets and a 90%
+            interval wholly below zero; it books it again when the last 30 days
+            of that segment, in that arm, have 40+ bets and an interval wholly
+            above zero. A phase is stored as "phase:live" / "phase:pre".
   cap       How many positions an active arm may open a day: 25 while it has
             fewer than 30 bets, then 10 + 30 × P(edge > 0), between 5 and 40.
 
@@ -84,6 +85,11 @@ def _settled(ps: list[dict]) -> list[dict]:
 def rec_of(ps: list[dict]) -> dict:
     s = _settled(ps)
     return pr.record([float(p["pl"]) for p in s], [float(p["stake"]) for p in s])
+
+
+def _seg(key: str) -> str:
+    return {"phase:live": "in-play bets", "phase:pre": "pre-match bets",
+            "phase:post": "after-the-whistle bets"}.get(key, key)
 
 
 def _pct(x: float | None, d: int = 1) -> str:
@@ -186,6 +192,8 @@ def decide(arms: list[dict], positions: list[dict], now: datetime) -> tuple[list
         by_sport: dict[str, list[dict]] = defaultdict(list)
         for p in by_arm[a["id"]]:
             by_sport[p["sport"]].append(p)
+            if p.get("phase"):
+                by_sport[f"phase:{p['phase']}"].append(p)
         new_excl = set(excl)
         notes = []
         for sport, ps in sorted(by_sport.items()):
@@ -193,13 +201,13 @@ def decide(arms: list[dict], positions: list[dict], now: datetime) -> tuple[list
                 r = rec_of([p for p in ps if p["entered_at"] >= recent])
                 if r["n"] >= SPORT_MIN_N and r["lo90"] is not None and r["lo90"] > 0:
                     new_excl.discard(sport)
-                    notes.append(f"books {sport} again: last {SPORT_RECENT_D} days {r['n']} bets, "
+                    notes.append(f"books {_seg(sport)} again: last {SPORT_RECENT_D} days {r['n']} bets, "
                                  f"{_pct(r['yield'])}{_ci(r)}")
             else:
                 r = rec_of(ps)
                 if r["n"] >= SPORT_MIN_N and r["hi90"] is not None and r["hi90"] < 0:
                     new_excl.add(sport)
-                    notes.append(f"stops booking {sport}: {r['n']} bets, {_pct(r['yield'])}{_ci(r)}")
+                    notes.append(f"stops booking {_seg(sport)}: {r['n']} bets, {_pct(r['yield'])}{_ci(r)}")
         if new_excl != excl:
             changes.append({"arm_id": a["id"], "key": a["key"], "what": "sports",
                             "excluded_sports": sorted(new_excl), "why": "; ".join(notes) + "."})
@@ -253,7 +261,7 @@ def diary(arms: list[dict], positions: list[dict], recs: dict, changes: list[dic
     if real:
         lines.append("Changed today:")
         verb = {"stop": "Stopped booking", "promote": "Promoted", "replaced": "Moved to watching",
-                "resume": "Booking again", "sports": "Changed sports for"}
+                "resume": "Booking again", "sports": "Changed what it books for"}
         for c in real:
             lines.append(f"• {verb[c['what']]} \"{lab[c['arm_id']]}\": {c['why']}")
     else:
@@ -276,7 +284,7 @@ def load(conn) -> tuple[list[dict], list[dict], int]:
                               excluded_sports, created_at
                          FROM price_reader_arms WHERE mode <> 'stopped' ORDER BY id""")
         arms = [dict(r) for r in cur.fetchall()]
-        cur.execute("""SELECT arm_id, booked, sport, status, pl::float8 AS pl, stake::float8 AS stake,
+        cur.execute("""SELECT arm_id, booked, sport, phase, status, pl::float8 AS pl, stake::float8 AS stake,
                               entered_at, clv::float8 AS clv
                          FROM price_reader_positions WHERE status IN ('sold', 'settled')""")
         positions = [dict(r) for r in cur.fetchall()]

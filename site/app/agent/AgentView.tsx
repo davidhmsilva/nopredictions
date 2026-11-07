@@ -32,6 +32,13 @@ const ORDER: Record<AgentOrder['status'], { label: string; cls: string }> = {
   cancelled: { label: 'CANCELLED', cls: '' },
 }
 
+/** What the review may take off an approach's tab besides a sport. */
+const SEGMENT: Record<string, string> = {
+  'phase:live': 'in-play bets',
+  'phase:pre': 'pre-match bets',
+  'phase:post': 'after-the-whistle bets',
+}
+
 const ARM_MODE: Record<LearningArm['mode'], { label: string; cls: string }> = {
   active: { label: 'TRADING', cls: 'is-good' },
   shadow: { label: 'WATCHING', cls: 'is-info' },
@@ -48,11 +55,13 @@ function Learning({ learning }: { learning: AgentLearning }) {
     <section className="gc-section">
       <h2 className="gc-h2">How it is learning</h2>
       <p className="gc-quiet">
-        It reads only the price: where it is, how it moved, the depth of the book and the clock. Never the
-        score. Seven ways of reading it run side by side, each with two variants it watches without betting.
-        Every morning it reviews its own bets. An approach that is clearly losing stops trading and is only
-        watched; a variant that is clearly better on the same days takes over. Watched bets are priced and
-        settled like real ones, but never reach the tab above.
+        It reads what the market is doing, never the score: how much money goes on each side, how many
+        different people back the same thing, the biggest bets, odds drifting over the hour and the day,
+        moves nobody paid for, and where the price sits. Each way of reading it is an approach with its own
+        record, and each has two variants it watches without betting. Every morning it reviews its own
+        bets: an approach that is clearly losing stops trading and is only watched; a variant clearly better
+        on the same days takes over; one that was only watched starts trading if it earns it. Watched bets
+        are priced and settled like real ones, but never reach the tab above.
       </p>
       {latest ? (
         <>
@@ -89,7 +98,9 @@ function Learning({ learning }: { learning: AgentLearning }) {
                       {r.label}
                     </span>
                     {(r.excluded_sports?.length ?? 0) > 0 && (
-                      <span className="ag-t-event">Not booking: {r.excluded_sports.join(', ')}</span>
+                      <span className="ag-t-event">
+                        Not booking: {r.excluded_sports.map((x) => SEGMENT[x] ?? x).join(', ')}
+                      </span>
                     )}
                     {r.note && r.note.includes(':') && /^\d{4}-/.test(r.note) && (
                       <span className="ag-t-event">{r.note}</span>

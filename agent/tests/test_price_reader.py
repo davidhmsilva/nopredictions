@@ -188,9 +188,10 @@ def test_every_base_arm_trades_and_every_variant_starts_in_shadow():
     arms = pr.seed_arms()
     keys = [a["key"] for a in arms]
     assert len(keys) == len(set(keys))
-    assert {a["key"] for a in arms if a["mode"] == "active"} == set(pr.BASE_ARMS)
+    assert {a["key"] for a in arms if a["mode"] == "active"} == set(pr.BASE_ARMS) - pr.START_WATCHED
     for a in arms:
-        if a["mode"] == "shadow":
+        if a["key"] != a["base_key"]:                                   # a variant changes something
+            assert a["mode"] == "shadow"
             assert a["params"] != pr.BASE_ARMS[a["base_key"]][1]
 
 
@@ -288,3 +289,114 @@ def test_the_diary_says_it_is_a_record_under_two_hundred_bets():
     assert text.startswith("Day 3.")
     assert "12 of the 200 settled bets a verdict needs" in text
     assert "No change to what it trades today" in text
+
+
+# ── behaviour: the money on the tape (2026-11-07) ───────────────────────────
+
+T0 = int(NOW.timestamp())
+
+
+def _fill(tok, side, usd, price, wallet, ago_s=60, tx=None):
+    return {"token_id": tok, "side": side, "size": usd / price, "price": price, "proxy_wallet": wallet,
+            "timestamp": T0 - ago_s, "transaction_hash": tx or f"{tok}-{wallet}-{ago_s}-{usd}"}
+
+
+def _live_game(bid, ask, ch=None):
+    return _event(1, "A vs B", NOW - timedelta(minutes=40),
+                  [_market("m1", "A vs B", ["A", "B"], bid, ask, ch=ch)], live=True, game=11)
+
+
+def test_a_buy_of_one_side_and_a_sale_of_the_other_are_the_same_money():
+    f = pr.FlowMemory()
+    rows = [_fill("m1-a", "BUY", 1000, 0.50, "w1"), _fill("m1-b", "SELL", 500, 0.50, "w2"),
+            _fill("m1-b", "BUY", 200, 0.50, "w3"), _fill("x", "BUY", 9999, 0.5, "w9")]
+    assert f.add(rows, watch={"m1-a", "m1-b"}) == 3
+    assert f.add(rows, watch={"m1-a", "m1-b"}) == 0                    # the same fills twice count once
+    assert f.last_ts == T0 - 60                                         # read up to here, sports or not
+    s = f.flow_on("m1-a", "m1-b", T0, 30)
+    assert round(s["usd_for"]) == 1500 and round(s["usd_against"]) == 200
+    assert s["wallets_for"] == 2 and s["wallets_against"] == 1
+    assert round(s["big_usd"]) == 1000 and s["big_price"] == 0.50
+    f.prune(T0 + 4 * 3600)
+    assert f.trades == {}
+
+
+def test_follow_the_money_needs_the_net_the_share_and_the_price_to_agree():
+    params = pr.BASE_ARMS["money_in"][1]
+    f = pr.FlowMemory()
+    f.add([_fill("m1-a", "BUY", 1500, 0.50, f"w{i}", ago_s=60 * i) for i in range(1, 4)])  # $4,500 for A
+    f.add([_fill("m1-b", "BUY", 300, 0.50, "z1")])
+    mem = pr.PriceMemory()
+    mem.observe(pr.quotes_of(_live_game(0.49, 0.50)), NOW - timedelta(minutes=30))
+    mem.observe(pr.quotes_of(_live_game(0.53, 0.54)), NOW)                # the daemon remembers now first
+    cands = pr.arm_candidates(params, [_live_game(0.53, 0.54)], mem, NOW, flow=f)
+    assert len(cands) == 1 and cands[0].quote.token_id == "m1-a"
+    assert cands[0].signal["usd_for"] == 4500 and "net taken on this side" in cands[0].why
+    # the same money with the price NOT moving: no signal
+    mem2 = pr.PriceMemory()
+    mem2.observe(pr.quotes_of(_live_game(0.53, 0.54)), NOW - timedelta(minutes=30))
+    mem2.observe(pr.quotes_of(_live_game(0.53, 0.54)), NOW)
+    assert pr.arm_candidates(params, [_live_game(0.53, 0.54)], mem2, NOW, flow=f) == []
+    # money on both sides: no signal
+    f.add([_fill("m1-b", "BUY", 3000, 0.50, "z2")])
+    assert pr.arm_candidates(params, [_live_game(0.53, 0.54)], mem, NOW, flow=f) == []
+
+
+def test_follow_the_crowd_counts_wallets_not_dollars():
+    params = pr.BASE_ARMS["crowd"][1]
+    f = pr.FlowMemory()
+    f.add([_fill("m1-b", "BUY", 60, 0.50, f"w{i}", ago_s=30 + i) for i in range(14)])
+    f.add([_fill("m1-a", "BUY", 5000, 0.50, "whale")])                 # one big wallet the other way
+    cands = pr.arm_candidates(params, [_live_game(0.49, 0.50)], pr.PriceMemory(), NOW, flow=f)
+    assert len(cands) == 1 and cands[0].quote.token_id == "m1-b"
+    assert cands[0].signal["wallets_for"] == 14
+
+
+def test_follow_a_big_bet_but_never_chase_it():
+    params = pr.BASE_ARMS["big_bet"][1]
+    f = pr.FlowMemory()
+    f.add([_fill("m1-a", "BUY", 4000, 0.50, "whale", ago_s=120)])
+    assert len(pr.arm_candidates(params, [_live_game(0.50, 0.51)], pr.PriceMemory(), NOW, flow=f)) == 1
+    assert pr.arm_candidates(params, [_live_game(0.54, 0.55)], pr.PriceMemory(), NOW, flow=f) == []
+    old = pr.FlowMemory()
+    old.add([_fill("m1-a", "BUY", 4000, 0.50, "whale", ago_s=20 * 60)])  # outside the 10 minutes
+    assert pr.arm_candidates(params, [_live_game(0.50, 0.51)], pr.PriceMemory(), NOW, flow=old) == []
+
+
+def test_a_move_nobody_paid_for_is_faded_and_a_paid_one_is_not():
+    # in play a price falls with no trade when a goal goes in: not this arm's
+    assert pr.arm_candidates(pr.BASE_ARMS["thin_move"][1], [_live_game(0.52, 0.53)], pr.PriceMemory(),
+                             NOW, flow=pr.FlowMemory()) == []
+    params = {**pr.BASE_ARMS["thin_move"][1], "phase": "any"}
+    mem = pr.PriceMemory()
+    mem.observe(pr.quotes_of(_live_game(0.59, 0.60)), NOW - timedelta(minutes=30))
+    mem.observe(pr.quotes_of(_live_game(0.52, 0.53)), NOW)
+    thin = pr.FlowMemory()
+    thin.add([_fill("m1-b", "BUY", 50, 0.45, "w1")])
+    cands = pr.arm_candidates(params, [_live_game(0.52, 0.53)], mem, NOW, flow=thin)
+    assert len(cands) == 1 and cands[0].quote.token_id == "m1-a"       # A fell 7pp: buy A
+    paid = pr.FlowMemory()
+    paid.add([_fill("m1-b", "BUY", 3000, 0.45, "w1")])
+    assert pr.arm_candidates(params, [_live_game(0.52, 0.53)], mem, NOW, flow=paid) == []
+
+
+def test_the_day_s_drift_comes_from_gamma_and_both_ends_of_it_are_arms():
+    ev = _event(1, "A vs B", NOW + timedelta(minutes=100),
+                [_market("d1", "A vs B", ["A", "B"], 0.40, 0.41)], game=12)
+    ev["markets"][0]["oneDayPriceChange"] = -0.08                       # A drifted 8pp over the day
+    steam = pr.arm_candidates(pr.BASE_ARMS["day_steam"][1], [ev], pr.PriceMemory(), NOW)
+    drift = pr.arm_candidates(pr.BASE_ARMS["day_drift"][1], [ev], pr.PriceMemory(), NOW)
+    assert [c.quote.token_id for c in steam] == ["d1-b"]
+    assert [c.quote.token_id for c in drift] == ["d1-a"]
+
+
+def test_a_phase_can_be_taken_off_the_tab_like_a_sport():
+    assert pr.excluded(["phase:live"], "soccer", "live")
+    assert not pr.excluded(["phase:live"], "soccer", "pre")
+    assert pr.excluded(["tennis"], "tennis", "pre")
+    arms = [_arm(1, "a", "a")]
+    ps = [{**_pos(1, 0.2), "phase": "pre"} for _ in range(100)] + \
+         [{**_pos(1, -0.5 if i % 2 else 0.1), "phase": "live"} for i in range(50)]
+    ch, _ = rv.decide(arms, ps, NOW)
+    sp = [c for c in ch if c["what"] == "sports"]
+    assert sp and sp[0]["excluded_sports"] == ["phase:live"] and "in-play bets" in sp[0]["why"]
