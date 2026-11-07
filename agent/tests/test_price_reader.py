@@ -400,3 +400,41 @@ def test_a_phase_can_be_taken_off_the_tab_like_a_sport():
     ch, _ = rv.decide(arms, ps, NOW)
     sp = [c for c in ch if c["what"] == "sports"]
     assert sp and sp[0]["excluded_sports"] == ["phase:live"] and "in-play bets" in sp[0]["why"]
+
+
+# ── the exit ─────────────────────────────────────────────────────────────────
+
+class _Cur:
+    def __init__(self, log):
+        self.log, self.rowcount = log, 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, args=None):
+        self.log.append((" ".join(sql.split()), args))
+
+
+class _Conn:
+    def __init__(self):
+        self.sql = []
+
+    def cursor(self, *a, **k):
+        return _Cur(self.sql)
+
+
+def test_a_flip_with_no_sellable_bid_waits_then_is_held_to_the_end():
+    from collections import Counter
+    import price_reader_agent as ag
+    pos = {"id": 7, "shares": 2.0, "stake": 1.0, "paper_trade_id": None,
+           "exit_due_at": NOW - timedelta(minutes=5)}
+    conn, stats = _Conn(), Counter()
+    ag._exit_one(conn, pos, None, NOW, stats)                    # due 5 min ago: try again
+    assert conn.sql == [] and not stats
+    pos["exit_due_at"] = NOW - timedelta(minutes=pr.EXIT_GIVE_UP_MIN + 1)
+    ag._exit_one(conn, pos, None, NOW, stats)                    # past the give-up: hold it
+    assert stats["held_no_bid"] == 1
+    assert "SET exit_rule = 'hold'" in conn.sql[0][0] and conn.sql[0][1][1] == 7
