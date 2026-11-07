@@ -410,7 +410,13 @@ def cycle(state: State, dry_run: bool = False) -> dict:
     conn = _conn()
     try:
         for pos in due:
-            _exit_one(conn, pos, books.get(pos["token_id"]), now, stats)
+            # One position that cannot be closed never stops the cycle: on
+            # 2026-11-06 a NameError here halted every entry and settle for 15 h.
+            try:
+                _exit_one(conn, pos, books.get(pos["token_id"]), now, stats)
+            except Exception:
+                stats["exit_errors"] += 1
+                log.exception(f"[price_reader] exit of position {pos.get('id')} failed")
         for arm, c in cands:
             book = books.get(c.quote.token_id)
             if c.quote.token_id not in asked:
@@ -453,7 +459,7 @@ def cycle(state: State, dry_run: bool = False) -> dict:
 
 def _exit_one(conn, pos: dict, book: dict | None, now: datetime, stats: Counter) -> None:
     """Sell a flip position at the bid. With no sellable book, try again next
-    cycle; EXIT_GIVE_UP_MIN after it was due, hold it to the end instead."""
+    cycle; pr.EXIT_GIVE_UP_MIN after it was due, hold it to the end instead."""
     why = pr.sale_verdict(book)
     if why is None:
         bid = float(book["best_bid"])
@@ -461,7 +467,7 @@ def _exit_one(conn, pos: dict, book: dict | None, now: datetime, stats: Counter)
         close_position(conn, pos, status="sold", payout=payout, reason="sold_on_time", bid=bid)
         stats["sold"] += 1
         return
-    if now - pos["exit_due_at"] > timedelta(minutes=EXIT_GIVE_UP_MIN):
+    if now - pos["exit_due_at"] > timedelta(minutes=pr.EXIT_GIVE_UP_MIN):
         with conn.cursor() as cur:
             cur.execute("""UPDATE price_reader_positions
                               SET exit_rule = 'hold', exit_reason = %s WHERE id = %s AND status = 'open'""",
