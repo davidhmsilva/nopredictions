@@ -1,0 +1,14 @@
+# Stage J, Polymarket's settled prices: the replay of both teams to score and the
+# other goal lines (db/085). An hour after Stage A, because a price is only read for
+# a fixture linked to a result in `matches`.
+[Unit]
+Description=NOPREDICTIONS timer stage-j
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+AccuracySec=1s
+Unit=np-job@stage-j.service
+
+[Install]
+WantedBy=timers.target
