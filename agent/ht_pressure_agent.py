@@ -870,6 +870,10 @@ def _base_row(sig: PressureSignals) -> dict:
         "under_token_id": None, "under_ask": None,
         "under_would_enter": False, "under_entered": False,
         "under_paper_trade_id": None, "under_skip_reason": None,
+        # Version 2 of the Under arm (db/091, ht_under_v2_agent), same row.
+        "under2_streak": None, "under2_ask": None,
+        "under2_would_enter": False, "under2_entered": False,
+        "under2_paper_trade_id": None, "under2_skip_reason": None,
     }
 
 
@@ -894,6 +898,8 @@ _COLS = [
     "venue", "alt_venue_ask", "venue_saving_pp", "entry_ask", "entry_ticker",
     "under_token_id", "under_ask", "under_would_enter", "under_entered",
     "under_paper_trade_id", "under_skip_reason",
+    "under2_streak", "under2_ask", "under2_would_enter", "under2_entered",
+    "under2_paper_trade_id", "under2_skip_reason",
 ]
 
 

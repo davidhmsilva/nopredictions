@@ -1631,6 +1631,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     import fav_swing_agent as swing
     import ht_pressure_agent as ht
     import ht_under_agent as under
+    import ht_under_v2_agent as under2
     import lab_inplay_runner as lab_live
 
     table = lgt.load(lgt.WIDE_TABLE_PATH)
@@ -1649,11 +1650,13 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
     strategy_id = None if dry_run else _strategy_id(conn)
     ht_strategy_id = None if dry_run else ht.strategy_id(conn)
     under_strategy_id = None if dry_run else under.strategy_id(conn)
+    under2_strategy_id = None if dry_run else under2.strategy_id(conn)
     fav_strategy_id = None if dry_run else fav.strategy_id(conn)
     swing_strategy_id = None if dry_run else swing.strategy_id(conn)
     tracker = LiveMatchTracker()
     pre_cache: dict[str, float] = {}
     ht_state = ht.HTState()
+    under2_state = under2.UnderV2State()
     fav_state = fav.FavState()
     swing_state = swing.SwingState()
     lab_live_state = swing.SwingState()
@@ -1714,6 +1717,16 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
             log.exception(f"[UNDER] decide failed: {exc}")
             for r in ht_rows:
                 r["under_would_enter"] = False
+        # Version 2 (db/091) reads v1's gate off the row and adds its own: quiet
+        # for six polls, never pressing, a goal game by its Over 2.5. No network.
+        # After v1.decide and before v1.open_trades, which clears the flag on a
+        # fixture v1 already holds.
+        try:
+            under2.decide(ht_rows, under2_state)
+        except Exception as exc:                              # noqa: BLE001
+            log.exception(f"[UNDER2] decide failed: {exc}")
+            for r in ht_rows:
+                r["under2_would_enter"] = False
         fav_rows = fav.observe(signals, fav_table, pm_fixtures, fav_state,
                                tracker.enrich_status)
 
@@ -1737,17 +1750,19 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                             f"{len(rows)} rows lost, next poll is {interval}s away")
                 db_dropped, opened, rows = True, 0, []
 
-        ht_opened = under_opened = 0
+        ht_opened = under_opened = under2_opened = 0
         if ht_rows and conn is not None and not db_dropped:
             try:
                 ht_opened = ht.open_trades(conn, ht_strategy_id, ht_rows)
                 # Before the write, so the Under trade id lands on its row.
                 under_opened = under.open_trades(conn, under_strategy_id, ht_rows)
+                under2_opened = under2.open_trades(conn, under2_strategy_id, ht_rows)
                 ht.write(conn, ht_rows)
             except _DB_DROPPED as exc:
                 log.warning(f"db dropped mid-write [HT] ({exc.__class__.__name__}) — "
                             f"{len(ht_rows)} rows lost")
                 db_dropped, ht_opened, under_opened, ht_rows = True, 0, 0, []
+                under2_opened = 0
         for r in ht_rows:
             if r["under_entered"]:
                 log.info(
@@ -1755,6 +1770,13 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                     f"{r['minute']}'  1H U0.5 ask={r['under_ask']:.3f} "
                     f"({1 / r['under_ask']:.2f})  pressure={r['pressure_now']:.1f}  "
                     f"#{r['under_paper_trade_id']}"
+                )
+            if r["under2_entered"]:
+                log.info(
+                    f"  ENTER  [UNDER2] {r['home'][:16]:16} 0-0 {r['away'][:16]:16} "
+                    f"{r['minute']}'  1H U0.5 ask={r['under2_ask']:.3f} "
+                    f"({1 / r['under2_ask']:.2f})  quiet x{r['under2_streak']}  "
+                    f"O2.5={r['pre_over25']:.2f}  #{r['under2_paper_trade_id']}"
                 )
         for r in ht_rows:
             if r["entered"]:
@@ -1820,7 +1842,7 @@ def run(once: bool, dry_run: bool, interval: int) -> None:
                     f"(base {r['edge_base_pp']:+.1f}pp)  #{r['paper_trade_id']}"
                 )
         log.info(f"live={len(rows):3d} priced={len(priced):3d} entered={opened:2d} "
-                 f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} under={under_opened} "
+                 f"| 1H rows={len(ht_rows):3d} entered={ht_opened:2d} under={under_opened} under2={under2_opened} "
                  f"| FAV rows={len(fav_rows):3d} entered={fav_opened:2d} "
                  f"| SWING in={swing_counts.get('entered', 0)} held={swing_counts.get('open', 0)}"
                  f"+{swing_counts.get('goal', 0)} sold={swing_counts.get('sold', 0)} "
@@ -1866,6 +1888,7 @@ def main() -> None:
         import fav_swing_agent as swing
         import ht_pressure_agent as ht
         import ht_under_agent as under
+        import ht_under_v2_agent as under2
         import lab_inplay_runner as lab_live
         conn = _conn()
         try:
@@ -1874,6 +1897,7 @@ def main() -> None:
                 log.info(f"settled {settle(conn)} observations")
                 log.info(f"settled {ht.settle(conn)} first-half observations")
                 log.info(f"settled {under.settle(conn)} first-half Under trades")
+                log.info(f"settled {under2.settle(conn)} first-half Under v2 trades")
                 log.info(f"settled {fav.settle(conn)} favourite observations")
                 log.info(f"settled {swing.settle(conn)} favourite-swing positions held to the end")
                 log.info(f"settled {lab_live.settle(conn)} Lab live-rule positions held to the end")
@@ -1881,6 +1905,7 @@ def main() -> None:
                 report(conn)
                 ht.report(conn)
                 under.report(conn)
+                under2.report(conn)
                 fav.report(conn)
                 swing.report(conn)
         finally:

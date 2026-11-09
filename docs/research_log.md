@@ -3725,3 +3725,56 @@ off an arm ("phase:live" / "phase:pre"), not only a sport. Priors still apply: f
 pre-match PM shortening lost in football (H-STEAM-FOLLOW), and 24-48 h flow was a martingale
 (H-PM-FLOW); informed WALLETS did beat the close, which is the next arm worth building
 (smart_money: wallets whose own settled record on the tape beats their prices).
+
+## Low Pressure HT Under 0.5: what v1 did, and v2 (2026-11-10)
+
+**v1 (db/076) after four weeks, paper:** 330 settled, 44.2% won at a mean price of
+48.6%, **-34.7u, -10.5% net**. It enters at a pressure between 5.9 and 13.6 (median
+10.1; 5.9 is the floor, a match with one shot). Three things it does that the
+operator's idea does not:
+
+- It never looks at whether the match was expected to have goals.
+- It does not wait: 126 of 330 entries were made on the fixture's first pressure
+  reading, 117 at minute 15 exactly.
+- "Quiet" is the last fifteen minutes only: 81 entries came in matches that had read
+  19 or more earlier, 29 with 9 or more shots (-28%).
+
+**The Over 2.5 on the row is not a pre-match price.** `pre_is_prematch` was true on 3
+of 1,658 fixtures since 2026-10-12: `pre_over25` is the first Over 2.5 price seen, in
+play, around 15' at 0-0. ⚠️ Getting the real pre-match price onto these rows is open.
+
+**Over 2.5 bands on v1's rule do not hold.** Same rule replayed on obs_version 6-7
+rows, first qualifying row per fixture, price as 1 - (Over bid) (it reproduces v1's
+own period: 333 fixtures, -11.2%, against -10.5% booked):
+
+| Over 2.5 first seen | before 2026-10-12 | after |
+|---|---|---|
+| >= 0.60 | +11.9% (46) | -37.3% (66) |
+| 0.52-0.60 | +17.7% (67) | +5.3% (78) |
+| 0.45-0.52 | -13.0% (86) | +6.0% (88) |
+| < 0.45 | +4.3% (89) | -22.0% (101) |
+| all | +3.5% (288) | -11.2% (333) |
+
+The bands change sign between the two months. A band filter would be fitted to noise.
+
+**What held in both months: staying quiet.** Six polls in a row below the ceiling and
+no reading at 19 or more since 15' (mean entry minute 24):
+
+| | before 2026-10-12 | after | both |
+|---|---|---|---|
+| all | +8.2% (126) | +0.8% (130) | +4.4% (256, se 6.0) |
+| Over 2.5 >= 0.52 | +16.5% (50, se 14.4) | +6.6% (46, se 16.6) | about +12% (96) |
+| Over 2.5 < 0.52 | +2.6% (76) | -2.4% (84) | about 0% (160) |
+
+The goal games that stay quiet are where the Under is still cheap (mean price 46-51%,
+against 56-57%). The streak of 6 and the 0.52 cut were chosen looking at these rows,
+one variant tested: in-sample, and nowhere near 200 bets.
+
+**v2 (db/091, `ht_under_v2_agent.py`, H-HT-UNDER-QUIET-V2):** v1's gate on the poll,
+plus six quiet polls in a row, never at 19, Over 2.5 first seen >= 0.52. Frozen
+2026-11-10. v1 keeps running unchanged as the comparison. About 1.6 entries a day, so
+200 settled is roughly four months away; until then it is a record.
+
+⚠️ `ht_goals` is not an outcome for these rows: after 2026-10-12 it is filled on 306 of
+1,662 fixtures and every one of them reads 0. `goal_before_ht` agrees with the booked
+result on all 330 v1 trades; use that.
