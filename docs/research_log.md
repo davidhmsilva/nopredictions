@@ -3383,6 +3383,40 @@ What remains, all traced game by game:
 - A pooled backend on 6543 answered with `default_transaction_read_only = on` while others said
   off, source unknown. A script that writes (a temp table) has to check, and try again.
 
+## The first-half table, rebuilt, and Low Pressure HT Under 0.5 reviewed (2026-11-05)
+
+**s38 passed its n ≥ 200 gate and failed it.** 260 settled (10-12 → 11-05), mean odds 2.17,
+hit 43.1% against 48.4% implied, **−13.5% net, CI[−26, −0.5]**. No minute, odds or pressure band
+is positive. The premise did not hold forward: on 421 clean-book fixtures since 10-12 the goal
+came in 63.4% against the Over ask's 60.6%, so the Under at 1 − (Over bid) lost −16.5% on every
+fixture. Quiet tercile −12%, pressing −25%: the right direction, CIs overlapping. The frozen bar
+selects next to nothing (−14% with it, −17% without).
+
+**PM's mid is calibrated on this market; October ran hot.** Clean books, first 0-0 row at 15-19',
+Aug-Nov, 971 fixtures: realised 0.600, PM mid 0.594. October alone 0.623, ~1σ over the mid,
+and that hot month is most of s38's loss. The 1,379-fixture "Over 3.3pp rich" reading of
+2026-10-11 and this one are both inside the noise of a calibrated price.
+
+**The old table read 4-5pp low on PM's fixtures** (0.439 vs 0.493 realised at every minute
+band, 2,208 fixtures 10-10 → 11-05, Brier 0.2419). Two causes, measured:
+- *Era.* First-half goals scored in added time: 5.4% (2017) → 10.8% (2026). The rate from
+  0-0 rose 1-3pp, most late (35': 0.262 → 0.279; 40': 0.162 → 0.183; 2017-22 vs 2022-26, ESPN).
+- *No pre-match total.* `pre_is_prematch` was true on 48 of ~16,000 rows: the daemon first
+  sees a fixture after kick-off, so every fair was the pooled cell. The total is the biggest
+  input (0-0 at 15': 0.52 low-total, 0.66 high-total).
+- League mix is NOT it: ESPN 2024-26 for the same leagues reads 0.555, the old table 0.553.
+
+**Rebuilt** (`agent/first_half_table.py`): ESPN timelines (Stage L), kick-off ≥ 2022-07, 72,479
+clean matches; per-minute logistic on logit(Pinnacle close O2.5). Pinnacle only: training on
+the market average put a 2026 holdout 2pp high (different margin). Holdout ESPN 2025 (fit
+2022-07..2024): within 1pp at 15/20/25/30/35'. `ht_pressure_agent.fill_pre_match` now reads
+PM's last pre-KO O2.5 mid from `venue_market_quotes` (18 of 20 live PM games found on test).
+On the 2,208: new table 0.476 (Brier 0.2334), PM in-play mid 0.476 (Brier 0.2325).
+
+**Not an edge.** Slope of (realised − mid) on (table − mid): −0.08 ± 0.72. PM already prices the
+minute and the total. The table is the measuring stick, not a reason to trade. Next test, if
+any: the same slope on the Under side only, and per league, pre-registered, forward.
+
 ## Price Reader: an agent that reads only the price, in every sport (2026-11-06)
 
 The operator's brief: an agent that tries to call a result in any Polymarket sports market, in
