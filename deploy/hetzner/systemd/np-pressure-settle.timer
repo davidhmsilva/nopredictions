@@ -1,0 +1,12 @@
+# pressure_agent.py --settle — was cron_guard --gap 25 (~every 30 min)
+[Unit]
+Description=NOPREDICTIONS timer pressure-settle
+
+[Timer]
+OnCalendar=*:05/30
+Persistent=true
+AccuracySec=1s
+Unit=np-job@pressure-settle.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+# soccer_live_recorder.py --settle — was */30
+[Unit]
+Description=NOPREDICTIONS timer soccer-live-settle
+
+[Timer]
+OnCalendar=*:10/30
+Persistent=true
+AccuracySec=1s
+Unit=np-job@soccer-live-settle.service
+
+[Install]
+WantedBy=timers.target

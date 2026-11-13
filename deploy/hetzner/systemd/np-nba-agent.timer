@@ -1,0 +1,12 @@
+# nba_agent.py --once (NBA Every Game) — every 5 min, offset from nfl (:00), :01, :02 and unl (:03)
+[Unit]
+Description=NOPREDICTIONS timer nba-agent
+
+[Timer]
+OnCalendar=*:04/5
+Persistent=true
+AccuracySec=1s
+Unit=np-job@nba-agent.service
+
+[Install]
+WantedBy=timers.target

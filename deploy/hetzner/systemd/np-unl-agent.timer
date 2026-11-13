@@ -1,0 +1,12 @@
+# unl_agent.py --once (Nations League) — was */5
+[Unit]
+Description=NOPREDICTIONS timer unl-agent
+
+[Timer]
+OnCalendar=*:03/5
+Persistent=true
+AccuracySec=1s
+Unit=np-job@unl-agent.service
+
+[Install]
+WantedBy=timers.target

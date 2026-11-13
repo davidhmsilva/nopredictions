@@ -1,0 +1,12 @@
+# nfl_live_recorder.py --once — every minute
+[Unit]
+Description=NOPREDICTIONS timer nfl-live
+
+[Timer]
+OnCalendar=*:*:00
+Persistent=true
+AccuracySec=1s
+Unit=np-job@nfl-live.service
+
+[Install]
+WantedBy=timers.target
