@@ -11,6 +11,9 @@ and 40'. The favourite's own pressure is in the top third for that minute
 PM's "<Favourite> leading at halftime?" (Yes) at the ask, 1u, paper.
 Hypothesis H-FAV-PRESS-REL (db/075).
 
+From obs_version 6 (2026-11-18, the operator's decision) only below odds 3.00:
+an ask above 1/3 (MIN_ASK).
+
 It replaces "Live Pressure Favourite HT" (strategy 18, archived 2026-10-12). That
 rule asked the favourite to OUT-press the underdog (dominance >= 20). Against the
 price, the underdog's pressure also raised the chance the favourite led at the
@@ -110,7 +113,10 @@ STRATEGY_NAME = "Favourite Pressing HT"
 # v5 (2026-10-12): the gate is the favourite's own pressure against a per-minute
 # bar, with no dominance term, and entries belong to "Favourite Pressing HT".
 # v1-v4 entries are strategy 18's. Never pool the two.
-OBS_VERSION = 5
+# v6 (2026-11-18, the operator's decision): no entry at odds of 3.00 or more
+# (MIN_ASK). Observation rows keep being written at every price, so the bar's
+# separation test is unchanged; only `would_enter` and the trades narrow.
+OBS_VERSION = 6
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300
@@ -175,6 +181,12 @@ def pressure_bar(minute: int) -> float | None:
     return None
 
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
+# obs_version 6 (2026-11-18, the operator's decision): buy only below odds 3.00,
+# i.e. an ask above 1/3. On the first 135 settled entries (12-10 -> 15-11), the
+# 48 at 3.00+ lost 8.7u net (11 above 4.00: 1 won, -6.9u) while the 87 below
+# made +9.7u, +11.1% CI +-25pp. Chosen after seeing the record: the record from
+# v6 on is the test of it, and it is short of 200 bets for a long while.
+MIN_ASK = 1.0 / 3.0
 MIN_DEPTH_USD = 25.0            # half-time markets are thin; see ht_pressure_agent
 # obs_version 2 (2026-08-31): a spread cap. The sibling arms settled on 6pp; this
 # market breaks at 3pp and the number is NOT copied across. 4,654 rows / 635
@@ -528,6 +540,7 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             and pressure_bar(sig.minute) is not None
             and row["fav_pressure_now"] >= pressure_bar(sig.minute)
             and book["best_ask"] <= MAX_ASK
+            and book["best_ask"] > MIN_ASK
             and book["best_bid"] is not None
             and (book["best_ask"] - book["best_bid"]) <= MAX_SPREAD
             and (book["ask_depth_usd"] or 0) >= MIN_DEPTH_USD
@@ -561,6 +574,8 @@ def _why_not(row: dict, book: dict, sig: PressureSignals, fav: dict) -> str:
                 f"({row['fav_pressure_now']:.1f} < {bar})")
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
+    if book["best_ask"] <= MIN_ASK:
+        return f"odds {1 / book['best_ask']:.2f} >= {1 / MIN_ASK:.2f}"
     if book["best_bid"] is None:
         return "one-sided book: no bid"
     if (book["best_ask"] - book["best_bid"]) > MAX_SPREAD:

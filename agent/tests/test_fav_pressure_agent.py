@@ -187,7 +187,7 @@ def _row(**kw) -> dict:
     return row
 
 
-def _book(ask=0.30, depth=200.0, bid=None) -> dict:
+def _book(ask=0.40, depth=200.0, bid=None) -> dict:
     # best_bid has been part of the gate since obs_version 2 added MAX_SPREAD;
     # the default sits one tick inside it so a test that is about something
     # else is not silently blocked by the spread.
@@ -209,6 +209,15 @@ def test_why_not_names_the_binding_gate():
     assert "pressing enough for 17'" in fa._why_not(_row(fav_pressure_now=5.0), _book(), ok, _fav())
     assert "ask" in fa._why_not(_row(), _book(ask=0.95), ok, _fav())
     assert "depth" in fa._why_not(_row(), _book(depth=1.0), ok, _fav())
+
+
+def test_no_entry_at_odds_of_three_or_more():
+    """obs_version 6: the operator capped the price at odds 3.00. An ask of
+    1/3 or less is refused and the reason names the odds; 2.94 still enters."""
+    ok = _sig(minute=22)
+    assert "odds 3.33 >= 3.00" in fa._why_not(_row(), _book(ask=0.30), ok, _fav())
+    assert "odds" in fa._why_not(_row(), _book(ask=1 / 3), ok, _fav())
+    assert fa._why_not(_row(), _book(ask=0.34), ok, _fav()) == ""
 
 
 def test_a_favourite_that_is_not_pressing_does_not_enter():
@@ -244,7 +253,7 @@ def test_the_bar_is_frozen_per_minute():
 def board(monkeypatch):
     from datetime import datetime, timedelta, timezone
     monkeypatch.setattr(fa, "_fetch_book", lambda tok: {
-        **tok, "best_bid": 0.28, "best_ask": 0.30,
+        **tok, "best_bid": 0.38, "best_ask": 0.40,
         "bid_depth_usd": 300.0, "ask_depth_usd": 300.0})
     # Kickoff in the future so the favourite counts as captured pre-match.
     fx = _fixture(kickoff=datetime.now(timezone.utc) + timedelta(minutes=5))
@@ -344,7 +353,7 @@ def test_a_fixture_first_seen_in_play_never_enters(monkeypatch):
     favourite it names is not the quantity the table is bucketed on."""
     from datetime import datetime, timedelta, timezone
     monkeypatch.setattr(fa, "_fetch_book", lambda tok: {
-        **tok, "best_bid": 0.28, "best_ask": 0.30,
+        **tok, "best_bid": 0.38, "best_ask": 0.40,
         "bid_depth_usd": 300.0, "ask_depth_usd": 300.0})
     fx = _fixture(kickoff=datetime.now(timezone.utc) - timedelta(minutes=16))
     rows = fa.observe({1: _pressing_home()}, fvt.load(), [fx], fa.FavState())
