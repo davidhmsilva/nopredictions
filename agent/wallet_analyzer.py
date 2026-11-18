@@ -17,13 +17,15 @@ by hand and survived only as markdown. This is that method, codified.
 
 THREE TRAPS THIS FILE EXISTS TO AVOID
 -------------------------------------
-1. `/activity?offset=` refuses anything past **5000** — a naive pager returns
-   5,000 rows and looks complete. GSX- has 16,157. We page by time cursor and
-   assert the walk terminated on a short page, never on a cap.
+1. A pager that stops on a cap looks complete. v1's `/activity?offset=`
+   refused anything past 5000 (GSX- has 16,157). v1 answers 410 since
+   2026-11-02; `/v2/activity` pages by an opaque cursor (pm_data.walk), and the
+   walk is complete only when the cursor runs out, never on a row cap.
 
-2. REDEEM rows carry **no `asset`** — only conditionId + outcomeIndex. Attribute
-   them by outcome index against the market's `clobTokenIds` or the redemption
-   lands on the wrong token and the P&L splits between two outcomes.
+2. v1 REDEEM rows carried **no `asset`** — only conditionId + outcomeIndex. They
+   are attributed by outcome index against the market's `clobTokenIds` first,
+   or the redemption lands on the wrong token and the P&L splits between two
+   outcomes. v2 REDEEM rows do carry the token, one row per outcome redeemed.
 
 3. Activity types we do not model (MERGE / SPLIT / CONVERSION) silently break
    the reconstruction for wallets that exit that way — and per
@@ -56,13 +58,14 @@ from typing import Any, Iterable, Optional
 
 import requests
 
-DATA_API = "https://data-api.polymarket.com"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pm_data  # noqa: E402
+
 GAMMA_API = "https://gamma-api.polymarket.com"
 LB_API = "https://lb-api.polymarket.com"
 
-PAGE = 500                # activity rows per request (server max)
+PAGE = 1000               # /v2/activity rows per request (server max; 1001 is a 400)
 GAMMA_BATCH = 100         # condition_ids per Gamma call (200 → HTTP 422)
-MAX_OFFSET = 5000         # the server's hard cap; we never rely on it
 # A market maker can run to hundreds of thousands of fills. Stopping is fine;
 # stopping QUIETLY is not — `complete` goes false and the narrative leads with it.
 MAX_ROWS = 250_000
@@ -171,55 +174,46 @@ def _row_key(r: dict) -> tuple:
             r.get("conditionId"), r.get("outcomeIndex"))
 
 
+def v1_row(r: dict) -> dict:
+    """A /v2/activity row under the v1 names the reconstruction reads. A token
+    of "" (MERGE, SPLIT, CONVERSION) has no asset, and outcome index 999 is the
+    API's "could not be labelled": both become None, as v1's absent fields."""
+    idx = r.get("outcome_index")
+    return {"timestamp": r.get("timestamp"), "type": r.get("type"), "side": r.get("side"),
+            "size": r.get("size"), "price": r.get("price"), "usdcSize": r.get("usdc_size"),
+            "asset": r.get("token_id") or None, "conditionId": r.get("condition_id"),
+            "outcomeIndex": None if idx is None or idx == 999 else idx,
+            "outcome": r.get("outcome"), "title": r.get("title"), "slug": r.get("slug"),
+            "eventSlug": r.get("event_slug"), "transactionHash": r.get("transaction_hash"),
+            "proxyWallet": r.get("proxy_wallet"), "name": r.get("name"), "pseudonym": r.get("pseudonym")}
+
+
 def fetch_activity(wallet: str, since: Optional[int] = None, until: Optional[int] = None,
                    session: Optional[requests.Session] = None,
                    log=lambda m: None) -> tuple[list[dict], bool]:
-    """Every activity row for `wallet`, newest first, walked by time cursor.
+    """Every activity row for `wallet` in [since, until], oldest first, in v1's
+    field names (v1_row). Walked by /v2/activity's cursor, with the same
+    filters on every page. v2 floors an omitted `start` to three years back.
 
     Returns (rows, complete). `complete` is False only when the walk stopped on
-    a guard rather than on a short page — the caller must say so out loud,
-    because a truncated history reads exactly like a smaller wallet.
+    MAX_ROWS rather than on the end of the cursor — the caller must say so out
+    loud, because a truncated history reads exactly like a smaller wallet.
+    Raises when a page failed: a refused read is not an empty wallet.
     """
-    s = session or _session()
+    params: dict[str, Any] = {"user": wallet}
+    if since is not None:
+        params["start"] = since
+    if until is not None:
+        params["end"] = until
+    got = pm_data.walk("activity", params, session=session or _session(), limit=PAGE,
+                       max_rows=MAX_ROWS, log=log)
+    if got is None:
+        raise RuntimeError(f"data-api /v2/activity did not answer for {wallet}")
+    batch, complete = got
     seen: dict[tuple, dict] = {}
-    cursor = until
-    complete = False
-    for page_no in range(MAX_ROWS // PAGE + 1):
-        params: dict[str, Any] = {"user": wallet, "limit": PAGE}
-        if cursor is not None:
-            params["end"] = cursor
-        if since is not None:
-            params["start"] = since
-        batch = _get(s, f"{DATA_API}/activity", params) or []
-        if not batch:
-            complete = True
-            break
-        for row in batch:
-            seen.setdefault(_row_key(row), row)
-        stamps = [b["timestamp"] for b in batch]
-        lo, hi = min(stamps), max(stamps)
-        log(f"page {page_no + 1}: {len(batch)} rows, {hi} → {lo}, total {len(seen)}")
-        if len(batch) < PAGE:
-            complete = True
-            break
-        if lo == hi:
-            # A single second saturated the page. Drain it by offset before
-            # stepping past, or the cursor can never advance.
-            for off in range(PAGE, MAX_OFFSET + 1, PAGE):
-                extra = _get(s, f"{DATA_API}/activity",
-                             {"user": wallet, "limit": PAGE, "start": lo, "end": lo, "offset": off}) or []
-                for row in extra:
-                    seen.setdefault(_row_key(row), row)
-                if len(extra) < PAGE:
-                    break
-            cursor = lo - 1
-        else:
-            cursor = lo
-        if since is not None and cursor < since:
-            complete = True
-            break
-        if len(seen) >= MAX_ROWS:
-            break
+    for row in batch:
+        r = v1_row(row)
+        seen.setdefault(_row_key(r), r)
     rows = sorted(seen.values(), key=lambda r: (r["timestamp"], r.get("transactionHash") or ""))
     return rows, complete
 
@@ -251,6 +245,13 @@ def fetch_lb_profit(wallet: str, session: Optional[requests.Session] = None) -> 
 
     ⚠️ Only `window=all` reconciles. The windowed figures are broken for at
     least one wallet we checked (30d volume < 7d volume), so they are not used.
+
+    ⚠️ lb-api answers 410 since 2026-11-02 ("use data-api /v2/leaderboard"), so
+    this is None and the report runs without its anchor. Not ported on purpose:
+    v2's `/v2/leaderboard?user=&time_period=ALL` gives GSX- $103,545 on
+    2026-11-05, against this file's reconstruction of $102,350 net of fees and
+    $113,872..$144,663 on the gross basis the check below was calibrated on.
+    Its basis has to be re-measured on several wallets before it can judge one.
     """
     s = session or _session()
     try:
@@ -289,14 +290,7 @@ def fetch_sports(session: Optional[requests.Session] = None) -> dict[str, dict]:
 
 
 def fetch_current_value(wallet: str, session: Optional[requests.Session] = None) -> Optional[float]:
-    s = session or _session()
-    try:
-        data = _get(s, f"{DATA_API}/value", {"user": wallet})
-        if isinstance(data, list) and data:
-            return float(data[0].get("value"))
-    except Exception:
-        pass
-    return None
+    return pm_data.value(wallet, session=session or _session())
 
 
 # ─── market metadata helpers ────────────────────────────────────────────────
@@ -429,8 +423,8 @@ def build_lots(rows: list[dict], markets: dict[str, dict]) -> tuple[list[Lot], d
     sell_proceeds = redeem_proceeds = merge_proceeds = deployed = 0.0
     buys = sells = redeems = merges = 0
 
-    # (conditionId, outcomeIndex) → token id, so a REDEEM row (which carries no
-    # asset) lands on the token it actually redeemed.
+    # (conditionId, outcomeIndex) → token id, so a REDEEM row (which in v1
+    # carried no asset) lands on the token it actually redeemed.
     token_of: dict[tuple[str, int], str] = {}
     for cid, m in markets.items():
         for idx, tok in enumerate(_json_list(m.get("clobTokenIds"))):
@@ -479,6 +473,8 @@ def build_lots(rows: list[dict], markets: dict[str, dict]) -> tuple[list[Lot], d
             cid = row.get("conditionId") or ""
             idx = row.get("outcomeIndex")
             asset = token_of.get((cid, int(idx))) if idx is not None else None
+            if not asset and row.get("asset"):
+                asset = row["asset"]         # v2 names the token on a REDEEM row
             if not asset:
                 # No token map (market metadata missing) — fall back to the only
                 # token we ever traded on this condition, and give up if unclear.

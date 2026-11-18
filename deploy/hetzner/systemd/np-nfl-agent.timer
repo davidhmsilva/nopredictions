@@ -1,0 +1,12 @@
+# nfl_agent.py --once — was */5
+[Unit]
+Description=NOPREDICTIONS timer nfl-agent
+
+[Timer]
+OnCalendar=*:00/5
+Persistent=true
+AccuracySec=1s
+Unit=np-job@nfl-agent.service
+
+[Install]
+WantedBy=timers.target

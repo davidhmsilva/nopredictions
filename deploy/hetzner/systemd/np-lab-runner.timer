@@ -1,0 +1,12 @@
+# lab_strategy_runner.py --once — every 5 min
+[Unit]
+Description=NOPREDICTIONS timer lab-runner
+
+[Timer]
+OnCalendar=*:01/5
+Persistent=true
+AccuracySec=1s
+Unit=np-job@lab-runner.service
+
+[Install]
+WantedBy=timers.target

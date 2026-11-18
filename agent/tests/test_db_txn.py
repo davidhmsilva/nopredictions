@@ -146,6 +146,7 @@ def test_every_daemon_connects_through_db_txn(module):
         ("fav_pressure_agent", "_halftime_scores"),
         ("ht_pressure_agent", "_pm_verdicts"),
         ("fav_pressure_agent", "_pm_verdicts"),
+        ("ht_under_agent", "_pm_verdicts"),
     ],
 )
 def test_settle_makes_no_network_call_inside_the_write_loop(module, fetch):

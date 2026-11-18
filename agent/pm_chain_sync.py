@@ -2,7 +2,8 @@
 Polymarket on-chain position sync.
 
 Pulls every position currently held by the trading wallet from the Polymarket
-data API and reconciles it with paper_trades:
+data API (/v2/positions, through pm_data: v1 has answered 410 since 2026-11-02)
+and reconciles it with paper_trades:
 
   - If a paper_trade row exists for the same pm_token_id and is pm_live, we
     refresh pm_size_matched + closing_price + flip pm_order_status to
@@ -38,10 +39,12 @@ import psycopg2.extras
 import requests
 from dotenv import load_dotenv
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../ingest/.env"))
 
+import pm_data  # noqa: E402
+
 WALLET = "0x4fE6F5E78093925fa2D446c26b59cAA71558BB5c"
-DATA_API = "https://data-api.polymarket.com"
 GAMMA_API = "https://gamma-api.polymarket.com"
 POLYGON_RPC = os.getenv("POLYGON_RPC", "https://polygon-rpc.com")
 CTF_CONTRACT = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"  # Polymarket CTF on Polygon
@@ -58,24 +61,26 @@ log = logging.getLogger(__name__)
 # ─── PM data API ─────────────────────────────────────────────────────────────
 
 def fetch_positions(wallet: str) -> list[dict]:
-    """All positions (CTF balances) for a wallet, paginated."""
-    out: list[dict] = []
-    offset = 0
-    while True:
-        r = requests.get(
-            f"{DATA_API}/positions",
-            params={"user": wallet, "limit": 100, "offset": offset},
-            timeout=20,
-        )
-        r.raise_for_status()
-        batch = r.json()
-        if not batch:
-            break
-        out.extend(batch)
-        if len(batch) < 100:
-            break
-        offset += 100
-    return out
+    """Every position the wallet still holds (v2's default status, as v1's
+    /positions served), walked by cursor. v2 rows are snake_case: `token_id`
+    for v1's `asset`, `current_size` for `size`, `current_price`, `avg_price`,
+    `entry_cost_usdc` (v1 initialValue), `current_value`, `unrealized_pnl` (v1
+    cashPnl, current value − entry cost). Raises when the walk failed: a
+    refused read must not look like a wallet that holds nothing."""
+    got = pm_data.walk("positions", {"user": wallet}, limit=500)
+    if got is None:
+        raise RuntimeError("data-api /v2/positions did not answer: nothing synced")
+    rows, complete = got
+    if not complete:
+        raise RuntimeError("data-api /v2/positions walk did not finish: nothing synced")
+    return rows
+
+
+def pnl_pct(pos: dict) -> float:
+    """v1's percentPnl: unrealized P&L over entry cost, in percent. v2's own
+    percent_pnl counts fees and realized P&L, a different number."""
+    cost = float(pos.get("entry_cost_usdc") or 0)
+    return 100.0 * float(pos.get("unrealized_pnl") or 0) / cost if cost else 0.0
 
 
 # ─── Polygon raw RPC (no web3 dependency) ────────────────────────────────────
@@ -205,19 +210,19 @@ def insert_orphan(conn, pos: dict, market_db_id: int) -> int:
         """,
         (
             LIVE_STRATEGY_ID, market_db_id, pos["outcome"].lower(),
-            float(pos["avgPrice"]),
-            (1.0 / float(pos["avgPrice"])) if float(pos["avgPrice"]) > 0 else None,
-            round(float(pos["initialValue"]), 4),
-            f"Orphan on-chain position discovered by pm_chain_sync (manual bet or pre-agent trade). PM eventSlug={pos.get('eventSlug')}.",
-            f"chain_sync:{pos['asset'][:12]}",
-            pos["asset"],
-            float(pos["size"]),
-            float(pos["size"]),
-            float(pos["avgPrice"]),
-            float(pos["curPrice"]),
-            float(pos.get("currentValue") or 0),
-            float(pos.get("cashPnl") or 0),
-            float(pos.get("percentPnl") or 0),
+            float(pos["avg_price"]),
+            (1.0 / float(pos["avg_price"])) if float(pos["avg_price"]) > 0 else None,
+            round(float(pos["entry_cost_usdc"]), 4),
+            f"Orphan on-chain position discovered by pm_chain_sync (manual bet or pre-agent trade). PM eventSlug={pos.get('event_slug')}.",
+            f"chain_sync:{pos['token_id'][:12]}",
+            pos["token_id"],
+            float(pos["current_size"]),
+            float(pos["current_size"]),
+            float(pos["avg_price"]),
+            float(pos["current_price"]),
+            float(pos.get("current_value") or 0),
+            float(pos.get("unrealized_pnl") or 0),
+            pnl_pct(pos),
         ),
     )
     return cur.fetchone()[0]
@@ -238,9 +243,9 @@ def run(dry_run: bool = False, verify_chain: bool = True) -> dict:
     n_chain_mismatch = 0
 
     for pos in positions:
-        token_id = pos["asset"]
-        size_api = float(pos["size"])
-        cur_price = float(pos["curPrice"])
+        token_id = pos["token_id"]
+        size_api = float(pos["current_size"])
+        cur_price = float(pos["current_price"])
 
         chain_size = None
         if verify_chain:
@@ -255,9 +260,9 @@ def run(dry_run: bool = False, verify_chain: bool = True) -> dict:
         match = known.get(token_id)
         if match:
             status = "matched" if size_api > 0 else (match.get("pm_order_status") or "live")
-            cash_pnl = float(pos.get("cashPnl") or 0)
-            cur_value = float(pos.get("currentValue") or 0)
-            pct_pnl = float(pos.get("percentPnl") or 0)
+            cash_pnl = float(pos.get("unrealized_pnl") or 0)
+            cur_value = float(pos.get("current_value") or 0)
+            pct_pnl = pnl_pct(pos)
             log.info(
                 f"  #{match['id']:>4} {pos['title'][:55]:55s} "
                 f"size={size_api:.2f} @{cur_price:.3f} pnl={cash_pnl:+.2f} ({pct_pnl:+.1f}%) → {status}"
@@ -277,12 +282,12 @@ def run(dry_run: bool = False, verify_chain: bool = True) -> dict:
             # Manual bet — insert under strategy 9
             log.info(
                 f"  ORPHAN: {pos['title'][:55]:55s} | {pos['outcome']:5s} "
-                f"size={size_api:.2f} @avg{float(pos['avgPrice']):.3f} cur={cur_price:.3f} "
-                f"pnl={float(pos['cashPnl']):+.2f}"
+                f"size={size_api:.2f} @avg{float(pos['avg_price']):.3f} cur={cur_price:.3f} "
+                f"pnl={float(pos.get('unrealized_pnl') or 0):+.2f}"
             )
             if not dry_run:
                 market_db_id = upsert_pm_market(
-                    conn, pos["conditionId"], pos["title"], pos.get("endDate")
+                    conn, pos["condition_id"], pos["title"], pos.get("end_date")
                 )
                 if market_db_id:
                     new_id = insert_orphan(conn, pos, market_db_id)

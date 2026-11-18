@@ -1,0 +1,12 @@
+# factory_cli.py settle — was */10
+[Unit]
+Description=NOPREDICTIONS timer factory-settle
+
+[Timer]
+OnCalendar=*:02/10
+Persistent=true
+AccuracySec=1s
+Unit=np-job@factory-settle.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+# close_maker_agent.py --once — every 5 min (db/073)
+[Unit]
+Description=NOPREDICTIONS timer close-maker
+
+[Timer]
+OnCalendar=*:01/5
+Persistent=true
+AccuracySec=1s
+Unit=np-job@close-maker.service
+
+[Install]
+WantedBy=timers.target

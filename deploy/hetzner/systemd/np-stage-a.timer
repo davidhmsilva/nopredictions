@@ -1,0 +1,12 @@
+# Football-Data refresh — was --daily 07:00 on a UTC+2 Mac = 05:00 UTC
+[Unit]
+Description=NOPREDICTIONS timer stage-a
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 UTC
+Persistent=true
+AccuracySec=1s
+Unit=np-job@stage-a.service
+
+[Install]
+WantedBy=timers.target

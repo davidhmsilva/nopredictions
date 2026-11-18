@@ -1,0 +1,13 @@
+# /etc/systemd/system/np-drift-scan.timer
+# drift_scanner.py — was */10 (opens Pre-Match Drift positions)
+[Unit]
+Description=NOPREDICTIONS timer drift-scan
+
+[Timer]
+OnCalendar=*:00/10
+Persistent=true
+AccuracySec=1s
+Unit=np-job@drift-scan.service
+
+[Install]
+WantedBy=timers.target

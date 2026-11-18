@@ -1,0 +1,12 @@
+# price_reader_review.py — the Price Reader's daily review, once a day
+[Unit]
+Description=NOPREDICTIONS timer price-reader-review
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+AccuracySec=1s
+Unit=np-job@price-reader-review.service
+
+[Install]
+WantedBy=timers.target

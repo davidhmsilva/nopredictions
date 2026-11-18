@@ -1,0 +1,466 @@
+{
+ "frozen_at": "2026-10-11",
+ "data_through": "2026-10-05",
+ "rule": "back-every-match ROI at the average bookmaker close: top 15 over the last 365 days (>=25 games), top 15 of the previous season (>=30), top 12 of this season (>=5)",
+ "dynamic_rule": {
+  "min_games_played": 5,
+  "pts_per_game_above_close_price": 0.3
+ },
+ "teams": [
+  {
+   "code": "B1",
+   "team": "Gent",
+   "league": "Belgian Pro",
+   "why": [
+    {
+     "window": "season_now",
+     "games": 7,
+     "roi_avg_close": 1.1014,
+     "pts_above_price": 1.202
+    }
+   ]
+  },
+  {
+   "code": "B1",
+   "team": "Standard",
+   "league": "Belgian Pro",
+   "why": [
+    {
+     "window": "12m",
+     "games": 37,
+     "roi_avg_close": 0.4019,
+     "pts_above_price": 0.34
+    },
+    {
+     "window": "season_prev",
+     "games": 40,
+     "roi_avg_close": 0.3972,
+     "pts_above_price": 0.296
+    }
+   ]
+  },
+  {
+   "code": "D1",
+   "team": "Augsburg",
+   "league": "Bundesliga",
+   "why": [
+    {
+     "window": "12m",
+     "games": 32,
+     "roi_avg_close": 0.5484,
+     "pts_above_price": 0.252
+    },
+    {
+     "window": "season_prev",
+     "games": 34,
+     "roi_avg_close": 0.4697,
+     "pts_above_price": 0.151
+    }
+   ]
+  },
+  {
+   "code": "D1",
+   "team": "Schalke 04",
+   "league": "Bundesliga",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 34,
+     "roi_avg_close": 0.4259,
+     "pts_above_price": 0.466
+    }
+   ]
+  },
+  {
+   "code": "D2",
+   "team": "Hertha",
+   "league": "2. Bundesliga",
+   "why": [
+    {
+     "window": "season_now",
+     "games": 6,
+     "roi_avg_close": 1.3667,
+     "pts_above_price": 1.548
+    }
+   ]
+  },
+  {
+   "code": "E0",
+   "team": "Aston Villa",
+   "league": "Premier League",
+   "why": [
+    {
+     "window": "12m",
+     "games": 36,
+     "roi_avg_close": 0.4736,
+     "pts_above_price": 0.278
+    },
+    {
+     "window": "season_prev",
+     "games": 38,
+     "roi_avg_close": 0.3958,
+     "pts_above_price": 0.251
+    }
+   ]
+  },
+  {
+   "code": "E0",
+   "team": "Hull",
+   "league": "Premier League",
+   "why": [
+    {
+     "window": "12m",
+     "games": 42,
+     "roi_avg_close": 0.715,
+     "pts_above_price": 0.473
+    },
+    {
+     "window": "season_prev",
+     "games": 46,
+     "roi_avg_close": 0.4391,
+     "pts_above_price": 0.343
+    },
+    {
+     "window": "season_now",
+     "games": 5,
+     "roi_avg_close": 1.642,
+     "pts_above_price": 0.931
+    }
+   ]
+  },
+  {
+   "code": "E0",
+   "team": "Man United",
+   "league": "Premier League",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 38,
+     "roi_avg_close": 0.2961,
+     "pts_above_price": 0.259
+    }
+   ]
+  },
+  {
+   "code": "E0",
+   "team": "Sunderland",
+   "league": "Premier League",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 38,
+     "roi_avg_close": 0.3782,
+     "pts_above_price": 0.418
+    }
+   ]
+  },
+  {
+   "code": "E1",
+   "team": "Lincoln",
+   "league": "Championship",
+   "why": [
+    {
+     "window": "12m",
+     "games": 43,
+     "roi_avg_close": 0.393,
+     "pts_above_price": 0.6
+    },
+    {
+     "window": "season_prev",
+     "games": 46,
+     "roi_avg_close": 0.4057,
+     "pts_above_price": 0.622
+    }
+   ]
+  },
+  {
+   "code": "E1",
+   "team": "Millwall",
+   "league": "Championship",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 46,
+     "roi_avg_close": 0.3252,
+     "pts_above_price": 0.373
+    }
+   ]
+  },
+  {
+   "code": "F1",
+   "team": "Lens",
+   "league": "Ligue 1",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 34,
+     "roi_avg_close": 0.2944,
+     "pts_above_price": 0.332
+    }
+   ]
+  },
+  {
+   "code": "F1",
+   "team": "Monaco",
+   "league": "Ligue 1",
+   "why": [
+    {
+     "window": "12m",
+     "games": 32,
+     "roi_avg_close": 0.4281,
+     "pts_above_price": 0.056
+    },
+    {
+     "window": "season_now",
+     "games": 5,
+     "roi_avg_close": 1.772,
+     "pts_above_price": 1.159
+    }
+   ]
+  },
+  {
+   "code": "F1",
+   "team": "Rennes",
+   "league": "Ligue 1",
+   "why": [
+    {
+     "window": "12m",
+     "games": 32,
+     "roi_avg_close": 0.3831,
+     "pts_above_price": 0.347
+    },
+    {
+     "window": "season_prev",
+     "games": 34,
+     "roi_avg_close": 0.3394,
+     "pts_above_price": 0.249
+    }
+   ]
+  },
+  {
+   "code": "F2",
+   "team": "Annecy",
+   "league": "Ligue 2",
+   "why": [
+    {
+     "window": "12m",
+     "games": 32,
+     "roi_avg_close": 0.3063,
+     "pts_above_price": 0.254
+    }
+   ]
+  },
+  {
+   "code": "G1",
+   "team": "OFI Crete",
+   "league": "Greek SL",
+   "why": [
+    {
+     "window": "12m",
+     "games": 32,
+     "roi_avg_close": 0.4116,
+     "pts_above_price": 0.3
+    },
+    {
+     "window": "season_now",
+     "games": 5,
+     "roi_avg_close": 2.15,
+     "pts_above_price": 0.663
+    }
+   ]
+  },
+  {
+   "code": "I1",
+   "team": "Cagliari",
+   "league": "Serie A",
+   "why": [
+    {
+     "window": "12m",
+     "games": 37,
+     "roi_avg_close": 0.4919,
+     "pts_above_price": 0.272
+    },
+    {
+     "window": "season_now",
+     "games": 5,
+     "roi_avg_close": 1.666,
+     "pts_above_price": 1.322
+    }
+   ]
+  },
+  {
+   "code": "I1",
+   "team": "Frosinone",
+   "league": "Serie A",
+   "why": [
+    {
+     "window": "12m",
+     "games": 36,
+     "roi_avg_close": 0.4069,
+     "pts_above_price": 0.593
+    },
+    {
+     "window": "season_now",
+     "games": 5,
+     "roi_avg_close": 1.552,
+     "pts_above_price": 1.06
+    }
+   ]
+  },
+  {
+   "code": "I1",
+   "team": "Lazio",
+   "league": "Serie A",
+   "why": [
+    {
+     "window": "season_now",
+     "games": 5,
+     "roi_avg_close": 0.988,
+     "pts_above_price": 1.217
+    }
+   ]
+  },
+  {
+   "code": "I1",
+   "team": "Udinese",
+   "league": "Serie A",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 38,
+     "roi_avg_close": 0.4997,
+     "pts_above_price": 0.192
+    }
+   ]
+  },
+  {
+   "code": "SC0",
+   "team": "Dundee",
+   "league": "Scottish Prem",
+   "why": [
+    {
+     "window": "12m",
+     "games": 37,
+     "roi_avg_close": 0.3857,
+     "pts_above_price": 0.322
+    }
+   ]
+  },
+  {
+   "code": "SC0",
+   "team": "Hearts",
+   "league": "Scottish Prem",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 38,
+     "roi_avg_close": 0.3,
+     "pts_above_price": 0.331
+    }
+   ]
+  },
+  {
+   "code": "SC1",
+   "team": "Stenhousemuir",
+   "league": "Scottish Champ",
+   "why": [
+    {
+     "window": "12m",
+     "games": 35,
+     "roi_avg_close": 0.5826,
+     "pts_above_price": 0.653
+    },
+    {
+     "window": "season_now",
+     "games": 8,
+     "roi_avg_close": 2.2388,
+     "pts_above_price": 1.719
+    }
+   ]
+  },
+  {
+   "code": "SC3",
+   "team": "Stranraer",
+   "league": "Scottish L2",
+   "why": [
+    {
+     "window": "12m",
+     "games": 36,
+     "roi_avg_close": 0.3825,
+     "pts_above_price": 0.273
+    }
+   ]
+  },
+  {
+   "code": "SP1",
+   "team": "Betis",
+   "league": "La Liga",
+   "why": [
+    {
+     "window": "season_now",
+     "games": 7,
+     "roi_avg_close": 1.2357,
+     "pts_above_price": 0.85
+    }
+   ]
+  },
+  {
+   "code": "SP1",
+   "team": "Getafe",
+   "league": "La Liga",
+   "why": [
+    {
+     "window": "12m",
+     "games": 37,
+     "roi_avg_close": 0.3141,
+     "pts_above_price": 0.134
+    },
+    {
+     "window": "season_prev",
+     "games": 38,
+     "roi_avg_close": 0.4837,
+     "pts_above_price": 0.195
+    }
+   ]
+  },
+  {
+   "code": "SP1",
+   "team": "Santander",
+   "league": "La Liga",
+   "why": [
+    {
+     "window": "season_prev",
+     "games": 42,
+     "roi_avg_close": 0.3319,
+     "pts_above_price": 0.389
+    }
+   ]
+  },
+  {
+   "code": "SP2",
+   "team": "Eibar",
+   "league": "LaLiga 2",
+   "why": [
+    {
+     "window": "season_now",
+     "games": 8,
+     "roi_avg_close": 1.045,
+     "pts_above_price": 1.051
+    }
+   ]
+  },
+  {
+   "code": "T1",
+   "team": "Alanyaspor",
+   "league": "Super Lig",
+   "why": [
+    {
+     "window": "season_now",
+     "games": 6,
+     "roi_avg_close": 1.0933,
+     "pts_above_price": 0.634
+    }
+   ]
+  }
+ ]
+}

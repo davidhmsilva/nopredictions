@@ -16,12 +16,15 @@ someone with their own line, and how would we get to the fair line?"
                 looks informed on the data it was picked from is the same
                 winner's curse factory v2 exists to avoid.
 
-Data API facts this relies on (probed 2026-10-10):
-  * /trades?market=<conditionId> returns TAKER fills, newest first;
-    `start`/`end` (unix s) bound it, which is how it is paged — `offset` stops
-    at 10,000, and a big match has more in-play trades than that.
-  * a fill on the No token (outcomeIndex 1) is the mirror of one on Yes:
+Data API facts this relies on (data-api v2 since 2026-11-02, when v1 went 410):
+  * /v2/trades?condition=<conditionId> returns TAKER fills, newest first,
+    paged by cursor (pm_trades.py). `start`/`end` are IGNORED on a market
+    query, so the window is applied on our side: the walk stops at the first
+    page older than KO−96h and drops the in-play prints after KO.
+  * a fill on the No token (outcome_index 1) is the mirror of one on Yes:
     price_yes = 1 − price and the direction flips.
+  * v2 rows are snake_case; they are stored under v1's names (KEEP) so the
+    pickles fetched before 2026-11-02 and after read the same.
 """
 from __future__ import annotations
 
@@ -41,13 +44,12 @@ import requests
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import pm_trades                                                   # noqa: E402
 from factory.v2 import tape as v2tape                              # noqa: E402
 
 log = logging.getLogger("pm_flow")
-DATA_API = "https://data-api.polymarket.com"
 CACHE = os.path.join(HERE, "factory", "cache", "pm_flow")
 WINDOW_S = 96 * 3600
-PAGE = 1000
 RATE = 6.0                 # requests per second, all threads together
 MIN_FIXTURE_USD = 30_000
 FROM = "2025-09-01"
@@ -86,39 +88,45 @@ class Pacer:
         time.sleep(max(0.0, t - now))
 
 
-def _get(s: requests.Session, pacer: Pacer, params: dict, tries: int = 6):
-    for k in range(tries):
-        pacer.wait()
-        try:
-            r = s.get(f"{DATA_API}/trades", params=params, timeout=30)
-        except requests.RequestException:
+class PacedSession:
+    """What pm_trades calls `session`: every request waits its turn on the
+    shared pacer, and a throttle or a server error is retried with backoff
+    before pm_trades sees it (it reads any non-200 as a failed market)."""
+
+    def __init__(self, s: requests.Session, pacer: Pacer, tries: int = 6):
+        self.s, self.pacer, self.tries = s, pacer, tries
+
+    def get(self, url: str, **kw):
+        r = None
+        for k in range(self.tries):
+            self.pacer.wait()
+            try:
+                r = self.s.get(url, **kw)
+            except requests.RequestException:
+                if k == self.tries - 1:
+                    raise
+                time.sleep(2 ** k)
+                continue
+            if r.status_code not in (429, 500, 502, 503, 504):
+                return r
             time.sleep(2 ** k)
-            continue
-        if r.status_code == 200:
-            return r.json()
-        if r.status_code in (429, 500, 502, 503, 504):
-            time.sleep(2 ** k)
-            continue
-        raise RuntimeError(f"/trades {r.status_code}: {r.text[:160]}")
-    raise RuntimeError("/trades: retries exhausted")
+        return r
 
 
-KEEP = ("timestamp", "side", "outcomeIndex", "price", "size", "proxyWallet", "transactionHash")
+# v1's names, as the cached pickles hold them  ←  pm_trades' v2 names
+KEEP = {"timestamp": "timestamp", "side": "side", "outcomeIndex": "outcome_index", "price": "price",
+        "size": "size", "proxyWallet": "proxy_wallet", "transactionHash": "transaction_hash"}
 
 
-def fetch_market(s: requests.Session, pacer: Pacer, cid: str, ko: int) -> pd.DataFrame:
-    """Every taker fill in [ko − WINDOW_S, ko], paged backwards by time."""
-    start, end, rows = ko - WINDOW_S, ko, []
-    while True:
-        batch = _get(s, pacer, {"market": cid, "start": start, "end": end, "limit": PAGE}) or []
-        rows += [{k: r.get(k) for k in KEEP} for r in batch]
-        if len(batch) < PAGE:
-            break
-        oldest = min(int(r["timestamp"]) for r in batch)
-        end = oldest if oldest < end else end - 1          # never stall on one busy second
-        if end <= start:
-            break
-    d = pd.DataFrame(rows, columns=KEEP)
+def fetch_market(s, pacer: Pacer, cid: str, ko: int) -> pd.DataFrame:
+    """Every taker fill in [ko − WINDOW_S, ko]. Raises when the API did not
+    answer, so no pickle is written and the market is fetched next run."""
+    got = pm_trades.trades(cid, start=ko - WINDOW_S, end=ko, taker_only=True, timeout=30,
+                           session=PacedSession(s, pacer), pause=0)
+    if got is None:
+        raise RuntimeError(f"/v2/trades {cid[:12]}: no complete answer")
+    rows = [{k: r.get(v) for k, v in KEEP.items()} for r in got]
+    d = pd.DataFrame(rows, columns=list(KEEP))
     return d.drop_duplicates().reset_index(drop=True)
 
 
