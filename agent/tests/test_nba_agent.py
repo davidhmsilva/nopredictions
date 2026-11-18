@@ -278,9 +278,21 @@ def test_decide_edge_needs_a_fresh_sharp_price_and_the_threshold():
     assert na.decide(_cand(9.0, "pm_mid"), fresh=True, mins=300) is None
 
 
-def test_decide_forces_a_bet_inside_the_window_whatever_its_sign():
-    assert na.decide(_cand(-3.0), fresh=False, mins=35) == "forced"
+def test_forced_bets_are_off_from_v4(monkeypatch):
+    """v4 (2026-11-18, the operator's decision): a game with no edge gets no
+    bet. The FORCED path is kept behind FORCED_ENABLED, and still works there."""
+    assert na.decide(_cand(-3.0), fresh=False, mins=35) is None
     assert na.decide(None, fresh=True, mins=10) is None
+    monkeypatch.setattr(na, "FORCED_ENABLED", True)
+    assert na.decide(_cand(-3.0), fresh=False, mins=35) == "forced"
+
+
+def test_no_bet_at_odds_of_four_or_more():
+    long = _cand(9.0)
+    long.ask = 0.25
+    assert na.decide(long, fresh=True, mins=300) is None
+    long.ask = 0.26
+    assert na.decide(long, fresh=True, mins=300) == "edge"
 
 
 def test_credits_are_rationed_for_the_shared_key():
@@ -450,7 +462,7 @@ def test_draftkings_edges_need_twice_the_pinnacle_threshold():
     assert na.decide(_cand(3.1, "dk_exact"), fresh=True, mins=300) == "edge"
     assert na.decide(_cand(4.9, "dk_model"), fresh=True, mins=300) is None
     assert na.decide(_cand(5.1, "dk_model"), fresh=True, mins=300) == "edge"
-    assert na.decide(_cand(-1.0, "dk_exact"), fresh=True, mins=35) == "forced"
+    assert na.decide(_cand(-1.0, "dk_exact"), fresh=True, mins=35) is None     # v4: no FORCED
 
 
 def test_the_close_benchmark_is_a_fresh_odds_api_line_before_draftkings():

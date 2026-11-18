@@ -116,6 +116,14 @@ def test_wide_or_extreme_books_get_no_bid():
     assert mk.bid_price({"bid": 0.02, "ask": 0.03}, 0.01) is None      # under MIN_BID
 
 
+def test_no_bid_at_odds_of_two_and_a_half_or_more():
+    """v2 (2026-11-18, the operator's decision): a bid of 0.40 or less is odds
+    2.50+ and is never posted; 0.41 (2.44) still is."""
+    assert mk.bid_price({"bid": 0.40, "ask": 0.41}, 0.01) is None
+    assert mk.bid_price({"bid": 0.35, "ask": 0.36}, 0.01) is None
+    assert mk.bid_price({"bid": 0.41, "ask": 0.42}, 0.01) == 0.41
+
+
 # ── the fill ─────────────────────────────────────────────────────────────────
 
 T0 = 1_000_000.0

@@ -188,3 +188,10 @@ def test_settle_pays_on_the_under_token_only(monkeypatch):
                           {"id": 7, "condition_id": "c3", "under_token_id": "t-u3"}])
     assert ua.settle(conn) == 1                          # c2 unresolved, c3 not read
     assert conn.writes("UPDATE paper_trades") == [("won", True, 5)]
+
+
+def test_a_retired_strategy_buys_nothing():
+    """Retired 2026-11-18: strategy_id is None and open_trades never touches
+    the connection, so the pressure daemon keeps running and observing."""
+    import ht_under_agent as hu
+    assert hu.open_trades(None, None, [{"under_would_enter": True}]) == 0

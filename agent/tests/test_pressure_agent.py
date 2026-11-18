@@ -670,7 +670,15 @@ def test_obs_version_was_bumped_with_the_axis():
     axis again (missing xG estimated from shots); v6 moved the PRICE — the
     entry is now booked at whichever of Polymarket and Kalshi is cheaper net
     of fees, and the book gates read that venue's book (db/054)."""
-    assert pa.OBS_VERSION == 6
+    assert pa.OBS_VERSION == 7
+
+
+def test_no_entry_at_odds_of_three_or_more():
+    """v7 (2026-11-18, the operator's decision): an ask of 1/3 or less is never
+    bought, and the skip names the odds."""
+    assert pa.MIN_ASK == 1.0 / 3.0
+    import inspect
+    assert "entry_ask > MIN_ASK" in inspect.getsource(pa.observe)
 
 
 def test_the_paper_trade_books_the_price_it_paid_not_polymarkets():

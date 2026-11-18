@@ -107,7 +107,9 @@ STRATEGY_NAME = "Live Pressure Overs"
 # an ESTIMATED xG from its shots (live_tracker.estimate_xg) instead of the xG
 # term being dropped and the rest renormalised. api-football has sent no xG
 # since 09-02, so that is every row. Never pool with v4.
-OBS_VERSION = 6
+# v7 (2026-11-18, the operator's decision): no entry at odds 3.00 or more
+# (MIN_ASK). Never pool with v6.
+OBS_VERSION = 7
 
 CYCLE_S = 60
 REFRESH_MARKETS_S = 300         # PM universe re-pull
@@ -233,6 +235,10 @@ MIN_PRESSURE = 45.0             # do not trade "a goal might happen eventually"
 # that a fault which never clears costs one kickoff window and not a weekend.
 DEAD_POLLS_BEFORE_EXIT = 10
 MAX_ASK = 0.85                  # PM asks above 0.85 resolve far below their price
+# v7 (2026-11-18, the operator's decision): buy only below odds 3.00. On 161
+# settled (v2-v6), the 28 at 3.00+ were -16.0u net (8 above 4.00, none won);
+# below 3.00, -2.5u on 133. Chosen on the record: v7 on is its test.
+MIN_ASK = 1.0 / 3.0
 STAKE_UNITS = 1.0
 SETTLE_HORIZON_MIN = 10         # the "goal is coming" horizon
 
@@ -661,6 +667,7 @@ def observe(signals: dict[int, PressureSignals], table: dict,
             # PM asks above 0.85 resolve at 0.66 (n=382). Nothing up there is
             # priced to be bought.
             and entry_ask <= MAX_ASK
+            and entry_ask > MIN_ASK
             # v4: the book has to be a book. A missing bid or a wide spread
             # means the ask is one parked order, not a price — those quote 0.90
             # and resolve at 0.53.
@@ -748,6 +755,8 @@ def _why_not(row: dict, book: dict, sig: PressureSignals) -> str:
         return "no window baseline yet"
     if book["best_ask"] > MAX_ASK:
         return f"ask {book['best_ask']:.2f} > {MAX_ASK}"
+    if book["best_ask"] <= MIN_ASK:
+        return f"odds {1 / book['best_ask']:.2f} >= {1 / MIN_ASK:.2f}"
     if book["best_bid"] is None:
         return "one-sided book: no bid"
     if (book["best_ask"] - book["best_bid"]) > MAX_SPREAD:

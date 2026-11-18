@@ -142,13 +142,17 @@ def decide(rows: list[dict], fetch_book=_fetch_book) -> int:
     return n
 
 
-def strategy_id(conn) -> int:
+def strategy_id(conn) -> int | None:
+    """None when the strategy is retired: the arm keeps writing its under_*
+    columns (v2 is measured against them) and buys nothing. Retired 2026-11-18
+    at the operator's direction: 346 settled, -9.0% net, no odds band positive."""
     with conn.cursor() as cur:
         cur.execute("SELECT id FROM strategies WHERE name = %s AND retired_at IS NULL",
                     (STRATEGY_NAME,))
         got = cur.fetchone()
     if not got:
-        raise SystemExit(f"strategy '{STRATEGY_NAME}' missing or retired — apply db/076")
+        log.warning(f"strategy '{STRATEGY_NAME}' missing or retired — observing only")
+        return None
     return got[0]
 
 
@@ -156,6 +160,8 @@ def open_trades(conn, sid: int, rows: list[dict]) -> int:
     """One 1u paper Under per fixture. Runs before ht.write, so the trade id
     lands on the row that bought it."""
     opened = 0
+    if sid is None:
+        return 0
     for r in rows:
         if not r["under_would_enter"]:
             continue

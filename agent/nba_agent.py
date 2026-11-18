@@ -99,7 +99,13 @@ ET = ZoneInfo("America/New_York")
 
 STRATEGY_NAME = "NBA Every Game"
 OWNER_FROM = "NFL Every Game"   # the new strategy is owned by whoever owns this one
-OBS_VERSION = 3               # 2026-11-07: DraftKings first, Pinnacle only where ESPN has none
+OBS_VERSION = 4               # 2026-11-18: EDGE only (no FORCED), odds below 4.00
+# v3 (2026-11-07): DraftKings first, Pinnacle only where ESPN has none.
+# v4 (2026-11-18, the operator's decision): on 163 settled the 23 FORCED bets
+# were -9.0u net and EDGE at 4.00+ -4.6u; EDGE below 4.00 was +0.5u on 131.
+# So a game with no edge gets no bet, and nothing is bought at 4.00 or more.
+FORCED_ENABLED = False
+TAKER_MIN_ASK = 0.25          # odds below 4.00
                               # (v2, 10-26: Pinnacle first, DraftKings when the Odds API had none)
 
 # ── the sharp feed ───────────────────────────────────────────────────────────
@@ -788,9 +794,11 @@ def decide(best: Cand | None, fresh: bool, mins: float) -> str | None:
     if best is None:
         return None
     th = EDGE_MIN.get(best.source)
+    if best.ask <= TAKER_MIN_ASK:
+        return None
     if fresh and th is not None and best.ev >= th:
         return "edge"
-    if mins <= FORCE_MIN:
+    if FORCED_ENABLED and mins <= FORCE_MIN:
         return "forced"
     return None
 
@@ -811,7 +819,8 @@ def _rules_now() -> dict:
             "season_types": sorted(BET_SEASON_TYPES),
             "edge_min_exact_pct": EDGE_MIN_EXACT, "edge_min_model_pct": EDGE_MIN_MODEL,
             "edge_min_dk_exact_pct": EDGE_MIN_DK_EXACT, "edge_min_dk_model_pct": EDGE_MIN_DK_MODEL,
-            "force_min": FORCE_MIN, "stake_u": STAKE_U}
+            "force_min": FORCE_MIN, "forced_enabled": FORCED_ENABLED,
+            "max_odds": round(1 / TAKER_MIN_ASK, 2), "stake_u": STAKE_U}
 
 
 def ensure_strategy(conn) -> int:
@@ -1093,6 +1102,8 @@ def run_once(dry_run: bool = False, allow_fetch: bool = True) -> None:
             if c.ev > IMPLAUSIBLE_EV_PCT:
                 log.warning(f"  {g.title}: {c.label} EV {c.ev:+.1f}% > {IMPLAUSIBLE_EV_PCT}% — "
                             f"refused as a probable bug (fair {c.fair:.3f} {c.source}, ask {c.ask:.3f})")
+        # v4: a longshot is never the pick, so the best market under the cap is.
+        sane = [c for c in sane if c.ask > TAKER_MIN_ASK]
         best = max(sane, key=lambda c: c.ev) if sane else None
         tag = (f"{sh.book} μ={sh.anchor.mu:+.1f} σ={sh.anchor.sigma:.1f} "
                f"T={sh.anchor.T if sh.anchor.T is None else round(sh.anchor.T, 1)} "

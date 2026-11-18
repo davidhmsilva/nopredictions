@@ -52,7 +52,11 @@ import pm_trades
 log = logging.getLogger("nba_maker")
 
 STRATEGY_NAME = "NBA Every Game — maker bids"
-OBS_VERSION = 1
+# v2 (2026-11-18, the operator's decision): bid only below odds 2.50. On 491
+# settled, the 98 at 2.50+ were -28.4u while the 393 below made +22.4u, +5.7%
+# CI +-9pp, positive in both halves of the record. v2 on is its test.
+OBS_VERSION = 2
+MAX_ODDS = 2.50
 
 HORIZON_MIN = 24 * 60         # bids are posted from 24h out
 MIN_POST_MIN = 15             # a game first seen this close to tip-off gets no bid
@@ -146,6 +150,8 @@ def bid_price(book: dict, tick: float) -> float | None:
     p = book["bid"] + tick if spread >= 3 * tick - 1e-9 else book["bid"]
     p = round(round(p / tick) * tick, 6)
     if not (MIN_BID <= p <= MAX_BID) or p >= book["ask"] - 1e-9:
+        return None
+    if p <= 1.0 / MAX_ODDS + 1e-9:
         return None
     return p
 
