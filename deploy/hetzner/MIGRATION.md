@@ -19,6 +19,7 @@ dos passos abaixo existe por causa disto.
 | `np-pressure-health.timer` | `pressure_health.py --recover`, de 10 em 10 min | */10 |
 | `np-sweep-settle.timer` | `settled_sweep_observer.py --settle`, :15 e :45 | cron_guard --gap 25 |
 | `np-stage-a.timer` | Football-Data, 05:00 UTC | --daily 07:00 (hora do Mac, UTC+2) |
+| `np-stage-j.timer` | Stage J, preços da Polymarket para o replay (db/085), 06:00 UTC | novo 2026-10-31 |
 | `np-nfl-agent.timer` | `nfl_agent.py --once`, 5 em 5 min | */5 |
 | `np-unl-agent.timer` | `unl_agent.py --once` (Nations League), 5 em 5 min | */5 |
 | `np-nba-agent.timer` | `nba_agent.py --once` (NBA, época regular + playoffs), 5 em 5 min | novo 2026-10-06 |
